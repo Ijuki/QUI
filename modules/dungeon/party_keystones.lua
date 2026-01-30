@@ -206,63 +206,79 @@ end)
 -- KEYSTONE BUTTON CREATION
 ---------------------------------------------------------------------------
 
+local ROW_WIDTH = FRAME_WIDTH - (ENTRY_PADDING_X * 2)
+
 local function CreateKeystoneButton(parent, yOffset)
     local button = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
-    button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
+    button:SetSize(ROW_WIDTH, BUTTON_SIZE)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", ENTRY_PADDING_X, yOffset)
     button:RegisterForClicks("AnyDown", "AnyUp")
 
-    -- Icon
+    -- Icon (fixed size at left edge of button)
     button.icon = button:CreateTexture(nil, "ARTWORK")
-    button.icon:SetAllPoints()
+    button.icon:SetSize(BUTTON_SIZE, BUTTON_SIZE)
+    button.icon:SetPoint("LEFT", button, "LEFT", 0, 0)
     button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    -- Cooldown overlay
+    -- Cooldown overlay (anchored to icon)
     button.cooldownOverlay = button:CreateTexture(nil, "ARTWORK", nil, 1)
-    button.cooldownOverlay:SetAllPoints()
+    button.cooldownOverlay:SetAllPoints(button.icon)
     button.cooldownOverlay:SetColorTexture(0, 0, 0, 0.6)
     button.cooldownOverlay:Hide()
 
-    -- Highlight
+    -- Highlight (full row, subtle)
     button.highlight = button:CreateTexture(nil, "HIGHLIGHT")
     button.highlight:SetAllPoints()
-    button.highlight:SetColorTexture(1, 1, 1, 0.2)
+    button.highlight:SetColorTexture(1, 1, 1, 0.06)
 
     local fontSize = GetFontSize()
 
     -- Key level text (centered on icon)
     button.keyLevel = button:CreateFontString(nil, "OVERLAY")
-    button.keyLevel:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button.keyLevel:SetPoint("CENTER", button.icon, "CENTER", 0, 0)
     button.keyLevel:SetFont(STANDARD_TEXT_FONT, fontSize + 1, "OUTLINE")
 
-    -- Dungeon short name (right of icon)
-    button.dungeonName = parent:CreateFontString(nil, "OVERLAY")
-    button.dungeonName:SetPoint("LEFT", button, "RIGHT", 4, 0)
+    -- Dungeon short name (right of icon, parented to button)
+    button.dungeonName = button:CreateFontString(nil, "OVERLAY")
+    button.dungeonName:SetPoint("LEFT", button.icon, "RIGHT", 4, 0)
     button.dungeonName:SetFont(STANDARD_TEXT_FONT, fontSize, "OUTLINE")
     button.dungeonName:SetJustifyH("LEFT")
     button.dungeonName:SetWidth(40)  -- Fixed width for alignment
 
-    -- Player name (right of dungeon name)
-    button.playerName = parent:CreateFontString(nil, "OVERLAY")
+    -- Player name (right of dungeon name, parented to button)
+    button.playerName = button:CreateFontString(nil, "OVERLAY")
     button.playerName:SetPoint("LEFT", button.dungeonName, "RIGHT", 4, 0)
     button.playerName:SetFont(STANDARD_TEXT_FONT, fontSize, "OUTLINE")
     button.playerName:SetJustifyH("LEFT")
 
-    -- Score (right side, same row as button)
-    button.score = parent:CreateFontString(nil, "OVERLAY")
-    button.score:SetPoint("RIGHT", parent, "RIGHT", -ENTRY_PADDING_X, 0)
-    button.score:SetPoint("TOP", button, "TOP", 0, 0)
-    button.score:SetPoint("BOTTOM", button, "BOTTOM", 0, 0)
+    -- Score (right side, parented to button)
+    button.score = button:CreateFontString(nil, "OVERLAY")
+    button.score:SetPoint("RIGHT", button, "RIGHT", 0, 0)
     button.score:SetFont(STANDARD_TEXT_FONT, fontSize, "OUTLINE")
     button.score:SetJustifyH("RIGHT")
     button.score:SetJustifyV("MIDDLE")
 
-    -- Leader icon
+    -- Leader icon (anchored to icon)
     button.leaderIcon = button:CreateTexture(nil, "OVERLAY")
     button.leaderIcon:SetSize(10, 10)
-    button.leaderIcon:SetPoint("TOPLEFT", button, "TOPLEFT", -2, 2)
+    button.leaderIcon:SetPoint("TOPLEFT", button.icon, "TOPLEFT", -2, 2)
     button.leaderIcon:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
     button.leaderIcon:Hide()
+
+    -- Tooltip
+    button:SetScript("OnEnter", function(self)
+        if self.tooltipDungeon then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(self.tooltipDungeon, 1, 1, 1)
+            if self.spellID then
+                GameTooltip:AddLine("Click to teleport", 0.5, 1, 0.5)
+            end
+            GameTooltip:Show()
+        end
+    end)
+    button:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
 
     return button
 end
@@ -351,6 +367,9 @@ local function UpdateButton(button, keystoneInfo, unitName, unit, isLeader)
             button:SetAttribute("spell", nil)
             button.spellID = nil
         end
+
+        -- Tooltip data
+        button.tooltipDungeon = C_ChallengeMode.GetMapUIInfo(keystoneInfo.challengeMapID)
     end
 
     -- Leader icon
@@ -362,22 +381,15 @@ local function UpdateButton(button, keystoneInfo, unitName, unit, isLeader)
 
     UpdateButtonCooldown(button)
     button:Show()
-    -- Also show font strings (they're parented to the frame, not the button)
-    if button.dungeonName then button.dungeonName:Show() end
-    if button.playerName then button.playerName:Show() end
-    if button.score then button.score:Show() end
 end
 
 local function HideButton(button)
     if InCombatLockdown() then return end
     button:Hide()
-    -- Also hide font strings (they're parented to the frame, not the button)
-    if button.dungeonName then button.dungeonName:Hide() end
-    if button.playerName then button.playerName:Hide() end
-    if button.score then button.score:Hide() end
     button:SetAttribute("type", nil)
     button:SetAttribute("spell", nil)
     button.spellID = nil
+    button.tooltipDungeon = nil
 end
 
 local function UpdateAllKeystones()
