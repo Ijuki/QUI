@@ -19,7 +19,7 @@ local function CreateGeneralQoLPage(parent)
         {name = "Chat", builder = ns.QUI_ChatOptions.BuildChatTab},
         {name = "Tooltip", builder = ns.QUI_TooltipsOptions.BuildTooltipTab},
         {name = "Character Pane", builder = ns.QUI_CharacterOptions.BuildCharacterPaneTab},
-        {name = "Dragonriding", builder = ns.QUI_SkyridingOptions.BuildDragonridingTab},
+        {name = "Skyriding", builder = ns.QUI_SkyridingOptions.BuildDragonridingTab},
         {name = "Missing Raid Buffs", builder = ns.QUI_RaidBuffsOptions.BuildRaidBuffsTab},
         {name = "Party Keystones", builder = ns.QUI_PartyKeystonesOptions.BuildPartyKeystonesTab},
     })

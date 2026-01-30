@@ -753,7 +753,7 @@ local function BuildSkinningTab(tabContent)
         overrideBarHeader:SetPoint("TOPLEFT", PAD, y)
         y = y - overrideBarHeader.gap
 
-        local overrideBarDesc = GUI:CreateLabel(tabContent, "Skin the vehicle/override action bar (dragonriding, possession, etc.).", 11, C.textMuted)
+        local overrideBarDesc = GUI:CreateLabel(tabContent, "Skin the vehicle/override action bar (skyriding, possession, etc.).", 11, C.textMuted)
         overrideBarDesc:SetPoint("TOPLEFT", PAD, y)
         overrideBarDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         overrideBarDesc:SetJustifyH("LEFT")
