@@ -29,13 +29,71 @@ local function ShouldHideHealthBar()
     return settings and settings.hideHealthBar
 end
 
--- Backdrop definition for tooltips
-local tooltipBackdrop = {
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = 1,
-    insets = { left = 1, right = 1, top = 1, bottom = 1 }
-}
+-- Get player class color from RAID_CLASS_COLORS
+local function GetPlayerClassColor()
+    local _, classToken = UnitClass("player")
+    if classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] then
+        local c = RAID_CLASS_COLORS[classToken]
+        return c.r, c.g, c.b, 1
+    end
+    return 0.2, 1.0, 0.6, 1 -- fallback to mint
+end
+
+-- Build a backdrop table with the given edge size
+local function BuildTooltipBackdrop(edgeSize)
+    edgeSize = edgeSize or 1
+    return {
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = edgeSize,
+        insets = { left = edgeSize, right = edgeSize, top = edgeSize, bottom = edgeSize }
+    }
+end
+
+-- Resolve the effective colors from settings (or fall back to skin colors)
+local function GetEffectiveColors()
+    local settings = GetSettings()
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetTooltipColors()
+
+    if settings then
+        -- Background color
+        if settings.bgColor then
+            bgr = settings.bgColor[1] or bgr
+            bgg = settings.bgColor[2] or bgg
+            bgb = settings.bgColor[3] or bgb
+        end
+        -- Background opacity
+        if settings.bgOpacity then
+            bga = settings.bgOpacity
+        end
+
+        -- Border color
+        if settings.borderUseClassColor then
+            sr, sg, sb, sa = GetPlayerClassColor()
+        elseif settings.borderColor then
+            sr = settings.borderColor[1] or sr
+            sg = settings.borderColor[2] or sg
+            sb = settings.borderColor[3] or sb
+            sa = settings.borderColor[4] or sa
+        end
+
+        -- Border visibility
+        if settings.showBorder == false then
+            sr, sg, sb, sa = 0, 0, 0, 0
+        end
+    end
+
+    return sr, sg, sb, sa, bgr, bgg, bgb, bga
+end
+
+-- Get the effective border thickness from settings
+local function GetEffectiveBorderThickness()
+    local settings = GetSettings()
+    if settings and settings.borderThickness then
+        return settings.borderThickness
+    end
+    return 1
+end
 
 -- Store original backdrops for unskinning
 local originalBackdrops = {}
@@ -45,7 +103,8 @@ local function SkinTooltip(tooltip)
     if not tooltip then return end
     if tooltip.quiSkinned then return end
 
-    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetTooltipColors()
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
+    local thickness = GetEffectiveBorderThickness()
 
     -- Store original backdrop info if available
     if tooltip.GetBackdrop then
@@ -61,7 +120,7 @@ local function SkinTooltip(tooltip)
     end
 
     -- Set the QUI backdrop
-    tooltip:SetBackdrop(tooltipBackdrop)
+    tooltip:SetBackdrop(BuildTooltipBackdrop(thickness))
     tooltip:SetBackdropColor(bgr, bgg, bgb, bga)
     tooltip:SetBackdropBorderColor(sr, sg, sb, sa)
 
@@ -78,7 +137,7 @@ end
 local function UpdateTooltipColors(tooltip)
     if not tooltip or not tooltip.quiSkinned then return end
 
-    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetTooltipColors()
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
 
     if tooltip.SetBackdropColor then
         tooltip:SetBackdropColor(bgr, bgg, bgb, bga)
@@ -86,6 +145,26 @@ local function UpdateTooltipColors(tooltip)
     if tooltip.SetBackdropBorderColor then
         tooltip:SetBackdropBorderColor(sr, sg, sb, sa)
     end
+
+    tooltip.quiColors = { sr, sg, sb, sa, bgr, bgg, bgb, bga }
+end
+
+-- Re-skin a tooltip (rebuild backdrop for thickness changes)
+local function ReskinTooltip(tooltip)
+    if not tooltip or not tooltip.quiSkinned then return end
+
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
+    local thickness = GetEffectiveBorderThickness()
+
+    -- Apply BackdropTemplate if needed
+    if not tooltip.SetBackdrop then
+        Mixin(tooltip, BackdropTemplateMixin)
+    end
+
+    -- Rebuild backdrop with current thickness
+    tooltip:SetBackdrop(BuildTooltipBackdrop(thickness))
+    tooltip:SetBackdropColor(bgr, bgg, bgb, bga)
+    tooltip:SetBackdropBorderColor(sr, sg, sb, sa)
 
     tooltip.quiColors = { sr, sg, sb, sa, bgr, bgg, bgb, bga }
 end
@@ -133,12 +212,12 @@ local function SkinAllTooltips()
     end
 end
 
--- Refresh colors on all skinned tooltips
+-- Refresh colors on all skinned tooltips (rebuilds backdrop for thickness)
 local function RefreshAllTooltipColors()
     for _, name in ipairs(tooltipsToSkin) do
         local tooltip = _G[name]
         if tooltip and tooltip.quiSkinned then
-            UpdateTooltipColors(tooltip)
+            ReskinTooltip(tooltip)
         end
     end
 end
@@ -153,9 +232,8 @@ local function HookTooltipOnShow(tooltip)
             SkinTooltip(self)
         else
             -- Re-apply colors in case they were reset
-            local colors = self.quiColors
-            if colors and self.SetBackdropColor and self.SetBackdropBorderColor then
-                local sr, sg, sb, sa, bgr, bgg, bgb, bga = unpack(colors)
+            local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
+            if self.SetBackdropColor and self.SetBackdropBorderColor then
                 self:SetBackdropColor(bgr, bgg, bgb, bga)
                 self:SetBackdropBorderColor(sr, sg, sb, sa)
             end
@@ -265,4 +343,5 @@ eventFrame:SetScript("OnEvent", function(self, event)
 end)
 
 -- Expose refresh function globally for live color updates
+-- This rebuilds backdrops (for thickness changes) and recolors
 _G.QUI_RefreshTooltipSkinColors = RefreshAllTooltipColors

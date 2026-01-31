@@ -89,6 +89,43 @@ local function BuildTooltipTab(tabContent)
     skinInfo:SetJustifyH("LEFT")
     y = y - FORM_ROW
 
+    -- Refresh callback for live tooltip skin updates
+    local function RefreshTooltipSkin()
+        if _G.QUI_RefreshTooltipSkinColors then
+            _G.QUI_RefreshTooltipSkinColors()
+        end
+    end
+
+    local bgColorPicker = GUI:CreateFormColorPicker(tabContent, "Background Color", "bgColor", tooltip, RefreshTooltipSkin)
+    bgColorPicker:SetPoint("TOPLEFT", PADDING, y)
+    bgColorPicker:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local bgOpacitySlider = GUI:CreateFormSlider(tabContent, "Background Opacity", 0, 1, 0.05, "bgOpacity", tooltip, RefreshTooltipSkin, {precision = 2})
+    bgOpacitySlider:SetPoint("TOPLEFT", PADDING, y)
+    bgOpacitySlider:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local showBorderCheck = GUI:CreateFormCheckbox(tabContent, "Show Border", "showBorder", tooltip, RefreshTooltipSkin)
+    showBorderCheck:SetPoint("TOPLEFT", PADDING, y)
+    showBorderCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local borderThicknessSlider = GUI:CreateFormSlider(tabContent, "Border Thickness", 1, 10, 1, "borderThickness", tooltip, RefreshTooltipSkin)
+    borderThicknessSlider:SetPoint("TOPLEFT", PADDING, y)
+    borderThicknessSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local borderColorPicker = GUI:CreateFormColorPicker(tabContent, "Border Color", "borderColor", tooltip, RefreshTooltipSkin)
+    borderColorPicker:SetPoint("TOPLEFT", PADDING, y)
+    borderColorPicker:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local classColorBorderCheck = GUI:CreateFormCheckbox(tabContent, "Use Class Color for Border", "borderUseClassColor", tooltip, RefreshTooltipSkin)
+    classColorBorderCheck:SetPoint("TOPLEFT", PADDING, y)
+    classColorBorderCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
     local hideHealthCheck = GUI:CreateFormCheckbox(tabContent, "Hide Health Bar", "hideHealthBar", tooltip, RefreshTooltips)
     hideHealthCheck:SetPoint("TOPLEFT", PADDING, y)
     hideHealthCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
