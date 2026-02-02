@@ -1389,7 +1389,9 @@ function CustomTrackers:StartCooldownPolling(bar)
                 local rechargeActive = false  -- Track charge recharge separately (for visibility logic)
 
                 -- If active, show active state progress instead of cooldown
-                if isActive and activeStartTime and activeDuration and activeDuration > 0 then
+                -- Skip active override when showOnlyOnCooldown: we need real CD state and swipe,
+                -- not the buff duration (e.g., Power Word: Shield buff outlasting its cooldown)
+                if isActive and activeStartTime and activeDuration and activeDuration > 0 and not showOnlyOnCooldown then
                     -- Active state: show buff/cast duration (reverse fill)
                     pcall(function()
                         icon.cooldown:SetReverse(true)
@@ -1594,9 +1596,10 @@ function CustomTrackers:StartCooldownPolling(bar)
                     if showOnlyWhenActive then
                         layoutVisible = isActive
                     elseif showOnlyOnCooldown then
-                        -- Show during cooldown OR while active (active overrides cooldown visuals)
+                        -- Show only during cooldown (isOnCD is never overridden by active state
+                        -- when showOnlyOnCooldown is true, so it reflects the real CD)
                         -- For charge spells: also show when recharge is active (any charge on cooldown)
-                        layoutVisible = isActive or isOnCD or rechargeActive
+                        layoutVisible = isOnCD or rechargeActive
                     elseif showOnlyWhenOffCooldown then
                         -- Show only when ready (not on cooldown)
                         -- For charge spells with remaining charges, stay visible even during active state
@@ -1643,7 +1646,7 @@ function CustomTrackers:StartCooldownPolling(bar)
                 -- Static layout: use baseVisible but apply alpha-based hiding for special modes
                 local shouldRender = dynamicLayout and layoutVisible or (baseVisible and combatVisible)
                 if shouldRender then
-                    if isActive then
+                    if isActive and not showOnlyOnCooldown then
                         -- Active state: saturated + glow + full alpha
                         icon:SetAlpha(1)
                         icon.tex:SetDesaturated(false)
