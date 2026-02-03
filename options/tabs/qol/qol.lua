@@ -868,6 +868,31 @@ local function BuildGeneralTab(tabContent)
     panelAlphaSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
     y = y - FORM_ROW
 
+    y = y - 10
+
+    GUI:SetSearchSection("Quick Delete")
+    local quickDeleteHeader = GUI:CreateSectionHeader(tabContent, "Quick Delete")
+    quickDeleteHeader:SetPoint("TOPLEFT", PADDING, y)
+    y = y - quickDeleteHeader.gap
+
+    local quickDeleteDesc = GUI:CreateLabel(tabContent,
+        "Auto-fills the delete confirmation and shows the item link.",
+        11, C.textMuted)
+    quickDeleteDesc:SetPoint("TOPLEFT", PADDING, y)
+    quickDeleteDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    quickDeleteDesc:SetJustifyH("LEFT")
+    quickDeleteDesc:SetWordWrap(true)
+    quickDeleteDesc:SetHeight(15)
+    y = y - 25
+
+    local generalDB = db and db.general
+    if generalDB then
+        local quickDeleteCheck = GUI:CreateFormCheckbox(tabContent, "Enable Quick Delete", "autoDeleteConfirm", generalDB)
+        quickDeleteCheck:SetPoint("TOPLEFT", PADDING, y)
+        quickDeleteCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        y = y - FORM_ROW
+    end
+
     tabContent:SetHeight(math.abs(y) + 50)
 end
 
