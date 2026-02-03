@@ -5,8 +5,6 @@ local function GetSettings()
     return Helpers.GetModuleDB("general")
 end
 
-local debug = false
-
 local function GetConfirmButton(popup, which)
     local name = popup and popup.GetName and popup:GetName()
     if name then
@@ -37,19 +35,9 @@ hooksecurefunc("StaticPopup_Show", function(which)
         local s = StaticPopup_FindVisible(which)
         if not s then return end
 
-        if debug then
-            print("=== DELETE POPUP DEBUG ===")
-            print("Which dialog:     ", which)
-            print("Has EditBox?      ", s.EditBox ~= nil)
-            print("Button1 exists?   ", s.button1 ~= nil)
-            print("buttons table?    ", type(s.buttons) == "table")
-            print("==========================")
-        end
-
         local edit = s.EditBox or s.editBox
         local btn = GetConfirmButton(s, which)
         if not edit or not btn then
-            if debug then print("Could not find confirm button.") end
             return
         end
 
