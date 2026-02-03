@@ -9,6 +9,16 @@ local CreateScrollableContent = Shared.CreateScrollableContent
 local GetDB = Shared.GetDB
 local GetTextureList = Shared.GetTextureList
 
+-- Helper: Get char-scope custom entries for a tracker
+local function GetCharCustomEntries(trackerKey)
+    local QUICore = ns.Addon
+    if QUICore and QUICore.db and QUICore.db.char and QUICore.db.char.ncdm
+        and QUICore.db.char.ncdm[trackerKey] then
+        return QUICore.db.char.ncdm[trackerKey].customEntries
+    end
+    return nil
+end
+
 --------------------------------------------------------------------------------
 -- Refresh callback for NCDM changes
 --------------------------------------------------------------------------------
@@ -76,6 +86,56 @@ local function EnsureNCDMDefaults(db)
             -- Row 3 disabled by default
             if i == 3 then
                 db.ncdm.utility[rowKey].iconCount = 0
+            end
+        end
+    end
+
+    -- Ensure char-scope customEntries exist for both trackers + one-time migration from profile
+    local QUICore = ns.Addon
+    local charDB = QUICore and QUICore.db and QUICore.db.char
+    if charDB then
+        if not charDB.ncdm then charDB.ncdm = {} end
+        for _, key in ipairs({"essential", "utility"}) do
+            if not charDB.ncdm[key] then charDB.ncdm[key] = {} end
+            if not charDB.ncdm[key].customEntries then
+                charDB.ncdm[key].customEntries = { enabled = true, placement = "after", entries = {} }
+            end
+            local charCustom = charDB.ncdm[key].customEntries
+            if not charCustom.entries then charCustom.entries = {} end
+            if charCustom.placement == nil then charCustom.placement = "after" end
+
+            -- One-time migration: copy from profile to char if char is empty and profile has data
+            local profileTracker = db.ncdm[key]
+            if profileTracker and profileTracker.customEntries then
+                local profileEntries = profileTracker.customEntries.entries
+                if profileEntries and #profileEntries > 0 and #charCustom.entries == 0 then
+                    -- Copy entries from profile to char
+                    for _, entry in ipairs(profileEntries) do
+                        table.insert(charCustom.entries, {
+                            id = entry.id,
+                            type = entry.type,
+                            enabled = entry.enabled,
+                            position = entry.position,
+                        })
+                    end
+                    -- Copy enabled/placement preferences
+                    if profileTracker.customEntries.enabled ~= nil then
+                        charCustom.enabled = profileTracker.customEntries.enabled
+                    end
+                    if profileTracker.customEntries.placement then
+                        charCustom.placement = profileTracker.customEntries.placement
+                    end
+                    -- Clear profile entries to prevent re-migration
+                    wipe(profileTracker.customEntries.entries)
+                end
+            end
+
+            -- Sanitize entries: ensure 'enabled' field and valid position values
+            for _, entry in ipairs(charCustom.entries) do
+                if entry.enabled == nil then entry.enabled = true end
+                if entry.position ~= nil and (type(entry.position) ~= "number" or entry.position < 1) then
+                    entry.position = nil
+                end
             end
         end
     end
@@ -346,6 +406,683 @@ local function CreateCDMSetupPage(parent)
         return y
     end
 
+    ---------------------------------------------------------------------------
+    -- Custom Entries Section (shared between Essential and Utility tabs)
+    ---------------------------------------------------------------------------
+    local function BuildCustomEntriesSection(tabContent, trackerKey, rebuildCallback)
+        local y = tabContent._currentY or -10
+        local PAD = 10
+        local FORM_ROW = 32
+
+        local customData = GetCharCustomEntries(trackerKey)
+        if not customData then return end
+
+        -- Section header
+        local header = GUI:CreateSectionHeader(tabContent, "Custom Entries")
+        header:SetPoint("TOPLEFT", PAD, y)
+        y = y - header.gap
+
+        -- Enable toggle
+        local enableCheck = GUI:CreateFormCheckbox(tabContent, "Enable Custom Entries", "enabled", customData, function()
+            RefreshNCDM()
+        end)
+        enableCheck:SetPoint("TOPLEFT", PAD, y)
+        enableCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+        y = y - FORM_ROW
+
+        -- Placement dropdown
+        local placementOptions = {
+            {value = "before", text = "Before Blizzard Icons"},
+            {value = "after", text = "After Blizzard Icons"},
+        }
+        local placementDropdown = GUI:CreateFormDropdown(tabContent, "Custom Icon Placement", placementOptions, "placement", customData, function()
+            RefreshNCDM()
+        end)
+        placementDropdown:SetPoint("TOPLEFT", PAD, y)
+        placementDropdown:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+        y = y - FORM_ROW
+
+        -- Drop zone for spells/items
+        local dropZone = CreateFrame("Button", nil, tabContent, "BackdropTemplate")
+        dropZone:SetHeight(50)
+        dropZone:SetPoint("TOPLEFT", PAD, y)
+        dropZone:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+        dropZone:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+        })
+        dropZone:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], 0.8)
+        dropZone:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
+
+        local dropLabel = dropZone:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        dropLabel:SetPoint("CENTER", 0, 0)
+        dropLabel:SetText("Drop Spells or Items Here")
+        dropLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 1)
+
+        dropZone:SetScript("OnReceiveDrag", function(self)
+            local cursorType, id1, id2, id3, id4 = GetCursorInfo()
+            if cursorType == "item" then
+                local itemID = id1
+                if itemID and ns.CustomCDM then
+                    ns.CustomCDM:AddEntry(trackerKey, "item", itemID)
+                    ClearCursor()
+                    if rebuildCallback then rebuildCallback() end
+                end
+            elseif cursorType == "spell" then
+                local slotIndex = id1
+                local bookType = id2 or "spell"
+                local spellID = id4
+
+                if not spellID and slotIndex then
+                    local spellBank = (bookType == "pet") and Enum.SpellBookSpellBank.Pet or Enum.SpellBookSpellBank.Player
+                    local spellBookInfo = C_SpellBook.GetSpellBookItemInfo(slotIndex, spellBank)
+                    if spellBookInfo then
+                        spellID = spellBookInfo.spellID
+                    end
+                end
+
+                if spellID then
+                    local overrideID = C_Spell.GetOverrideSpell(spellID)
+                    if overrideID and overrideID ~= spellID then
+                        spellID = overrideID
+                    end
+                end
+
+                if spellID and ns.CustomCDM then
+                    ns.CustomCDM:AddEntry(trackerKey, "spell", spellID)
+                    ClearCursor()
+                    if rebuildCallback then rebuildCallback() end
+                end
+            end
+        end)
+
+        dropZone:SetScript("OnMouseUp", function(self)
+            local cursorType = GetCursorInfo()
+            if cursorType == "item" or cursorType == "spell" then
+                local handler = dropZone:GetScript("OnReceiveDrag")
+                if handler then handler(self) end
+            end
+        end)
+
+        dropZone:SetScript("OnEnter", function(self)
+            local cursorType = GetCursorInfo()
+            if cursorType == "item" or cursorType == "spell" then
+                self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+                dropLabel:SetTextColor(C.accent[1], C.accent[2], C.accent[3], 1)
+            end
+        end)
+        dropZone:SetScript("OnLeave", function(self)
+            self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
+            dropLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 1)
+        end)
+
+        y = y - 58
+
+        -- Trinket buttons row
+        local trinketRow = CreateFrame("Frame", nil, tabContent)
+        trinketRow:SetHeight(28)
+        trinketRow:SetPoint("TOPLEFT", PAD, y)
+        trinketRow:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+
+        local trinket1Btn = GUI:CreateButton(trinketRow, "Add Trinket 1 (Slot 13)", 180, 24, function()
+            if ns.CustomCDM then
+                local added = ns.CustomCDM:AddEntry(trackerKey, "trinket", 13)
+                if added and rebuildCallback then rebuildCallback() end
+            end
+        end)
+        trinket1Btn:SetPoint("LEFT", 0, 0)
+
+        local trinket2Btn = GUI:CreateButton(trinketRow, "Add Trinket 2 (Slot 14)", 180, 24, function()
+            if ns.CustomCDM then
+                local added = ns.CustomCDM:AddEntry(trackerKey, "trinket", 14)
+                if added and rebuildCallback then rebuildCallback() end
+            end
+        end)
+        trinket2Btn:SetPoint("LEFT", trinket1Btn, "RIGHT", 8, 0)
+
+        y = y - FORM_ROW
+
+        -- Column headers for entry list
+        local entries = customData.entries or {}
+        if #entries > 0 then
+            local headerRow = CreateFrame("Frame", nil, tabContent)
+            headerRow:SetHeight(16)
+            headerRow:SetPoint("TOPLEFT", PAD, y)
+            headerRow:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+
+            local posHeader = headerRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            posHeader:SetPoint("RIGHT", headerRow, "RIGHT", -160, 0)
+            posHeader:SetText("Pos")
+            posHeader:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 1)
+            posHeader:SetFont(posHeader:GetFont(), 10)
+
+            y = y - 18
+        end
+
+        -- Entry list
+        for i, entry in ipairs(entries) do
+            local entryRow = CreateFrame("Frame", nil, tabContent, "BackdropTemplate")
+            entryRow:SetHeight(28)
+            entryRow:SetPoint("TOPLEFT", PAD, y)
+            entryRow:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            entryRow:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+            })
+            entryRow:SetBackdropColor(0.12, 0.12, 0.15, 0.6)
+
+            -- Icon texture (resolve via shared helper)
+            local iconTex = entryRow:CreateTexture(nil, "ARTWORK")
+            iconTex:SetSize(20, 20)
+            iconTex:SetPoint("LEFT", 6, 0)
+
+            local texturePath = "Interface\\Icons\\INV_Misc_QuestionMark"
+            if entry.type == "spell" then
+                local info = C_Spell.GetSpellInfo(entry.id)
+                if info and info.iconID then texturePath = info.iconID end
+            elseif entry.type == "item" then
+                local icon = C_Item.GetItemIconByID(entry.id)
+                if icon then texturePath = icon end
+            elseif entry.type == "trinket" then
+                local itemID = GetInventoryItemID("player", entry.id)
+                if itemID then
+                    local icon = C_Item.GetItemIconByID(itemID)
+                    if icon then texturePath = icon end
+                end
+            end
+            iconTex:SetTexture(texturePath)
+            iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+            -- Name label
+            local nameLabel = entryRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            nameLabel:SetPoint("LEFT", iconTex, "RIGHT", 6, 0)
+            nameLabel:SetPoint("RIGHT", entryRow, "RIGHT", -230, 0)
+            nameLabel:SetJustifyH("LEFT")
+            local entryName = ns.CustomCDM and ns.CustomCDM:GetEntryName(entry) or "Unknown"
+            local typeTag = entry.type == "trinket" and "[T]" or (entry.type == "item" and "[I]" or "[S]")
+            nameLabel:SetText(typeTag .. " " .. entryName)
+            nameLabel:SetTextColor(0.9, 0.9, 0.9, 1)
+
+            -- Position EditBox
+            local entryIndex = i
+            local posBox = CreateFrame("EditBox", nil, entryRow, "BackdropTemplate")
+            posBox:SetSize(36, 20)
+            posBox:SetPoint("RIGHT", entryRow, "RIGHT", -158, 0)
+            posBox:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8x8",
+                edgeFile = "Interface\\Buttons\\WHITE8x8",
+                edgeSize = 1,
+            })
+            posBox:SetBackdropColor(0.1, 0.1, 0.12, 0.8)
+            posBox:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+            posBox:SetFontObject("GameFontHighlightSmall")
+            posBox:SetJustifyH("CENTER")
+            posBox:SetAutoFocus(false)
+            posBox:SetNumeric(false) -- Allow empty string for "Auto"
+            posBox:SetMaxLetters(3)
+
+            -- Show current position or empty for auto
+            if entry.position and entry.position > 0 then
+                posBox:SetText(tostring(entry.position))
+            else
+                posBox:SetText("")
+            end
+
+            -- Placeholder text for "Auto"
+            local placeholder = posBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            placeholder:SetPoint("CENTER", 0, 0)
+            placeholder:SetText("Auto")
+            placeholder:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.6)
+            if posBox:GetText() ~= "" then placeholder:Hide() end
+
+            posBox:SetScript("OnTextChanged", function(self, userInput)
+                if self:GetText() == "" then
+                    placeholder:Show()
+                else
+                    placeholder:Hide()
+                end
+            end)
+
+            posBox:SetScript("OnEnterPressed", function(self)
+                local text = self:GetText()
+                local val = tonumber(text)
+                if text ~= "" and val == nil then
+                    -- Invalid non-numeric input: flash red and revert
+                    self:SetBackdropBorderColor(1, 0.3, 0.3, 1)
+                    C_Timer.After(0.4, function()
+                        if self:HasFocus() then
+                            self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+                        else
+                            self:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+                        end
+                    end)
+                    -- Revert text to saved value
+                    if entry.position and entry.position > 0 then
+                        self:SetText(tostring(entry.position))
+                    else
+                        self:SetText("")
+                    end
+                    self:ClearFocus()
+                    return
+                end
+                if ns.CustomCDM then
+                    if text == "" then
+                        ns.CustomCDM:SetEntryPosition(trackerKey, entryIndex, nil)
+                    else
+                        ns.CustomCDM:SetEntryPosition(trackerKey, entryIndex, val)
+                    end
+                    if rebuildCallback then rebuildCallback() end
+                end
+                self:ClearFocus()
+            end)
+
+            posBox:SetScript("OnEscapePressed", function(self)
+                -- Revert to saved value
+                if entry.position and entry.position > 0 then
+                    self:SetText(tostring(entry.position))
+                else
+                    self:SetText("")
+                end
+                self:ClearFocus()
+            end)
+
+            posBox:SetScript("OnEditFocusGained", function(self)
+                self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+            end)
+            posBox:SetScript("OnEditFocusLost", function(self)
+                self:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+            end)
+
+            posBox:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Position (Slot)")
+                GameTooltip:AddLine("Set a specific slot number in the bar.\nLeave empty for automatic placement.", 1, 1, 1, true)
+                GameTooltip:Show()
+            end)
+            posBox:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+
+            -- Enable/disable toggle
+            local toggleBtn = GUI:CreateButton(entryRow, entry.enabled ~= false and "On" or "Off", 32, 20, function()
+                if ns.CustomCDM then
+                    local newState = not (entry.enabled ~= false)
+                    ns.CustomCDM:SetEntryEnabled(trackerKey, entryIndex, newState)
+                    if rebuildCallback then rebuildCallback() end
+                end
+            end)
+            toggleBtn:SetPoint("RIGHT", entryRow, "RIGHT", -126, 0)
+
+            -- Move up button
+            local upBtn = GUI:CreateButton(entryRow, "^", 24, 20, function()
+                if ns.CustomCDM then
+                    ns.CustomCDM:MoveEntry(trackerKey, entryIndex, -1)
+                    if rebuildCallback then rebuildCallback() end
+                end
+            end)
+            upBtn:SetPoint("RIGHT", entryRow, "RIGHT", -96, 0)
+
+            -- Move down button
+            local downBtn = GUI:CreateButton(entryRow, "v", 24, 20, function()
+                if ns.CustomCDM then
+                    ns.CustomCDM:MoveEntry(trackerKey, entryIndex, 1)
+                    if rebuildCallback then rebuildCallback() end
+                end
+            end)
+            downBtn:SetPoint("RIGHT", entryRow, "RIGHT", -68, 0)
+
+            -- Remove button
+            local removeBtn = GUI:CreateButton(entryRow, "X", 24, 20, function()
+                if ns.CustomCDM then
+                    ns.CustomCDM:RemoveEntry(trackerKey, entryIndex)
+                    if rebuildCallback then rebuildCallback() end
+                end
+            end)
+            removeBtn:SetPoint("RIGHT", entryRow, "RIGHT", -6, 0)
+
+            y = y - 30
+        end
+
+        if #entries == 0 then
+            local noEntries = GUI:CreateLabel(tabContent, "No custom entries. Drag spells or items above, or add trinkets.", 11, C.textMuted)
+            noEntries:SetPoint("TOPLEFT", PAD, y)
+            noEntries:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            noEntries:SetJustifyH("LEFT")
+            y = y - 20
+        end
+
+        -- Live Preview (multi-row, mirrors actual CDM bar layout with real icons)
+        -- Uses a self-refreshing container that updates when any CDM setting changes.
+        if #entries > 0 then
+            y = y - 8
+
+            local previewLabel = GUI:CreateLabel(tabContent, "Preview:", 10, C.textMuted)
+            previewLabel:SetPoint("TOPLEFT", PAD, y)
+            previewLabel:SetJustifyH("LEFT")
+            y = y - 16
+
+            -- Reserve space; container is repopulated by RefreshPreview
+            local previewContainer = CreateFrame("Frame", nil, tabContent)
+            previewContainer:SetHeight(1) -- Will be resized by RefreshPreview
+            previewContainer:SetPoint("TOPLEFT", PAD, y)
+            previewContainer:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+
+            local previewAnchorY = y  -- remember Y for height recalculation
+
+            -- Reusable function: wipe and rebuild preview contents
+            local function RefreshPreview()
+                if not previewContainer:GetParent() then return end -- tab torn down
+
+                -- Wipe existing children and regions (skip the watcher frame)
+                for _, child in pairs({ previewContainer:GetChildren() }) do
+                    if not child._isPreviewWatcher then
+                        child:Hide()
+                        child:ClearAllPoints()
+                        child:SetParent(nil)
+                    end
+                end
+                for _, region in pairs({ previewContainer:GetRegions() }) do
+                    if region.Hide then region:Hide() end
+                    if region.SetParent then region:SetParent(nil) end
+                end
+
+                -- Re-read settings (may have changed since initial build)
+                local trackerSettings = db.ncdm[trackerKey]
+                if not trackerSettings then return end
+
+                local customDataNow = GetCharCustomEntries(trackerKey)
+                if not customDataNow then return end
+                local entriesNow = customDataNow.entries or {}
+
+                -- Gather row configs
+                local rowConfigs = {}
+                local totalSlots = 0
+                for ri = 1, 3 do
+                    local rowKey = "row" .. ri
+                    local rd = trackerSettings[rowKey]
+                    if rd and rd.iconCount and rd.iconCount > 0 then
+                        table.insert(rowConfigs, {
+                            count = rd.iconCount,
+                            size = rd.iconSize or 50,
+                            aspectRatioCrop = rd.aspectRatioCrop or 1.0,
+                            padding = rd.padding or 0,
+                            borderSize = rd.borderSize or 2,
+                        })
+                        totalSlots = totalSlots + rd.iconCount
+                    end
+                end
+                if totalSlots <= 0 then totalSlots = 12 end
+                if #rowConfigs == 0 then
+                    rowConfigs = {{ count = totalSlots, size = 50, aspectRatioCrop = 1.0, padding = 0, borderSize = 2 }}
+                end
+
+                -- Collect actual Blizzard icon textures from the live viewer
+                local vName = (trackerKey == "essential") and "EssentialCooldownViewer" or "UtilityCooldownViewer"
+                local viewer = _G[vName]
+                local blizzardTextures = {}
+                if viewer and viewer.GetChildren then
+                    local blizzIcons = {}
+                    local children = { viewer:GetChildren() }
+                    for _, child in ipairs(children) do
+                        if child and child ~= viewer.Selection and not child._isCustomCDMIcon then
+                            local iconTex = child.Icon or child.icon
+                            if iconTex and (child.Cooldown or child.cooldown) then
+                                if child:IsShown() or child._ncdmHidden then
+                                    table.insert(blizzIcons, child)
+                                end
+                            end
+                        end
+                    end
+                    table.sort(blizzIcons, function(a, b)
+                        return (a.layoutIndex or 9999) < (b.layoutIndex or 9999)
+                    end)
+                    for _, icon in ipairs(blizzIcons) do
+                        local tex = icon.Icon or icon.icon
+                        local texID = tex and tex.GetTexture and tex:GetTexture()
+                        table.insert(blizzardTextures, texID or "Interface\\Icons\\INV_Misc_QuestionMark")
+                    end
+                end
+
+                -- Build merged slot list mirroring CollectIcons logic
+                local placement = customDataNow.placement or "after"
+
+                local positioned = {}
+                local unpositioned = {}
+                local enabledEntries = {}
+                for ei, entry in ipairs(entriesNow) do
+                    if entry.enabled ~= false then
+                        table.insert(enabledEntries, entry)
+                        if entry.position and entry.position > 0 then
+                            table.insert(positioned, { entry = entry, origIndex = ei })
+                        else
+                            table.insert(unpositioned, entry)
+                        end
+                    end
+                end
+
+                -- Blizzard icons are additive; custom entries don't replace them
+                local blizzardSlotCount = #blizzardTextures
+                if blizzardSlotCount == 0 then
+                    blizzardSlotCount = math.max(0, totalSlots - #enabledEntries)
+                end
+                local previewSlots = {}
+                for n = 1, blizzardSlotCount do
+                    table.insert(previewSlots, {
+                        type = "blizzard",
+                        num = n,
+                        texture = blizzardTextures[n] or nil,
+                    })
+                end
+
+                -- Insert unpositioned via before/after
+                if placement == "before" then
+                    local merged = {}
+                    for _, entry in ipairs(unpositioned) do
+                        table.insert(merged, { type = "custom", entry = entry })
+                    end
+                    for _, slot in ipairs(previewSlots) do
+                        table.insert(merged, slot)
+                    end
+                    previewSlots = merged
+                else
+                    for _, entry in ipairs(unpositioned) do
+                        table.insert(previewSlots, { type = "custom", entry = entry })
+                    end
+                end
+
+                -- Insert positioned at specified slots (descending, stable)
+                table.sort(positioned, function(a, b)
+                    local posA = a.entry.position or 0
+                    local posB = b.entry.position or 0
+                    if posA ~= posB then return posA > posB end
+                    return a.origIndex < b.origIndex
+                end)
+                for _, item in ipairs(positioned) do
+                    local pos = item.entry.position
+                    local insertAt = math.min(pos, #previewSlots + 1)
+                    table.insert(previewSlots, insertAt, { type = "custom", entry = item.entry })
+                end
+
+                -- Truncate to totalSlots
+                while #previewSlots > totalSlots do
+                    table.remove(previewSlots)
+                end
+
+                -- Calculate scale
+                local availableWidth = 680 - (PAD * 2)
+                local maxNativeWidth = 0
+                for _, rc in ipairs(rowConfigs) do
+                    local rowWidth = (rc.count * rc.size) + ((rc.count - 1) * math.max(rc.padding, 0))
+                    if rowWidth > maxNativeWidth then maxNativeWidth = rowWidth end
+                end
+                local scale = 1
+                if maxNativeWidth > 0 then
+                    scale = math.min(1, availableWidth / maxNativeWidth)
+                    local maxIconSize = 36
+                    for _, rc in ipairs(rowConfigs) do
+                        if rc.size * scale > maxIconSize then
+                            scale = math.min(scale, maxIconSize / rc.size)
+                        end
+                    end
+                end
+
+                -- Calculate total preview height
+                local ROW_GAP = 14
+                local previewHeight = 0
+                for ri, rc in ipairs(rowConfigs) do
+                    local aspect = rc.aspectRatioCrop or 1.0
+                    local iconH = (rc.size / aspect) * scale
+                    previewHeight = previewHeight + iconH
+                    if ri > 1 then previewHeight = previewHeight + ROW_GAP end
+                end
+                previewHeight = previewHeight + 12 -- slot numbers
+
+                previewContainer:SetHeight(previewHeight)
+
+                -- Render rows
+                local slotIdx = 1
+                local rowY = 0
+                local globalSlot = 0
+
+                for ri, rc in ipairs(rowConfigs) do
+                    local aspect = rc.aspectRatioCrop or 1.0
+                    local iconW = rc.size * scale
+                    local iconH = (rc.size / aspect) * scale
+                    local padding = rc.padding * scale
+                    local borderSize = math.max(1, math.floor(rc.borderSize * scale + 0.5))
+
+                    local iconsInRow = math.min(rc.count, #previewSlots - slotIdx + 1)
+                    if iconsInRow <= 0 then break end
+
+                    local rowWidth = (iconsInRow * iconW) + ((iconsInRow - 1) * padding)
+                    local rowStartX = (availableWidth - rowWidth) / 2
+
+                    for i = 1, iconsInRow do
+                        local slot = previewSlots[slotIdx]
+                        if not slot then break end
+                        globalSlot = globalSlot + 1
+
+                        local x = rowStartX + (i - 1) * (iconW + padding)
+
+                        local slotFrame = CreateFrame("Frame", nil, previewContainer, "BackdropTemplate")
+                        slotFrame:SetSize(iconW, iconH)
+                        slotFrame:SetPoint("TOPLEFT", x, -rowY)
+
+                        local isCustom = (slot.type == "custom")
+
+                        slotFrame:SetBackdrop({
+                            bgFile = "Interface\\Buttons\\WHITE8x8",
+                            edgeFile = "Interface\\Buttons\\WHITE8x8",
+                            edgeSize = borderSize,
+                        })
+                        slotFrame:SetBackdropColor(0, 0, 0, 1)
+                        if isCustom then
+                            slotFrame:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+                        else
+                            slotFrame:SetBackdropBorderColor(0, 0, 0, 1)
+                        end
+
+                        local tex = slotFrame:CreateTexture(nil, "ARTWORK")
+                        tex:SetPoint("TOPLEFT", borderSize, -borderSize)
+                        tex:SetPoint("BOTTOMRIGHT", -borderSize, borderSize)
+                        tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                        if isCustom then
+                            local texPath = "Interface\\Icons\\INV_Misc_QuestionMark"
+                            if slot.entry.type == "spell" then
+                                local info = C_Spell.GetSpellInfo(slot.entry.id)
+                                if info and info.iconID then texPath = info.iconID end
+                            elseif slot.entry.type == "item" then
+                                local ic = C_Item.GetItemIconByID(slot.entry.id)
+                                if ic then texPath = ic end
+                            elseif slot.entry.type == "trinket" then
+                                local itemID = GetInventoryItemID("player", slot.entry.id)
+                                if itemID then
+                                    local ic = C_Item.GetItemIconByID(itemID)
+                                    if ic then texPath = ic end
+                                end
+                            end
+                            tex:SetTexture(texPath)
+                        else
+                            if slot.texture then
+                                tex:SetTexture(slot.texture)
+                            else
+                                tex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                                tex:SetDesaturated(true)
+                                tex:SetAlpha(0.4)
+                            end
+                        end
+
+                        -- Slot number below icon
+                        local slotNum = previewContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                        slotNum:SetPoint("TOP", slotFrame, "BOTTOM", 0, -1)
+                        slotNum:SetText(tostring(globalSlot))
+                        if isCustom then
+                            slotNum:SetTextColor(C.accent[1], C.accent[2], C.accent[3], 0.9)
+                        else
+                            slotNum:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.6)
+                        end
+                        slotNum:SetFont(slotNum:GetFont(), 8)
+
+                        -- Tooltip
+                        slotFrame:EnableMouse(true)
+                        local slotLabel = globalSlot
+                        if isCustom then
+                            local entryRef = slot.entry
+                            slotFrame:SetScript("OnEnter", function(self)
+                                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                                local name = ns.CustomCDM and ns.CustomCDM:GetEntryName(entryRef) or "Custom"
+                                local posText = (entryRef.position and entryRef.position > 0) and (" (pos " .. entryRef.position .. ")") or " (auto)"
+                                GameTooltip:SetText("Slot " .. slotLabel .. ": " .. name .. posText)
+                                GameTooltip:Show()
+                            end)
+                        else
+                            slotFrame:SetScript("OnEnter", function(self)
+                                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                                GameTooltip:SetText("Slot " .. slotLabel .. ": Blizzard Icon")
+                                GameTooltip:Show()
+                            end)
+                        end
+                        slotFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+                        slotIdx = slotIdx + 1
+                    end
+
+                    rowY = rowY + iconH + ROW_GAP
+                end
+            end
+
+            -- Initial render
+            RefreshPreview()
+
+            -- Auto-refresh: watch the NCDM settings version counter so the preview
+            -- updates when any CDM setting changes (row counts, sizes, etc.)
+            local lastVersion = -1
+            local watchFrame = CreateFrame("Frame", nil, previewContainer)
+            watchFrame._isPreviewWatcher = true
+            watchFrame:SetScript("OnUpdate", function(self, elapsed)
+                self._elapsed = (self._elapsed or 0) + elapsed
+                if self._elapsed < 0.2 then return end
+                self._elapsed = 0
+
+                -- Check if settings version changed
+                local currentVersion = 0
+                if ns.NCDM and ns.NCDM.settingsVersion then
+                    currentVersion = (ns.NCDM.settingsVersion[trackerKey] or 0)
+                end
+                if currentVersion ~= lastVersion then
+                    lastVersion = currentVersion
+                    RefreshPreview()
+                end
+            end)
+
+            y = y - (previewContainer:GetHeight() or 40) - 4
+        end
+
+        y = y - 10
+        tabContent._currentY = y
+    end
+
     -- Build Essential sub-tab
     local function BuildEssentialTab(tabContent)
         tabContent._currentY = -10
@@ -370,12 +1107,12 @@ local function CreateCDMSetupPage(parent)
                         if child.UnregisterAllEvents then
                             child:UnregisterAllEvents()
                         end
-                        if child.SetScript then
-                            child:SetScript("OnUpdate", nil)
-                            child:SetScript("OnClick", nil)
-                            child:SetScript("OnEnter", nil)
-                            child:SetScript("OnLeave", nil)
-                            child:SetScript("OnEvent", nil)
+                        if child.SetScript and child.HasScript then
+                            if child:HasScript("OnUpdate") then child:SetScript("OnUpdate", nil) end
+                            if child:HasScript("OnClick") then child:SetScript("OnClick", nil) end
+                            if child:HasScript("OnEnter") then child:SetScript("OnEnter", nil) end
+                            if child:HasScript("OnLeave") then child:SetScript("OnLeave", nil) end
+                            if child:HasScript("OnEvent") then child:SetScript("OnEvent", nil) end
                         end
                         if child.EnableMouse then
                             child:EnableMouse(false)
@@ -393,11 +1130,11 @@ local function CreateCDMSetupPage(parent)
                     elseif region.SetText and region.GetObjectType and region:GetObjectType() == "FontString" then
                         region:SetText("")
                     end
-                    if region.SetScript then
-                        region:SetScript("OnUpdate", nil)
-                        region:SetScript("OnEnter", nil)
-                        region:SetScript("OnLeave", nil)
-                        region:SetScript("OnEvent", nil)
+                    if region.SetScript and region.HasScript then
+                        if region:HasScript("OnUpdate") then region:SetScript("OnUpdate", nil) end
+                        if region:HasScript("OnEnter") then region:SetScript("OnEnter", nil) end
+                        if region:HasScript("OnLeave") then region:SetScript("OnLeave", nil) end
+                        if region:HasScript("OnEvent") then region:SetScript("OnEvent", nil) end
                     end
                     if region.ClearAllPoints then
                         region:ClearAllPoints()
@@ -454,6 +1191,9 @@ local function CreateCDMSetupPage(parent)
             if ess.row3 then
                 BuildRowSettings(tabContent, 3, ess.row3, "Essential", ess, rebuildEssential)
             end
+
+            -- Custom Entries
+            BuildCustomEntriesSection(tabContent, "essential", rebuildEssential)
         else
             local info = GUI:CreateLabel(tabContent, "NCDM Essential settings not found. Please reload UI.", 12, C.accentLight)
             info:SetPoint("TOPLEFT", PAD, y)
@@ -478,11 +1218,52 @@ local function CreateCDMSetupPage(parent)
             local function rebuildUtility()
                 -- Clear and rebuild the tab content
                 for _, child in pairs({tabContent:GetChildren()}) do
-                    child:Hide()
-                    child:SetParent(nil)
+                    if child.Release then
+                        child:Release()
+                    elseif child.Recycle then
+                        child:Recycle()
+                    else
+                        if child.UnregisterAllEvents then
+                            child:UnregisterAllEvents()
+                        end
+                        if child.SetScript and child.HasScript then
+                            if child:HasScript("OnUpdate") then child:SetScript("OnUpdate", nil) end
+                            if child:HasScript("OnClick") then child:SetScript("OnClick", nil) end
+                            if child:HasScript("OnEnter") then child:SetScript("OnEnter", nil) end
+                            if child:HasScript("OnLeave") then child:SetScript("OnLeave", nil) end
+                            if child:HasScript("OnEvent") then child:SetScript("OnEvent", nil) end
+                        end
+                        if child.EnableMouse then
+                            child:EnableMouse(false)
+                        end
+                        if child.ClearAllPoints then
+                            child:ClearAllPoints()
+                        end
+                        child:Hide()
+                        child:SetParent(nil)
+                    end
                 end
                 for _, region in pairs({tabContent:GetRegions()}) do
-                    region:Hide()
+                    if region.SetTexture and region.GetObjectType and region:GetObjectType() == "Texture" then
+                        region:SetTexture(nil)
+                    elseif region.SetText and region.GetObjectType and region:GetObjectType() == "FontString" then
+                        region:SetText("")
+                    end
+                    if region.SetScript and region.HasScript then
+                        if region:HasScript("OnUpdate") then region:SetScript("OnUpdate", nil) end
+                        if region:HasScript("OnEnter") then region:SetScript("OnEnter", nil) end
+                        if region:HasScript("OnLeave") then region:SetScript("OnLeave", nil) end
+                        if region:HasScript("OnEvent") then region:SetScript("OnEvent", nil) end
+                    end
+                    if region.ClearAllPoints then
+                        region:ClearAllPoints()
+                    end
+                    if region.Hide then
+                        region:Hide()
+                    end
+                    if region.SetParent then
+                        region:SetParent(nil)
+                    end
                 end
                 BuildUtilityTab(tabContent)
             end
@@ -553,6 +1334,9 @@ local function CreateCDMSetupPage(parent)
             if util.row3 then
                 BuildRowSettings(tabContent, 3, util.row3, "Utility", util, rebuildUtility)
             end
+
+            -- Custom Entries
+            BuildCustomEntriesSection(tabContent, "utility", rebuildUtility)
         else
             local info = GUI:CreateLabel(tabContent, "NCDM Utility settings not found. Please reload UI.", 12, C.accentLight)
             info:SetPoint("TOPLEFT", PAD, y)

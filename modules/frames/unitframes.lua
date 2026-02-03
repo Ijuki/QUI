@@ -3967,10 +3967,11 @@ function QUI_UF:EnableEditMode()
             if EditModeManagerFrame and EditModeManagerFrame:IsShown() then
                 -- Save changes first
                 if EditModeManagerFrame.SaveLayoutChanges then
-                    EditModeManagerFrame:SaveLayoutChanges()
+                    pcall(EditModeManagerFrame.SaveLayoutChanges, EditModeManagerFrame)
                 end
-                -- Then exit
-                HideUIPanel(EditModeManagerFrame)
+                -- Then exit (pcall: Blizzard's exit path can trigger secret value
+                -- errors in CompactUnitFrame_UpdateInRange via party frame refresh)
+                pcall(HideUIPanel, EditModeManagerFrame)
             else
                 -- Fallback for /qui editmode case
                 QUI_UF:DisableEditMode()

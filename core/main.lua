@@ -951,9 +951,6 @@ local defaults = {
                     stackTextColor = {1, 1, 1, 1},
                     stackAnchor = "BOTTOMRIGHT",
                 },
-                customEntries = {
-                    enabled = true,
-                },
             },
             utility = {
                 enabled = true,
@@ -1023,12 +1020,6 @@ local defaults = {
                 },
                 anchorBelowEssential = false,
                 anchorGap = 0,
-                customEntries = {
-                    enabled = true,
-                    entries = {
-                        { id = 58984, type = "spell" },
-                    },
-                },
             },
             buff = {
                 enabled = true,
