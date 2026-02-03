@@ -251,6 +251,13 @@ local function BackupCurrentFPSSettings()
             backup[cvar] = current
         end
     end
+    if not db.fpsOriginalBackup then
+        local original = {}
+        for cvar, value in pairs(backup) do
+            original[cvar] = value
+        end
+        db.fpsOriginalBackup = original
+    end
     db.fpsBackup = backup
     return true
 end
@@ -283,6 +290,31 @@ local function RestorePreviousFPSSettings()
     return true
 end
 
+local function RestoreOriginalFPSSettings()
+    local db = GetDB()
+    if not db.fpsOriginalBackup then
+        print("|cffFF6B6BQUI:|r No original backup found. Apply FPS settings first to create it.")
+        return false
+    end
+
+    local successCount = 0
+    local failCount = 0
+    for cvar, value in pairs(db.fpsOriginalBackup) do
+        local ok = pcall(C_CVar.SetCVar, cvar, tostring(value))
+        if ok then
+            successCount = successCount + 1
+        else
+            failCount = failCount + 1
+        end
+    end
+
+    print("|cff34D399QUI:|r Restored " .. successCount .. " original settings.")
+    if failCount > 0 then
+        print("|cffFF6B6BQUI:|r " .. failCount .. " settings could not be restored.")
+    end
+    return true
+end
+
 local function ApplyQuaziiFPSSettings()
     -- Backup current settings first
     BackupCurrentFPSSettings()
@@ -303,7 +335,7 @@ local function ApplyQuaziiFPSSettings()
     end
 
     print("|cff34D399QUI:|r Your previous settings have been backed up.")
-    print("|cff34D399QUI:|r Applied " .. successCount .. " FPS settings. Use 'Restore Previous Settings' to undo.")
+    print("|cff34D399QUI:|r Applied " .. successCount .. " FPS settings. Use 'Restore Previous Settings' or 'Restore Original Settings' to undo.")
     if failCount > 0 then
         print("|cffFF6B6BQUI:|r " .. failCount .. " settings could not be applied (may require restart).")
     end
@@ -389,6 +421,7 @@ ns.QUI_Options = {
     -- FPS functions
     BackupCurrentFPSSettings = BackupCurrentFPSSettings,
     RestorePreviousFPSSettings = RestorePreviousFPSSettings,
+    RestoreOriginalFPSSettings = RestoreOriginalFPSSettings,
     ApplyQuaziiFPSSettings = ApplyQuaziiFPSSettings,
     CheckCVarsMatch = CheckCVarsMatch,
 

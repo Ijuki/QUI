@@ -221,7 +221,7 @@ local function BuildGeneralTab(tabContent)
 
     local fpsDesc = GUI:CreateLabel(tabContent,
         "Apply Quazii's optimized graphics settings for competitive play. " ..
-        "Your current settings are automatically saved when you click Apply - use 'Restore Previous Settings' to revert anytime. " ..
+        "Your current settings are automatically saved when you click Apply - use 'Restore Previous Settings' or 'Restore Original Settings' to revert anytime. " ..
         "Caution: Clicking Apply again will overwrite your backup with these settings.",
         11, C.textMuted)
     fpsDesc:SetPoint("TOPLEFT", PADDING, y)
@@ -232,6 +232,7 @@ local function BuildGeneralTab(tabContent)
     y = y - 40
 
     local restoreFpsBtn
+    local resetFpsBtn
     local fpsStatusText
 
     local function UpdateFPSStatus()
@@ -250,6 +251,8 @@ local function BuildGeneralTab(tabContent)
         Shared.ApplyQuaziiFPSSettings()
         restoreFpsBtn:SetAlpha(1)
         restoreFpsBtn:Enable()
+        resetFpsBtn:SetAlpha(1)
+        resetFpsBtn:Enable()
         UpdateFPSStatus()
     end)
     applyFpsBtn:SetPoint("TOPLEFT", PADDING, y)
@@ -267,12 +270,27 @@ local function BuildGeneralTab(tabContent)
     restoreFpsBtn:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
     y = y - 38
 
+    resetFpsBtn = GUI:CreateButton(tabContent, "Restore Original Settings", 180, 28, function()
+        if Shared.RestoreOriginalFPSSettings() then
+            resetFpsBtn:SetAlpha(0.5)
+            resetFpsBtn:Disable()
+        end
+        UpdateFPSStatus()
+    end)
+    resetFpsBtn:SetPoint("TOPLEFT", PADDING, y)
+    resetFpsBtn:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - 38
+
     fpsStatusText = GUI:CreateLabel(tabContent, "", 11, C.accent)
     fpsStatusText:SetPoint("TOPLEFT", PADDING, y)
 
     if not db.fpsBackup then
         restoreFpsBtn:SetAlpha(0.5)
         restoreFpsBtn:Disable()
+    end
+    if not db.fpsOriginalBackup then
+        resetFpsBtn:SetAlpha(0.5)
+        resetFpsBtn:Disable()
     end
 
     UpdateFPSStatus()
