@@ -1132,18 +1132,26 @@ local function ApplyKeybindToTrackerIcon(icon)
         return
     end
 
+    -- Check tracker overrides toggle
+    local trackersOverridesEnabled = true
+    if db then
+        trackersOverridesEnabled = db.keybindOverridesEnabledTrackers ~= false
+    end
+
+    -- Use centralized API for overrides
+    local overrides = trackersOverridesEnabled and QUIKeybinds.GetOverrides and QUIKeybinds.GetOverrides() or nil
+
     if entry.type == "spell" and entry.id then
         -- Step 1: Check for user override (highest priority)
-        local overrides = db and db.keybindOverrides
         if overrides and overrides[entry.id] and overrides[entry.id] ~= "" then
             keybind = overrides[entry.id]
         end
-        
+
         -- Step 2: Try auto-detected cache by spell ID
         if not keybind then
             keybind = QUIKeybinds.GetKeybindForSpell(entry.id)
         end
-        
+
         -- Step 3: Try spell name fallback (for macros)
         if not keybind and QUIKeybinds.GetKeybindForSpellName then
             local spellInfo = C_Spell.GetSpellInfo(entry.id)
@@ -1154,19 +1162,18 @@ local function ApplyKeybindToTrackerIcon(icon)
     elseif entry.type == "item" and entry.id then
         -- Step 1: Check for user override (highest priority)
         -- Items use negative itemID as key to avoid conflicts with spellIDs
-        local overrides = db and db.keybindOverrides
         if overrides then
             local overrideKey = -entry.id
             if overrides[overrideKey] and overrides[overrideKey] ~= "" then
                 keybind = overrides[overrideKey]
             end
         end
-        
+
         -- Step 2: Try auto-detected cache by item ID
         if not keybind then
             keybind = QUIKeybinds.GetKeybindForItem(entry.id)
         end
-        
+
         -- Step 3: Try item name fallback (for macros)
         if not keybind and QUIKeybinds.GetKeybindForItemName then
             local itemName = C_Item.GetItemInfo(entry.id)

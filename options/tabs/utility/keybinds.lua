@@ -11,6 +11,16 @@ local C = GUI.Colors
 -- Import shared utilities
 local Shared = ns.QUI_Options
 
+-- Persistent event listener for item info loading (created once, callback updated per tab build)
+local itemInfoListener = CreateFrame("Frame")
+itemInfoListener:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+local itemInfoListenerCallback = nil
+itemInfoListener:SetScript("OnEvent", function(self, event, itemID)
+    if event == "GET_ITEM_INFO_RECEIVED" and itemID and itemInfoListenerCallback then
+        itemInfoListenerCallback(itemID)
+    end
+end)
+
 local ANCHOR_OPTIONS = {
     { value = "TOPLEFT", text = "Top Left" },
     { value = "TOPRIGHT", text = "Top Right" },
@@ -184,14 +194,14 @@ local function BuildKeybindsTab(tabContent)
         end
 
         -- =====================================================
-        -- CDM KEYBIND OVERRIDES (SPELL ID → CUSTOM TEXT)
+        -- KEYBIND OVERRIDES (SPELL ID → CUSTOM TEXT)
         -- =====================================================
         y = y - 10 -- Section spacing
-        local overrideHeader = GUI:CreateSectionHeader(tabContent, "CDM KEYBIND OVERRIDES")
+        local overrideHeader = GUI:CreateSectionHeader(tabContent, "KEYBIND TEXT OVERRIDES")
         overrideHeader:SetPoint("TOPLEFT", PAD, y)
         y = y - overrideHeader.gap
 
-        local overrideInfo = GUI:CreateLabel(tabContent, "Override the auto-detected keybind for specific spells and items. Drag spells from your spellbook or items from your bags into the box below.", 11, C.textMuted)
+        local overrideInfo = GUI:CreateLabel(tabContent, "Override the auto-detected keybind text for specific spells and items. Drag spells from your spellbook or items from your bags into the box below.", 11, C.textMuted)
         overrideInfo:SetPoint("TOPLEFT", PAD, y)
         overrideInfo:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         overrideInfo:SetJustifyH("LEFT")
@@ -209,37 +219,56 @@ local function BuildKeybindsTab(tabContent)
                 QUICore.db.profile.keybindOverrides = {}
             end
 
+            -- Enable toggle: CDM overrides
+            local cdmToggle = GUI:CreateFormCheckbox(tabContent, "Enable for CDM", "keybindOverridesEnabledCDM", QUICore.db.profile, function()
+                if _G.QUI_RefreshKeybinds then
+                    _G.QUI_RefreshKeybinds()
+                end
+            end)
+            cdmToggle:SetPoint("TOPLEFT", PAD, y)
+            cdmToggle:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            -- Enable toggle: Custom Trackers overrides
+            local trackersToggle = GUI:CreateFormCheckbox(tabContent, "Enable for Custom Trackers", "keybindOverridesEnabledTrackers", QUICore.db.profile, function()
+                if _G.QUI_RefreshCustomTrackerKeybinds then
+                    _G.QUI_RefreshCustomTrackerKeybinds()
+                end
+            end)
+            trackersToggle:SetPoint("TOPLEFT", PAD, y)
+            trackersToggle:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            -- Refresh both CDM and Custom Tracker keybind displays
+            local function RefreshAllKeybindDisplays()
+                if _G.QUI_RefreshKeybinds then
+                    _G.QUI_RefreshKeybinds()
+                end
+                if _G.QUI_RefreshCustomTrackerKeybinds then
+                    _G.QUI_RefreshCustomTrackerKeybinds()
+                end
+            end
+
             -- Helper function to save/update override
             -- If keybindText is nil, it means "remove override" (user clicked X)
             -- If keybindText is a string (even empty ""), it means "set this binding"
             local function SaveOverride(spellID, keybindText)
                 if not spellID or spellID <= 0 then return false end
-                
-                local saved = false
-                local shouldRemove = (keybindText == nil)
-                
-                if _G.QUI_SetKeybindOverride then
-                    -- Pass nil to remove, or the text (even if empty string) to set
-                    _G.QUI_SetKeybindOverride("EssentialCooldownViewer", spellID, keybindText)
-                    saved = true
-                elseif QUI and QUI.Keybinds and QUI.Keybinds.SetOverride then
-                    QUI.Keybinds.SetOverride("EssentialCooldownViewer", spellID, keybindText)
-                    saved = true
-                else
-                    -- Direct DB access fallback
-                    QUICore.db.profile.keybindOverrides = QUICore.db.profile.keybindOverrides or {}
-                    if shouldRemove then
-                        QUICore.db.profile.keybindOverrides[spellID] = nil
-                    else
-                        -- Store the text (even if empty string - this allows new entries to show in list)
-                        QUICore.db.profile.keybindOverrides[spellID] = keybindText
-                    end
-                    saved = true
-                    if _G.QUI_RefreshKeybinds then
-                        _G.QUI_RefreshKeybinds()
-                    end
+
+                if QUI and QUI.Keybinds and QUI.Keybinds.SetOverride then
+                    QUI.Keybinds.SetOverride(spellID, keybindText)
+                    return true
                 end
-                return saved
+
+                -- Direct DB access fallback
+                QUICore.db.profile.keybindOverrides = QUICore.db.profile.keybindOverrides or {}
+                if keybindText == nil then
+                    QUICore.db.profile.keybindOverrides[spellID] = nil
+                else
+                    QUICore.db.profile.keybindOverrides[spellID] = keybindText
+                end
+                RefreshAllKeybindDisplays()
+                return true
             end
 
             -- Entry list frame (will be created below)
@@ -249,15 +278,10 @@ local function BuildKeybindsTab(tabContent)
             -- Function to refresh override list
             local function RefreshOverrideList()
                 if not entryListFrame then return end
-                
-                -- Clear existing children properly
+
+                -- Hide all existing frames
                 for i, frame in ipairs(entryFrames) do
-                    if frame and frame:IsShown() then
-                        frame:Hide()
-                    end
-                    if frame then
-                        frame:SetParent(nil)
-                    end
+                    if frame then frame:Hide() end
                 end
                 wipe(entryFrames)
 
@@ -285,8 +309,8 @@ local function BuildKeybindsTab(tabContent)
                     local entryFrame = CreateFrame("Frame", nil, entryListFrame)
                     entryFrame:SetSize(400, 28)
                     entryFrame:SetPoint("TOPLEFT", 0, listY)
-                    entryFrame:Show() -- Ensure frame is visible
-                    table.insert(entryFrames, entryFrame) -- Track for cleanup
+                    entryFrame:Show()
+                    entryFrames[i] = entryFrame
 
                     -- Icon
                     local iconTex = entryFrame:CreateTexture(nil, "ARTWORK")
@@ -362,31 +386,23 @@ local function BuildKeybindsTab(tabContent)
                         keybindInputBg:SetBackdropBorderColor(0.25, 0.25, 0.25, 0.6)
                     end)
 
-                    -- Save button for this entry
-                    local saveBtn = GUI:CreateButton(entryFrame, "Save", 50, 22, function()
+                    -- Save button for this entry (forward-declared for OnEnterPressed)
+                    local saveBtn
+                    saveBtn = GUI:CreateButton(entryFrame, "Save", 50, 22, function()
                         local newKeybindText = keybindInput:GetText() or ""
                         local saved = false
                         if entry.type == "spell" then
                             saved = SaveOverride(entry.id, newKeybindText)
                         else -- item
-                            if _G.QUI_SetKeybindOverrideForItem then
-                                _G.QUI_SetKeybindOverrideForItem(entry.id, newKeybindText)
-                                saved = true
-                            elseif QUI and QUI.Keybinds and QUI.Keybinds.SetOverrideForItem then
+                            if QUI and QUI.Keybinds and QUI.Keybinds.SetOverrideForItem then
                                 QUI.Keybinds.SetOverrideForItem(entry.id, newKeybindText)
                                 saved = true
                             else
                                 -- Direct DB access fallback
                                 QUICore.db.profile.keybindOverrides = QUICore.db.profile.keybindOverrides or {}
-                                if newKeybindText == "" or not newKeybindText then
-                                    QUICore.db.profile.keybindOverrides[-entry.id] = nil
-                                else
-                                    QUICore.db.profile.keybindOverrides[-entry.id] = newKeybindText
-                                end
+                                QUICore.db.profile.keybindOverrides[-entry.id] = newKeybindText
                                 saved = true
-                                if _G.QUI_RefreshCustomTrackerKeybinds then
-                                    _G.QUI_RefreshCustomTrackerKeybinds()
-                                end
+                                RefreshAllKeybindDisplays()
                             end
                         end
                         if saved then
@@ -396,6 +412,11 @@ local function BuildKeybindsTab(tabContent)
                         end
                     end)
                     saveBtn:SetPoint("LEFT", keybindInputBg, "RIGHT", 6, 0)
+
+                    -- Save on Enter key
+                    keybindInput:SetScript("OnEnterPressed", function(self)
+                        saveBtn:Click()
+                    end)
 
                     -- Remove button (X)
                     local removeBtn = CreateFrame("Button", nil, entryFrame, "BackdropTemplate")
@@ -425,10 +446,7 @@ local function BuildKeybindsTab(tabContent)
                         if entry.type == "spell" then
                             removed = SaveOverride(entry.id, nil)
                         else -- item
-                            if _G.QUI_SetKeybindOverrideForItem then
-                                _G.QUI_SetKeybindOverrideForItem(entry.id, nil)
-                                removed = true
-                            elseif QUI and QUI.Keybinds and QUI.Keybinds.SetOverrideForItem then
+                            if QUI and QUI.Keybinds and QUI.Keybinds.SetOverrideForItem then
                                 QUI.Keybinds.SetOverrideForItem(entry.id, nil)
                                 removed = true
                             else
@@ -436,9 +454,7 @@ local function BuildKeybindsTab(tabContent)
                                 QUICore.db.profile.keybindOverrides = QUICore.db.profile.keybindOverrides or {}
                                 QUICore.db.profile.keybindOverrides[-entry.id] = nil
                                 removed = true
-                                if _G.QUI_RefreshCustomTrackerKeybinds then
-                                    _G.QUI_RefreshCustomTrackerKeybinds()
-                                end
+                                RefreshAllKeybindDisplays()
                             end
                         end
                         if removed then
@@ -572,12 +588,12 @@ local function BuildKeybindsTab(tabContent)
 
             -- Create drop zone
             local dropSection = CreateDropZone(tabContent, RefreshOverrideList)
-            dropSection:SetPoint("TOPLEFT", overrideInfo, "BOTTOMLEFT", 0, -10)
+            dropSection:SetPoint("TOPLEFT", PAD, y)
             dropSection:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
-            y = y - 90
+            y = y - 78
 
             -- Overridden Keybind Spells section
-            local trackedHeader = GUI:CreateSectionHeader(tabContent, "Overridden Keybind Spells")
+            local trackedHeader = GUI:CreateSectionHeader(tabContent, "Overridden Keybind Texts For Spells")
             trackedHeader:SetPoint("TOPLEFT", dropSection, "BOTTOMLEFT", 0, -15)
 
             -- Entry list container
@@ -585,21 +601,15 @@ local function BuildKeybindsTab(tabContent)
             entryListFrame:SetPoint("TOPLEFT", trackedHeader, "BOTTOMLEFT", 0, -8)
             entryListFrame:SetSize(400, 20)
             
-            -- Listen for item info loading to refresh the list
-            local itemInfoListener = CreateFrame("Frame")
-            itemInfoListener:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-            itemInfoListener:SetScript("OnEvent", function(self, event, itemID)
-                if event == "GET_ITEM_INFO_RECEIVED" and itemID then
-                    -- Check if this item is in our overrides list
-                    local overrides = QUICore.db.profile.keybindOverrides
-                    if overrides and overrides[-itemID] then
-                        -- Refresh the list to update the item name/icon
-                        C_Timer.After(0.1, function()
-                            RefreshOverrideList()
-                        end)
-                    end
+            -- Update item info listener callback (frame is reused across tab builds)
+            itemInfoListenerCallback = function(itemID)
+                local overrides = QUICore.db.profile.keybindOverrides
+                if overrides and overrides[-itemID] then
+                    C_Timer.After(0.1, function()
+                        RefreshOverrideList()
+                    end)
                 end
-            end)
+            end
             
             RefreshOverrideList()
 

@@ -80,7 +80,7 @@ local function GetSharedOverrides()
 end
 
 -- Helper: get an override keybind, if any, for a given spell/baseSpell (shared across viewers)
-local function GetOverrideKeybind(viewerName, spellID, baseSpellID, spellName)
+local function GetOverrideKeybind(spellID, baseSpellID, spellName)
     local overrides = GetSharedOverrides()
     if not overrides then return nil end
 
@@ -924,7 +924,15 @@ local function ApplyKeybindToIcon(icon, viewerName)
     local baseSpellID = nil
 
     -- Step 1: explicit user override, if configured
-    local overrideKeybind = GetOverrideKeybind(viewerName, spellID, nil, spellName)
+    local overrideKeybind = nil
+    local cdmOverridesEnabled = true
+    local QUICore_ref = _G.QUI and _G.QUI.QUICore
+    if QUICore_ref and QUICore_ref.db and QUICore_ref.db.profile then
+        cdmOverridesEnabled = QUICore_ref.db.profile.keybindOverridesEnabledCDM ~= false
+    end
+    if cdmOverridesEnabled then
+        overrideKeybind = GetOverrideKeybind(spellID, nil, spellName)
+    end
     if overrideKeybind then
         keybind = overrideKeybind
     end
@@ -945,7 +953,9 @@ local function ApplyKeybindToIcon(icon, viewerName)
             if compareOk and isDifferent then
                 baseSpellID = baseFromInfo
                 -- Re-check for explicit override on base spell
-                overrideKeybind = GetOverrideKeybind(viewerName, spellID, baseSpellID, spellName)
+                if cdmOverridesEnabled then
+                    overrideKeybind = GetOverrideKeybind(spellID, baseSpellID, spellName)
+                end
                 if overrideKeybind then
                     keybind = overrideKeybind
                 else
@@ -965,7 +975,9 @@ local function ApplyKeybindToIcon(icon, viewerName)
             if compareOk and isDifferent then
                 baseSpellID = resultBase
                 -- Re-check override for this base spell
-                overrideKeybind = GetOverrideKeybind(viewerName, spellID, baseSpellID, spellName)
+                if cdmOverridesEnabled then
+                    overrideKeybind = GetOverrideKeybind(spellID, baseSpellID, spellName)
+                end
                 if overrideKeybind then
                     keybind = overrideKeybind
                 else
@@ -1043,8 +1055,7 @@ end
 -- Override management API ----------------------------------------------------
 
 -- Set or clear a keybind override for a spellID (shared across all viewers).
--- viewerName parameter is kept for API compatibility but ignored (overrides are shared).
-local function SetKeybindOverride(viewerName, spellID, keybindText)
+local function SetKeybindOverride(spellID, keybindText)
     if not spellID then return end
     
     -- Ensure spellID is a number (convert from string if needed)
@@ -1084,8 +1095,7 @@ local function SetKeybindOverride(viewerName, spellID, keybindText)
     end
 end
 
-local function ClearAllKeybindOverrides(viewerName)
-    -- viewerName kept for API compatibility but ignored (overrides are shared)
+local function ClearAllKeybindOverrides()
     local overrides = GetSharedOverrides()
     if not overrides then return end
 
@@ -2031,6 +2041,7 @@ QUI.Keybinds = {
     GetKeybindForSpellName = GetKeybindForSpellName,
     GetKeybindForItem = GetKeybindForItem,
     GetKeybindForItemName = GetKeybindForItemName,
+    GetOverrides = GetSharedOverrides,
     RebuildCache = RebuildCache,
     DebugPrintCache = DebugPrintCache,
     SetOverride = SetKeybindOverride,
@@ -2044,5 +2055,4 @@ QUI.Keybinds = {
 -- Global refresh function for config panel
 _G.QUI_RefreshKeybinds = UpdateAllKeybinds
 _G.QUI_RefreshRotationHelper = RefreshRotationHelper
-_G.QUI_SetKeybindOverrideForItem = SetKeybindOverrideForItem
 
