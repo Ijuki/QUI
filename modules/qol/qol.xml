@@ -3,6 +3,8 @@
     <Script file="qol.lua"/>
     <Script file="quickdelete.lua"/>
     <Script file="quicksalvage.lua"/>
+    <Script file="petwarning.lua"/>
+    <Script file="consumablecheck.lua"/>
     <Script file="tooltips.lua"/>
     <Script file="combattimer.lua"/>
     <Script file="crosshair.lua"/>
