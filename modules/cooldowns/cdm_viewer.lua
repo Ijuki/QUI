@@ -103,6 +103,18 @@ local function IsIconFrame(child)
 end
 
 ---------------------------------------------------------------------------
+-- HELPER: Check if an icon has a valid spell texture (not an empty placeholder)
+---------------------------------------------------------------------------
+local function HasValidTexture(icon)
+    local tex = icon.Icon or icon.icon
+    if tex and tex.GetTexture then
+        local texID = tex:GetTexture()
+        return texID ~= nil and texID ~= 0 and texID ~= ""
+    end
+    return false
+end
+
+---------------------------------------------------------------------------
 -- HELPER: Get total icon capacity from row settings
 ---------------------------------------------------------------------------
 local function GetTotalIconCapacity(settings)
@@ -545,9 +557,14 @@ local function CollectIcons(viewer, trackerKey)
         local child = select(i, viewer:GetChildren())
         -- Skip custom CDM icons from child enumeration (we inject them separately)
         if child and child ~= viewer.Selection and not child._isCustomCDMIcon and IsIconFrame(child) then
-            -- Collect shown icons OR icons we previously hid
-            if child:IsShown() or child._ncdmHidden then
+            -- Collect shown icons OR icons we previously hid, but only if they
+            -- have an actual spell texture (skip empty Blizzard placeholder frames)
+            if (child:IsShown() or child._ncdmHidden) and HasValidTexture(child) then
                 table.insert(icons, child)
+            else
+                -- Clear our hidden flag on textureless frames so they aren't
+                -- perpetually re-collected; Blizzard will Show() them when ready
+                child._ncdmHidden = nil
             end
         end
     end
@@ -1069,28 +1086,30 @@ local function HookViewer(viewerName, trackerKey)
 
         -- Grace period: skip early-exit for 2 seconds after zone change to catch late Blizzard scrambles
         local inGracePeriod = viewer.__ncdmGraceUntil and GetTime() < viewer.__ncdmGraceUntil
-        if not inGracePeriod then
-            -- Normal optimization: early-exit if nothing changed
-            if currentBlizzardCount == lastBlizzardLayoutCount and currentVersion == lastSettingsVersion then
-                return
-            end
-        end
         -- Clear expired grace period
         if viewer.__ncdmGraceUntil and GetTime() >= viewer.__ncdmGraceUntil then
             viewer.__ncdmGraceUntil = nil
         end
-        lastBlizzardLayoutCount = currentBlizzardCount
 
-        -- Collect visible Blizzard icons (only when something changed)
+        -- Collect visible Blizzard icons (lightweight: ~10-20 children)
         -- Excludes custom CDM icons to avoid phantom count changes
+        -- Also excludes empty placeholder frames without a spell texture
         local icons = {}
         for i = 1, viewer:GetNumChildren() do
             local child = select(i, viewer:GetChildren())
-            if child and child ~= viewer.Selection and not child._isCustomCDMIcon and IsIconFrame(child) and child:IsShown() then
+            if child and child ~= viewer.Selection and not child._isCustomCDMIcon and IsIconFrame(child) and child:IsShown() and HasValidTexture(child) then
                 table.insert(icons, child)
             end
         end
         local count = #icons
+
+        -- Early-exit if nothing changed (skip during grace period to catch late Blizzard scrambles)
+        if not inGracePeriod then
+            if currentBlizzardCount == lastBlizzardLayoutCount and currentVersion == lastSettingsVersion and count == lastIconCount then
+                return
+            end
+        end
+        lastBlizzardLayoutCount = currentBlizzardCount
 
         local needsLayout = false
 
