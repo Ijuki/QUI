@@ -4,4 +4,5 @@
     <Script file="quiprofile.lua" />
     <Script file="quiprofile_darkmode.lua" />
     <Script file="platynator.lua" />
+    <Script file="plater.lua" />
 </Ui>

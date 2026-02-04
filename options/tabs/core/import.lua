@@ -369,7 +369,35 @@ local function BuildQuaziiStringsTab(tabContent)
     platTip:SetPoint("LEFT", platBtn, "RIGHT", 10, 0)
     y = y - 30
 
-    tabContent:SetHeight(math.abs(y) + 20)
+    -- =====================================================
+    -- PLATER STRING
+    -- =====================================================
+    local platerHeader = GUI:CreateSectionHeader(tabContent, "Plater String")
+    platerHeader:SetPoint("TOPLEFT", PAD, y)
+    y = y - platerHeader.gap
+
+    local platerString = ""
+    if _G.QUI and _G.QUI.imports and _G.QUI.imports.Plater then
+        platerString = _G.QUI.imports.Plater.data or ""
+    end
+
+    local platerContainer = CreateScrollableTextBox(tabContent, BOX_HEIGHT, platerString)
+    platerContainer:SetPoint("TOPLEFT", PAD, y)
+    platerContainer:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+    table.insert(allTextBoxes, platerContainer.editBox)
+
+    y = y - BOX_HEIGHT - 8
+
+    local platerBtn = GUI:CreateButton(tabContent, "SELECT ALL", 120, 24, function()
+        selectOnly(platerContainer.editBox)
+    end)
+    platerBtn:SetPoint("TOPLEFT", PAD, y)
+
+    local platerTip = GUI:CreateLabel(tabContent, "then press Ctrl+C to copy", 11, C.textMuted)
+    platerTip:SetPoint("LEFT", platerBtn, "RIGHT", 10, 0)
+    y = y - 30
+
+    tabContent:SetHeight(math.abs(y) + 30)
 end
 
 --------------------------------------------------------------------------------
