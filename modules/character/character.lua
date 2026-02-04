@@ -108,6 +108,7 @@ local defaultSettings = {
     showEnchants = true,
     showGems = true,
     showDurability = false,
+    showDurabilityText = true,
     inspectEnabled = true,
     showModelBackground = true,
     secondaryStatFormat = "both",
@@ -596,6 +597,13 @@ local function CreateSlotOverlay(slotFrame, slotInfo, unit)
     duraBg:SetAllPoints()
     duraBg:SetColorTexture(0, 0, 0, 0.5)
 
+    -- Durability percent text
+    overlay.durabilityText = overlay:CreateFontString(nil, "OVERLAY")
+    overlay.durabilityText:SetFont(GetGlobalFont(), 11, "OUTLINE")
+    overlay.durabilityText:SetPoint("BOTTOM", overlay, "BOTTOM", 0, -2)
+    overlay.durabilityText:SetTextColor(1, 1, 1, 1)
+    overlay.durabilityText:Hide()
+
     overlay.slotInfo = slotInfo
     return overlay
 end
@@ -790,11 +798,19 @@ local function UpdateSlotOverlay(overlay, unit)
                 overlay.durabilityBar:SetStatusBarColor(0.8, 0.2, 0.2, 1)
             end
             overlay.durabilityBar:Show()
+            if settings.showDurabilityText and overlay.durabilityText then
+                overlay.durabilityText:SetText(string.format("%d%%", math.floor(pct + 0.5)))
+                overlay.durabilityText:Show()
+            elseif overlay.durabilityText then
+                overlay.durabilityText:Hide()
+            end
         else
             overlay.durabilityBar:Hide()
+            if overlay.durabilityText then overlay.durabilityText:Hide() end
         end
     else
         overlay.durabilityBar:Hide()
+        if overlay.durabilityText then overlay.durabilityText:Hide() end
     end
 end
 
@@ -2997,6 +3013,12 @@ local function HookCharacterFrame()
         local showDura = GUI:CreateFormCheckbox(scrollChild, "Show Durability Bars", "showDurability", charDB, RefreshAll)
         showDura:SetPoint("TOPLEFT", PAD, y)
         showDura:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
+        y = y - FORM_ROW
+
+        if charDB.showDurabilityText == nil then charDB.showDurabilityText = true end
+        local showDuraText = GUI:CreateFormCheckbox(scrollChild, "Show Durability Percent", "showDurabilityText", charDB, RefreshAll)
+        showDuraText:SetPoint("TOPLEFT", PAD, y)
+        showDuraText:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
 
         y = y - 10
