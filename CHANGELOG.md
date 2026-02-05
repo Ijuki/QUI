@@ -5,6 +5,11 @@ All notable changes to QUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
+
+## v2.22 - 2026-02-05
+
+### Added
+- search results now will also capture entire sub-tabs or sections
 ## v2.21 - 2026-02-05
 
 ### Added
