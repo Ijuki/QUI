@@ -3810,6 +3810,14 @@ function QUICore:HideCurrentSelectionArrows()
         if self.minimapOverlay then
             self:HideNudgeButtons(self.minimapOverlay)
         end
+    elseif sel.selectedType == "castbar" then
+        -- Castbars store their overlay on the castbar frame itself
+        if ns.QUI_Castbar and ns.QUI_Castbar.castbars then
+            local castbar = ns.QUI_Castbar.castbars[sel.selectedKey]
+            if castbar and castbar.editOverlay then
+                self:HideNudgeButtons(castbar.editOverlay)
+            end
+        end
     end
 end
 
@@ -3846,6 +3854,16 @@ function QUICore:ShowSelectionArrows(elementType, elementKey)
                     math.floor(settings.position[4] or 0)))
             end
         end
+    elseif elementType == "castbar" then
+        if ns.QUI_Castbar and ns.QUI_Castbar.castbars then
+            local castbar = ns.QUI_Castbar.castbars[elementKey]
+            if castbar and castbar.editOverlay then
+                -- Only show nudge buttons if not anchored
+                if not castbar.editOverlay._isAnchored then
+                    self:ShowNudgeButtons(castbar.editOverlay)
+                end
+            end
+        end
     end
 end
 
@@ -3867,6 +3885,157 @@ function QUICore:HideNudgeButtons(overlay)
     if overlay.nudgeLeft then overlay.nudgeLeft:Hide() end
     if overlay.nudgeRight then overlay.nudgeRight:Hide() end
     if overlay.infoText then overlay.infoText:Hide() end
+end
+
+-- ============================================================================
+-- ARROW KEY NUDGING
+-- When an element is selected in Edit Mode, arrow keys nudge its position
+-- ============================================================================
+
+local EditModeKeyHandler = CreateFrame("Frame", "QUIEditModeKeyHandler", UIParent)
+EditModeKeyHandler:EnableKeyboard(false)
+EditModeKeyHandler:SetPropagateKeyboardInput(true)
+
+-- Nudge the currently selected element by deltaX, deltaY
+function QUICore:NudgeSelectedElement(deltaX, deltaY)
+    local sel = self.EditModeSelection
+    if not sel or not sel.selectedType or not sel.selectedKey then return false end
+
+    local shift = IsShiftKeyDown()
+    local step = shift and 10 or 1
+    local dx = deltaX * step
+    local dy = deltaY * step
+
+    if sel.selectedType == "unitframe" then
+        if ns.QUI_UnitFrames and ns.QUI_UnitFrames.frames then
+            local frame = ns.QUI_UnitFrames.frames[sel.selectedKey]
+            local settingsKey = sel.selectedKey
+            if settingsKey and settingsKey:match("^boss%d+$") then
+                settingsKey = "boss"
+            end
+            -- Unit frames database is stored at quiUnitFrames
+            local ufdb = self.db and self.db.profile and self.db.profile.quiUnitFrames
+            local settings = ufdb and ufdb[settingsKey]
+
+            -- Block nudging for anchored frames
+            local isAnchored = settings and settings.anchorTo and settings.anchorTo ~= "disabled"
+            if isAnchored and (settingsKey == "player" or settingsKey == "target") then
+                return false
+            end
+
+            if settings and frame then
+                settings.offsetX = (settings.offsetX or 0) + dx
+                settings.offsetY = (settings.offsetY or 0) + dy
+                frame:ClearAllPoints()
+                frame:SetPoint("CENTER", UIParent, "CENTER", settings.offsetX, settings.offsetY)
+                -- Update info text
+                if frame.editOverlay and frame.editOverlay.infoText then
+                    frame.editOverlay.infoText:SetText(string.format("%s  X:%d Y:%d",
+                        sel.selectedKey, settings.offsetX, settings.offsetY))
+                end
+                -- Notify options panel
+                if ns.QUI_UnitFrames and ns.QUI_UnitFrames.NotifyPositionChanged then
+                    ns.QUI_UnitFrames:NotifyPositionChanged(settingsKey, settings.offsetX, settings.offsetY)
+                end
+                return true
+            end
+        end
+    elseif sel.selectedType == "powerbar" then
+        local cfg = (sel.selectedKey == "primary") and self.db.profile.powerBar or self.db.profile.secondaryPowerBar
+        local bar = (sel.selectedKey == "primary") and self.powerBar or self.secondaryPowerBar
+        if cfg and bar then
+            cfg.offsetX = (cfg.offsetX or 0) + dx
+            cfg.offsetY = (cfg.offsetY or 0) + dy
+            cfg.autoAttach = false
+            cfg.useRawPixels = true
+            bar:ClearAllPoints()
+            bar:SetPoint("CENTER", UIParent, "CENTER", cfg.offsetX, cfg.offsetY)
+            -- Update info text
+            if bar.editOverlay and bar.editOverlay.infoText then
+                local label = (sel.selectedKey == "primary") and "Primary" or "Secondary"
+                bar.editOverlay.infoText:SetText(string.format("%s  X:%d Y:%d", label, cfg.offsetX, cfg.offsetY))
+            end
+            -- Notify options panel
+            self:NotifyPowerBarPositionChanged(sel.selectedKey, cfg.offsetX, cfg.offsetY)
+            return true
+        end
+    elseif sel.selectedType == "castbar" then
+        if ns.QUI_Castbar and ns.QUI_Castbar.castbars then
+            local castbar = ns.QUI_Castbar.castbars[sel.selectedKey]
+            -- Castbar settings are stored within unit frame settings at quiUnitFrames
+            local ufdb = self.db and self.db.profile and self.db.profile.quiUnitFrames
+            local settings = ufdb and ufdb[sel.selectedKey]
+            local castSettings = settings and settings.castbar
+            -- Only nudge if not anchored
+            if castSettings and castSettings.anchor == "none" and castbar then
+                castSettings.offsetX = (castSettings.offsetX or 0) + dx
+                castSettings.offsetY = (castSettings.offsetY or 0) + dy
+                castSettings.freeOffsetX = castSettings.offsetX
+                castSettings.freeOffsetY = castSettings.offsetY
+                castbar:ClearAllPoints()
+                castbar:SetPoint("CENTER", UIParent, "CENTER", castSettings.offsetX, castSettings.offsetY)
+                -- Update info text
+                if castbar.editOverlay and castbar.editOverlay.infoText then
+                    local displayName = sel.selectedKey == "player" and "Player" or
+                                        sel.selectedKey == "target" and "Target" or
+                                        sel.selectedKey == "focus" and "Focus" or "Castbar"
+                    castbar.editOverlay.infoText:SetText(string.format("%s Castbar  X:%d Y:%d",
+                        displayName, castSettings.offsetX, castSettings.offsetY))
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
+EditModeKeyHandler:SetScript("OnKeyDown", function(self, key)
+    if not QUICore.EditModeSelection or not QUICore.EditModeSelection.selectedType then
+        return
+    end
+
+    local handled = false
+    if key == "UP" then
+        handled = QUICore:NudgeSelectedElement(0, 1)
+    elseif key == "DOWN" then
+        handled = QUICore:NudgeSelectedElement(0, -1)
+    elseif key == "LEFT" then
+        handled = QUICore:NudgeSelectedElement(-1, 0)
+    elseif key == "RIGHT" then
+        handled = QUICore:NudgeSelectedElement(1, 0)
+    end
+
+    if handled then
+        self:SetPropagateKeyboardInput(false)
+    else
+        self:SetPropagateKeyboardInput(true)
+    end
+end)
+
+EditModeKeyHandler:SetScript("OnKeyUp", function(self, key)
+    self:SetPropagateKeyboardInput(true)
+end)
+
+-- Enable/disable keyboard handling based on selection
+function QUICore:UpdateEditModeKeyHandler()
+    if self.EditModeSelection and self.EditModeSelection.selectedType then
+        EditModeKeyHandler:EnableKeyboard(true)
+    else
+        EditModeKeyHandler:EnableKeyboard(false)
+    end
+end
+
+-- Hook into selection changes to enable/disable key handler
+local origSelectEditModeElement = QUICore.SelectEditModeElement
+function QUICore:SelectEditModeElement(elementType, elementKey)
+    origSelectEditModeElement(self, elementType, elementKey)
+    self:UpdateEditModeKeyHandler()
+end
+
+local origClearEditModeSelection = QUICore.ClearEditModeSelection
+function QUICore:ClearEditModeSelection()
+    origClearEditModeSelection(self)
+    self:UpdateEditModeKeyHandler()
 end
 
 -- ============================================================================

@@ -3424,6 +3424,11 @@ function QUI_UF:RefreshFrame(unitKey)
                         QUI_Castbar:RefreshBossCastbar(castbar, bossKey, castSettings, frame)
                     end
                 end
+
+                -- Restore edit overlay if in Edit Mode
+                if self.editModeActive then
+                    self:RestoreEditOverlayIfNeeded(bossKey)
+                end
             end
         end
         return
@@ -3804,6 +3809,18 @@ function QUI_UF:RefreshFrame(unitKey)
             self.castbars[unitKey] = QUI_Castbar:CreateCastbar(frame, unitKey, unitKey)
         end
     end
+
+    -- Restore edit overlay if in Edit Mode (QUI's own Edit Mode)
+    if self.editModeActive then
+        self:RestoreEditOverlayIfNeeded(unitKey)
+    end
+
+    -- Restore castbar edit overlay if in Blizzard's Edit Mode
+    if EditModeManagerFrame and EditModeManagerFrame:IsEditModeActive() then
+        if QUI_Castbar and QUI_Castbar.RestoreEditOverlaysIfNeeded then
+            QUI_Castbar:RestoreEditOverlaysIfNeeded(unitKey)
+        end
+    end
 end
 
 function QUI_UF:RefreshAll()
@@ -3860,6 +3877,9 @@ end
 local function CreateNudgeButton(parent, direction, deltaX, deltaY, unitKey)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(18, 18)
+    -- Use TOOLTIP strata so nudge buttons appear above all other frames
+    btn:SetFrameStrata("TOOLTIP")
+    btn:SetFrameLevel(100)
 
     -- Background - dark grey at 70% for visibility over any game content
     local bg = btn:CreateTexture(nil, "BACKGROUND")
@@ -4199,6 +4219,16 @@ function QUI_UF:EnableEditMode()
             elseif key == "DOWN" then deltaY = -1
             else return end  -- Ignore other keys
 
+            -- Use global selection system - nudge the SELECTED element, not this frame
+            local core = GetCore()
+            if core and core.EditModeSelection and core.EditModeSelection.selectedType then
+                -- Delegate to the global nudge function which handles all element types
+                -- Pass raw delta (1 or -1) - NudgeSelectedElement handles shift multiplier
+                core:NudgeSelectedElement(deltaX, deltaY)
+                return
+            end
+
+            -- Fallback: no selection, nudge this frame (legacy behavior)
             local settingsKey = self.unitKey
             if settingsKey and settingsKey:match("^boss%d+$") then
                 settingsKey = "boss"
@@ -4304,6 +4334,32 @@ function QUI_UF:ToggleEditMode()
     else
         self:EnableEditMode()
     end
+end
+
+-- Restore edit overlay for a specific unit frame (called after RefreshFrame during Edit Mode)
+function QUI_UF:RestoreEditOverlayIfNeeded(unitKey)
+    if not self.editModeActive then return end
+    if InCombatLockdown() then return end
+
+    local frame = self.frames[unitKey]
+    if not frame then return end
+
+    -- Check if overlay exists and is still valid (parent might have changed)
+    if frame.editOverlay and frame.editOverlay:GetParent() == frame then
+        -- Overlay is still valid, just ensure it's shown
+        frame.editOverlay:Show()
+        return
+    end
+
+    -- Need to recreate overlay - delegate to EnableEditMode logic for this frame
+    -- This is a simplified version that just shows the overlay
+    C_Timer.After(0.05, function()
+        if not self.editModeActive then return end
+        local f = self.frames[unitKey]
+        if f and f.editOverlay then
+            f.editOverlay:Show()
+        end
+    end)
 end
 
 ---------------------------------------------------------------------------

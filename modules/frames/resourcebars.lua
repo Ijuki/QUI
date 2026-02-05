@@ -517,6 +517,9 @@ end
 local function CreatePowerBarNudgeButton(parent, direction, deltaX, deltaY, barKey)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(18, 18)
+    -- Use TOOLTIP strata so nudge buttons appear above all other frames
+    btn:SetFrameStrata("TOOLTIP")
+    btn:SetFrameLevel(100)
 
     -- Background
     local bg = btn:CreateTexture(nil, "BACKGROUND")
@@ -747,6 +750,24 @@ function QUICore:EnablePowerBarEditMode()
                     QUICore:NotifyPowerBarPositionChanged(barKey, offsetX, offsetY)
                 end
             end)
+
+            -- Enable keyboard for arrow key nudging
+            bar:EnableKeyboard(true)
+            bar:SetScript("OnKeyDown", function(self, key)
+                if not PowerBarEditMode.active then return end
+
+                local deltaX, deltaY = 0, 0
+                if key == "LEFT" then deltaX = -1
+                elseif key == "RIGHT" then deltaX = 1
+                elseif key == "UP" then deltaY = 1
+                elseif key == "DOWN" then deltaY = -1
+                else return end  -- Ignore other keys
+
+                -- Use global selection system - nudge the SELECTED element, not this bar
+                if QUICore and QUICore.EditModeSelection and QUICore.EditModeSelection.selectedType then
+                    QUICore:NudgeSelectedElement(deltaX, deltaY)
+                end
+            end)
         end
     end
 end
@@ -769,11 +790,13 @@ function QUICore:DisablePowerBarEditMode()
                 bar.editOverlay:Hide()
             end
 
-            -- Disable dragging and click handlers
+            -- Disable dragging, click handlers, and keyboard
             bar:RegisterForDrag()
+            bar:EnableKeyboard(false)
             bar:SetScript("OnMouseDown", nil)
             bar:SetScript("OnDragStart", nil)
             bar:SetScript("OnDragStop", nil)
+            bar:SetScript("OnKeyDown", nil)
             bar:SetScript("OnUpdate", nil)
         end
     end
