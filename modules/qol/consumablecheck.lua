@@ -796,7 +796,7 @@ local function HasMissingBuffs()
     if settings.consumableOilMH ~= false and not hasMainHandEnchant then return true end
     if settings.consumableOilOH ~= false and IsDualWielding() and not hasOffHandEnchant then return true end
     if settings.consumableHealthstone ~= false and HasWarlockInGroup() then
-        local hsCount = C_Item.GetItemCount(5512, false, true) + C_Item.GetItemCount(224464, false, true)
+        local hsCount = (C_Item.GetItemCount(5512, false, true) or 0) + (C_Item.GetItemCount(224464, false, true) or 0)
         if hsCount == 0 then return true end
     end
     return false
@@ -938,7 +938,7 @@ local function CheckExpiringBuffs()
         end
     end
     if settings.consumableOilOH ~= false and IsDualWielding() then
-        local _, _, _, _, hasOffHandEnchant, offHandExpiration = GetWeaponEnchantInfo()
+        local hasMainHandEnchant, _, _, _, hasOffHandEnchant, offHandExpiration = GetWeaponEnchantInfo()
         if hasOffHandEnchant and offHandExpiration then
             local remaining = offHandExpiration / 1000
             if remaining > 0 and remaining <= threshold then
@@ -1005,9 +1005,10 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     end
 end)
 
--- Combat lockdown: hide clickable buttons
+-- Combat lockdown: hide clickable buttons, restore after combat
 local combatFrame = CreateFrame("Frame")
 combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 combatFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_REGEN_DISABLED" then
         for _, button in pairs(ConsumablesFrame.buttons) do
@@ -1015,6 +1016,8 @@ combatFrame:SetScript("OnEvent", function(self, event)
                 button.click:Hide()
             end
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        UpdateConsumables()
     end
 end)
 

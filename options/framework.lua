@@ -3630,8 +3630,9 @@ function GUI:CreateMainFrame()
             local c = db.addonAccentColor or {0.204, 0.827, 0.6, 1}
             GUI:ApplyAccentColor(c[1], c[2], c[3])
         end
-        RefreshAllSkinning()
         GUI:RefreshAccentColor()
+        -- Defer skinning refresh to next frame to reduce lag spike
+        C_Timer.After(0, RefreshAllSkinning)
     end)
 
     classToggle:SetScript("OnEnter", function()
@@ -3648,6 +3649,8 @@ function GUI:CreateMainFrame()
         pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1)
     end)
 
+    local pickerWatcher = CreateFrame("Frame")
+    pickerWatcher:Hide()
     accentSwatch:SetScript("OnClick", function()
         local db = QUI.QUICore and QUI.QUICore.db and QUI.QUICore.db.profile and QUI.QUICore.db.profile.general
         if not db then return end
@@ -3655,15 +3658,17 @@ function GUI:CreateMainFrame()
         if db.skinUseClassColor then return end
         local cur = db.addonAccentColor or {0.204, 0.827, 0.6, 1}
         -- Schedule panel rebuild when ColorPickerFrame closes
-        local pickerWatcher = CreateFrame("Frame")
         pickerWatcher:SetScript("OnUpdate", function(self)
             if not ColorPickerFrame:IsShown() then
                 self:SetScript("OnUpdate", nil)
+                self:Hide()
                 -- Rebuild panel to apply new accent everywhere
                 GUI:RefreshAccentColor()
-                RefreshAllSkinning()
+                -- Defer skinning refresh to next frame to reduce lag spike
+                C_Timer.After(0, RefreshAllSkinning)
             end
         end)
+        pickerWatcher:Show()
         ColorPickerFrame:SetupColorPickerAndShow({
             r = cur[1], g = cur[2], b = cur[3], opacity = 1,
             hasOpacity = false,
@@ -4282,6 +4287,9 @@ function GUI:RefreshAccentColor()
     local savedTab = self.MainFrame.activeTab or 1
     local wasShown = self.MainFrame:IsShown()
 
+    -- Save current position so the window doesn't jump back to center
+    local point, _, relPoint, xOfs, yOfs = self.MainFrame:GetPoint()
+
     -- Tear down old frame
     self.MainFrame:Hide()
     self.MainFrame:SetParent(nil)
@@ -4295,6 +4303,12 @@ function GUI:RefreshAccentColor()
 
     -- Recreate
     self:InitializeOptions()
+
+    -- Restore position
+    if point and self.MainFrame then
+        self.MainFrame:ClearAllPoints()
+        self.MainFrame:SetPoint(point, UIParent, relPoint, xOfs, yOfs)
+    end
 
     -- Restore tab
     if savedTab and self.MainFrame then

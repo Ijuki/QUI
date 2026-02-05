@@ -9,25 +9,24 @@ After the recent drama involving code disputes, monetization concerns, and Quazi
 - Preserve the core vision and feel of QuaziiUI
 - Make it freely available to everyone (no Patreon, no paid installers – pure open-source)
 - Fix compatibility issues for current WoW patches (e.g., Midnight 12.0+)
-- Use public, community-approved libraries to avoid any past controversies (e.g., pixel-perfect scaling via MIT-licensed sources)
+- Use public, community-approved libraries to avoid any past controversies (rewrote scaling logic from scratch)
 - Keep the UI as a free resource for the community that Quazii once built it for
 
 For the base of this I cleaned up and re-organized the code base, removed the controversial PixelPerfect code snippets, in part likely copied from ElvUI, and merged some of the open feature branches from before Quazii's exit. The rest of the base is basically the state of **QuaziiUI v1.99b**.
 
-Since then I added a few features and fixes important to me, and I will continue doing that for at least until a while into Midnight.
+Since then I added a few features and fixes important to me, and I will continue doing that for at least until a while into Midnight. Feel free to raise issues or create pull requests, I will try to get to them as quickly as possible.
 
 ### Credits & Thanks
 
 - **Original Creator**: Quazii – for the vision, the clean design, the performance optimizations, and the countless hours of work that made QUI special.
 - **Original Co-Developers & Contributors**: All the people who helped shape QUI behind the scenes (you know who you are, let me know if you want to be mentioned). Your code, ideas, and testing live on here.
-- **Community Libraries**
 - **Special Thanks**: To everyone who reached out after the fallout, shared ideas, or simply kept using the UI. This repo exists because of you.
 
 ### Features (Inherited + Improvements)
 
 - Clean, modern UI layout
 - Strong performance focus (Mythic+, Raiding)
-- Pixel-perfect scaling with widescreen / ultrawide / 4K support
+- Pixel-perfect scaling
 - Customizable bars, frames, cooldowns, etc.
 - Ongoing fixes for Midnight patch compatibility
 

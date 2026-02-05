@@ -22,6 +22,7 @@ TotemBar.hooked = false
 TotemBar.ticker = nil
 
 local QUICore = ns.Addon
+local Helpers = ns.Helpers
 local BASE_CROP = 0.08
 
 ---------------------------------------------------------------------------
@@ -33,7 +34,6 @@ local GetDB = Helpers.CreateDBGetter("totemBar")
 ---------------------------------------------------------------------------
 -- FONT HELPERS (uses shared helpers)
 ---------------------------------------------------------------------------
-local Helpers = ns.Helpers
 local GetGeneralFont = Helpers.GetGeneralFont
 local GetGeneralFontOutline = Helpers.GetGeneralFontOutline
 

@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create addon zip
+        run: |
+          mkdir -p build/QUI
+
+          rsync -av --progress . build/QUI/ \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='build' \
+
+          # re-add specific md files we want in the release
+          cp README.md build/QUI/ 2>/dev/null || true
+          cp CHANGELOG.md build/QUI/ 2>/dev/null || true
+          cp LICENSE build/QUI/ 2>/dev/null || true
+
+          # create the zip from inside build/ so the path is QUI/...
+          cd build
+          zip -r ../QUI-${{ steps.version.outputs.version }}.zip QUI
+
+      - name: Extract changelog for release
+        id: changelog
+        run: |
+          # Extract the section for this version from CHANGELOG.md
+          # Looks for ## [vX.Y.Z] or ## vX.Y.Z and captures until next ## or EOF
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk -v ver="$VERSION" '
+              /^## / {
+                if (found) exit
+                if ($0 ~ ver) { found=1; next }
+              }
+              found { print }
+            ' CHANGELOG.md)
+
+            if [ -z "$NOTES" ]; then
+              NOTES="Release $VERSION"
+            fi
+          else
+            NOTES="Release $VERSION"
+          fi
+
+          echo "$NOTES" > release_notes.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: QUI-${{ steps.version.outputs.version }}.zip
+          body_path: release_notes.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

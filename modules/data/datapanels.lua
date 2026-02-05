@@ -71,15 +71,16 @@ function Datapanels:CreatePanel(panelID, config)
 
     panel.borderLeft:SetPoint("TOPRIGHT", panel, "TOPLEFT", 0, 0)
     panel.borderLeft:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 0, 0)
-    
+
     panel.borderRight:SetPoint("TOPLEFT", panel, "TOPRIGHT", 0, 0)
     panel.borderRight:SetPoint("BOTTOMLEFT", panel, "BOTTOMRIGHT", 0, 0)
-    
-    panel.borderTop:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 0, 0)
-    panel.borderTop:SetPoint("BOTTOMRIGHT", panel, "TOPRIGHT", 0, 0)
-    
-    panel.borderBottom:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 0, 0)
-    panel.borderBottom:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+
+    -- Extend top/bottom borders to cover corners
+    panel.borderTop:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", -borderSize, 0)
+    panel.borderTop:SetPoint("BOTTOMRIGHT", panel, "TOPRIGHT", borderSize, 0)
+
+    panel.borderBottom:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", -borderSize, 0)
+    panel.borderBottom:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", borderSize, 0)
     
     -- Store config
     panel.panelID = panelID
@@ -238,6 +239,17 @@ function Datapanels:UpdateSlots(panel)
             if point then
                 panel.config.position = {point, relPoint, x, y}
             end
+
+            -- Persist to saved variables
+            local db = QUICore.db.profile.quiDatatexts
+            if db and db.panels then
+                for i, panelConfig in ipairs(db.panels) do
+                    if panelConfig.id == panel.panelID then
+                        db.panels[i].position = panel.config.position
+                        break
+                    end
+                end
+            end
         end)
         
         -- Attach datatext if configured
@@ -280,6 +292,14 @@ function Datapanels:UpdatePanel(panelID)
     panel.borderRight:SetColorTexture(unpack(borderColor))
     panel.borderTop:SetColorTexture(unpack(borderColor))
     panel.borderBottom:SetColorTexture(unpack(borderColor))
+
+    -- Re-anchor top/bottom borders to cover corners with current borderSize
+    panel.borderTop:ClearAllPoints()
+    panel.borderTop:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", -borderSize, 0)
+    panel.borderTop:SetPoint("BOTTOMRIGHT", panel, "TOPRIGHT", borderSize, 0)
+    panel.borderBottom:ClearAllPoints()
+    panel.borderBottom:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", -borderSize, 0)
+    panel.borderBottom:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", borderSize, 0)
 
     -- Hide borders when borderSize is 0 (WoW enforces 1px minimum on textures)
     local showBorder = borderSize > 0
