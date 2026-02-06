@@ -70,7 +70,7 @@ local function BuildCharacterPaneTab(tabContent)
     inspectHeader:SetPoint("TOPLEFT", PADDING, y)
     y = y - inspectHeader.gap
 
-    local inspectDesc = GUI:CreateLabel(tabContent, "Apply the same overlays and stats panel to the Inspect frame when inspecting other players.", 11, C.textMuted)
+    local inspectDesc = GUI:CreateLabel(tabContent, "Apply overlays to the inspect frame when inspecting other players.", 11, C.textMuted)
     inspectDesc:SetPoint("TOPLEFT", PADDING, y)
     inspectDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
     inspectDesc:SetJustifyH("LEFT")
@@ -80,12 +80,108 @@ local function BuildCharacterPaneTab(tabContent)
 
     if char.inspectEnabled == nil then char.inspectEnabled = true end
 
+    -- Initialize lite mode defaults
+    if char.inspectLiteMode == nil then char.inspectLiteMode = false end
+    if char.inspectLiteShowOverall == nil then char.inspectLiteShowOverall = true end
+    if char.inspectLiteShowPerSlot == nil then char.inspectLiteShowPerSlot = true end
+    if char.inspectLiteFontSize == nil then char.inspectLiteFontSize = 15 end
+    if char.inspectLiteOverallFontSize == nil then char.inspectLiteOverallFontSize = 11 end
+    if char.inspectLiteOverallOffsetX == nil then char.inspectLiteOverallOffsetX = 0 end
+    if char.inspectLiteOverallOffsetY == nil then char.inspectLiteOverallOffsetY = -8 end
+
+    -- Store widget refs for lite mode (enabled when inspect overlays OFF)
+    local liteModeWidgets = {}
+
+    -- Refresh callback for lite mode settings
+    local function RefreshInspectLite()
+        local shared = ns.QUI.CharacterShared
+        if shared and shared.ScheduleUpdate then
+            shared.ScheduleUpdate()
+        end
+    end
+
+    -- Helper to update enable states based on inspect overlays toggle
+    -- Only disables widgets visually - does NOT modify saved settings
+    local function UpdateLiteModeWidgetStates()
+        local overlaysOn = char.inspectEnabled
+        -- Lite mode widgets: enabled when overlays OFF, greyed out when overlays ON
+        for _, widget in pairs(liteModeWidgets) do
+            if widget and widget.SetEnabled then
+                widget:SetEnabled(not overlaysOn)
+            end
+        end
+    end
+
     local inspectEnabled = GUI:CreateFormCheckbox(tabContent, "Enable Inspect Overlays", "inspectEnabled", char, function()
-        print("|cFF56D1FFQUI:|r Inspect overlay change requires /reload to take effect.")
+        UpdateLiteModeWidgetStates()
+        GUI:ShowConfirmation({
+            title = "Reload UI?",
+            message = "Inspect overlay changes require a reload to take effect.",
+            acceptText = "Reload",
+            cancelText = "Later",
+            onAccept = function() QUI:SafeReload() end,
+        })
     end)
     inspectEnabled:SetPoint("TOPLEFT", PADDING, y)
     inspectEnabled:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+--     y = y - FORM_ROW
+
+    local inspectNote = GUI:CreateLabel(tabContent, "Requires /reload to take effect.", 9, C.textMuted)
+    inspectNote:SetPoint("TOPLEFT", 250, y - 9)
+    y = y - 38
+
+    local inspectLiteDesc = GUI:CreateLabel(tabContent, "Show iLvL numbers on the Blizzard inspect frame (when overlays are disabled).", 11, C.textMuted)
+    inspectLiteDesc:SetPoint("TOPLEFT", PADDING, y)
+    inspectLiteDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    inspectLiteDesc:SetJustifyH("LEFT")
+    inspectLiteDesc:SetWordWrap(true)
+    inspectLiteDesc:SetHeight(20)
+    y = y - 28
+
+    -- Show Overall Average iLvL
+    local liteOverall = GUI:CreateFormCheckbox(tabContent, "Show Overall Average iLvl", "inspectLiteShowOverall", char, RefreshInspectLite)
+    liteOverall:SetPoint("TOPLEFT", PADDING, y)
+    liteOverall:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.showOverall = liteOverall
     y = y - FORM_ROW
+
+    -- Overall iLvL Font Size
+    local overallFontSize = GUI:CreateFormSlider(tabContent, "Overall iLvl Font Size", 8, 24, 1, "inspectLiteOverallFontSize", char, RefreshInspectLite)
+    overallFontSize:SetPoint("TOPLEFT", PADDING, y)
+    overallFontSize:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.overallFontSize = overallFontSize
+    y = y - FORM_ROW
+
+    -- Overall iLvL X Offset
+    local overallOffsetX = GUI:CreateFormSlider(tabContent, "Overall iLvl X Offset", -100, 100, 1, "inspectLiteOverallOffsetX", char, RefreshInspectLite)
+    overallOffsetX:SetPoint("TOPLEFT", PADDING, y)
+    overallOffsetX:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.overallOffsetX = overallOffsetX
+    y = y - FORM_ROW
+
+    -- Overall iLvL Y Offset
+    local overallOffsetY = GUI:CreateFormSlider(tabContent, "Overall iLvl Y Offset", -100, 100, 1, "inspectLiteOverallOffsetY", char, RefreshInspectLite)
+    overallOffsetY:SetPoint("TOPLEFT", PADDING, y)
+    overallOffsetY:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.overallOffsetY = overallOffsetY
+    y = y - FORM_ROW
+
+    -- Show Per-Slot iLvL
+    local litePerSlot = GUI:CreateFormCheckbox(tabContent, "Show Per-Slot iLvl", "inspectLiteShowPerSlot", char, RefreshInspectLite)
+    litePerSlot:SetPoint("TOPLEFT", PADDING, y)
+    litePerSlot:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.showPerSlot = litePerSlot
+    y = y - FORM_ROW
+
+    -- Per-Slot Font Size
+    local liteFontSize = GUI:CreateFormSlider(tabContent, "Per-Slot Font Size", 8, 24, 1, "inspectLiteFontSize", char, RefreshInspectLite)
+    liteFontSize:SetPoint("TOPLEFT", PADDING, y)
+    liteFontSize:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    liteModeWidgets.perSlotFontSize = liteFontSize
+    y = y - FORM_ROW
+
+    -- Set initial enable/disable states
+    UpdateLiteModeWidgetStates()
 
     y = y - 10
 

@@ -1298,6 +1298,7 @@ local defaults = {
             lockedToUtility   = false,  -- Auto-resize width when Utility CDM changes
             snapGap           = 5,      -- Gap when snapped to CDM
             orientation       = "HORIZONTAL",  -- Bar orientation
+            visibility        = "always",  -- "always", "combat", "hostile"
         },
         castBar = {
             enabled       = true,
@@ -1374,6 +1375,7 @@ local defaults = {
             lockedToPrimary   = true,   -- Position above + match Primary bar width
             snapGap       = 5,        -- Gap when snapped
             orientation   = "AUTO",   -- Bar orientation
+            visibility    = "always",  -- "always", "combat", "hostile"
             showFragmentedPowerBarText = false,  -- Show text on fragmented power bars
         },
         -- Power Colors (global, used by both Primary and Secondary power bars)
@@ -1620,6 +1622,7 @@ local defaults = {
                 usabilityColor = {0.4, 0.4, 0.4, 1},  -- Fallback color if not desaturating
                 manaColor = {0.5, 0.5, 1.0, 1}, -- Out of mana color (blue tint)
                 fastUsabilityUpdates = false, -- 5x faster range/usability checks (50ms vs 250ms)
+                showTooltips = true,        -- Show tooltips when hovering action buttons
             },
             -- Mouseover fade settings
             fade = {

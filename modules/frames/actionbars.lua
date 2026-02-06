@@ -938,6 +938,15 @@ local function ApplyBarScale()
     -- No-op: Users should scale action bars via Edit Mode
 end
 
+-- Drag preview: show hidden empty slots at low alpha while cursor holds a placeable action
+local DRAG_PREVIEW_ALPHA = 0.3
+
+local function CursorHasPlaceableAction()
+    local infoType = GetCursorInfo()
+    return infoType == "spell" or infoType == "item" or infoType == "macro"
+        or infoType == "petaction" or infoType == "mount" or infoType == "flyout"
+end
+
 -- Update empty slot visibility for a single button
 local function UpdateEmptySlotVisibility(button, settings)
     if not settings then return end
@@ -963,7 +972,12 @@ local function UpdateEmptySlotVisibility(button, settings)
             button:SetAlpha(targetAlpha)
             button._quiHiddenEmpty = nil
         else
-            button:SetAlpha(0)
+            -- Show at preview alpha while dragging a placeable action
+            if ActionBars.dragPreviewActive then
+                button:SetAlpha(DRAG_PREVIEW_ALPHA * targetAlpha)
+            else
+                button:SetAlpha(0)
+            end
             button._quiHiddenEmpty = true
         end
     end
@@ -1263,7 +1277,7 @@ local function SetBarAlpha(barKey, alpha)
     for _, button in ipairs(buttons) do
         -- Respect hide empty slots setting - keep empty buttons hidden
         if hideEmptyEnabled and button._quiHiddenEmpty then
-            button:SetAlpha(0)
+            button:SetAlpha(ActionBars.dragPreviewActive and (DRAG_PREVIEW_ALPHA * alpha) or 0)
         else
             button:SetAlpha(alpha)
         end
@@ -1812,6 +1826,19 @@ function ActionBars:Initialize()
     -- One-time migration for lock setting (preserves user setting after CVar sync fix)
     MigrateLockSetting()
 
+    -- Hook tooltip suppression for action buttons
+    hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
+        local global = GetGlobalSettings()
+        if not global or global.showTooltips ~= false then return end
+        local name = parent and parent.GetName and parent:GetName()
+        if name and (name:match("^ActionButton") or name:match("^MultiBar") or name:match("^PetActionButton")
+            or name:match("^StanceButton") or name:match("^OverrideActionBar") or name:match("^ExtraActionButton")) then
+            tooltip:Hide()
+            tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+            tooltip:ClearLines()
+        end
+    end)
+
     -- Initial skin pass
     SkinAllBars()
 
@@ -1877,6 +1904,7 @@ eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 eventFrame:RegisterEvent("UPDATE_BINDINGS")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("CURSOR_CHANGED")
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -1886,7 +1914,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end)
 
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
-        -- Re-apply text styling when actions change
+        -- Re-apply text styling and empty slot visibility when actions change
         C_Timer.After(0.1, function()
             for barKey, _ in pairs(BUTTON_PATTERNS) do
                 local effectiveSettings = GetEffectiveSettings(barKey)
@@ -1894,10 +1922,34 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                     local buttons = GetBarButtons(barKey)
                     for _, button in ipairs(buttons) do
                         UpdateButtonText(button, effectiveSettings)
+                        UpdateEmptySlotVisibility(button, effectiveSettings)
                     end
                 end
             end
         end)
+
+    elseif event == "CURSOR_CHANGED" then
+        -- Show/hide drag preview on hidden empty slots
+        local settings = GetGlobalSettings()
+        if settings and settings.hideEmptySlots then
+            local shouldPreview = CursorHasPlaceableAction()
+            if shouldPreview ~= (ActionBars.dragPreviewActive or false) then
+                ActionBars.dragPreviewActive = shouldPreview or nil
+                for barKey, _ in pairs(BUTTON_PATTERNS) do
+                    local effectiveSettings = GetEffectiveSettings(barKey)
+                    if effectiveSettings then
+                        local buttons = GetBarButtons(barKey)
+                        for _, button in ipairs(buttons) do
+                            if button._quiHiddenEmpty then
+                                local fadeState = ActionBars.fadeState and ActionBars.fadeState[barKey]
+                                local targetAlpha = fadeState and fadeState.currentAlpha or 1
+                                button:SetAlpha(shouldPreview and (DRAG_PREVIEW_ALPHA * targetAlpha) or 0)
+                            end
+                        end
+                    end
+                end
+            end
+        end
 
     elseif event == "UPDATE_BINDINGS" then
         -- Re-apply keybind styling when bindings change

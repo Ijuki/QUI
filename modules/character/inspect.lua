@@ -22,6 +22,10 @@ local currentInspectTab = 1  -- 1=Character, 2=PvP, 3=Guild
 local inspectSettingsPanel = nil
 local currentInspectGUID = nil  -- Tracks inspected unit's GUID for validation
 
+-- Lite mode state
+local liteOverlays = {}           -- FontStrings for per-slot ilvl
+local liteOverallDisplay = nil    -- Overall ilvl frame
+
 ---------------------------------------------------------------------------
 -- Import shared functions from qui_character.lua
 -- These will be available after qui_character.lua loads
@@ -51,6 +55,14 @@ local function GetSettings()
         inspectEnchantTextColor = {0.204, 0.827, 0.6},
         inspectNoEnchantTextColor = {0.5, 0.5, 0.5},
         inspectUpgradeTrackColor = {0.98, 0.60, 0.35, 1},
+        -- Lite mode defaults
+        inspectLiteMode = false,
+        inspectLiteShowPerSlot = true,
+        inspectLiteShowOverall = true,
+        inspectLiteFontSize = 15,
+        inspectLiteOverallFontSize = 11,
+        inspectLiteOverallOffsetX = 0,
+        inspectLiteOverallOffsetY = -8,
     }
 end
 
@@ -65,6 +77,163 @@ local function GetColors()
         text = { 0.953, 0.957, 0.965, 1 },
         border = { 0.2, 0.25, 0.3, 1 },
     }
+end
+
+---------------------------------------------------------------------------
+-- Slots counted for average ilvl calculation
+---------------------------------------------------------------------------
+local COUNTED_SLOTS = {
+    [INVSLOT_HEAD] = true,
+    [INVSLOT_NECK] = true,
+    [INVSLOT_SHOULDER] = true,
+    [INVSLOT_BACK] = true,
+    [INVSLOT_CHEST] = true,
+    [INVSLOT_WAIST] = true,
+    [INVSLOT_LEGS] = true,
+    [INVSLOT_FEET] = true,
+    [INVSLOT_WRIST] = true,
+    [INVSLOT_HAND] = true,
+    [INVSLOT_FINGER1] = true,
+    [INVSLOT_FINGER2] = true,
+    [INVSLOT_TRINKET1] = true,
+    [INVSLOT_TRINKET2] = true,
+    [INVSLOT_MAINHAND] = true,
+    [INVSLOT_OFFHAND] = true,
+}
+
+---------------------------------------------------------------------------
+-- Get slot item level using C_TooltipInfo (like LuheyUI)
+-- Works reliably for inspected units
+---------------------------------------------------------------------------
+local function GetSlotItemLevel(unit, slotId)
+    if not unit or not slotId then return nil end
+
+    -- Use C_TooltipInfo for reliable ilvl extraction (works for inspect)
+    if C_TooltipInfo and C_TooltipInfo.GetInventoryItem then
+        local info = C_TooltipInfo.GetInventoryItem(unit, slotId)
+        if info and info.lines then
+            for _, line in ipairs(info.lines) do
+                local text = line.leftText
+                if text then
+                    -- Strip color codes and textures
+                    text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+                    text = text:gsub("|T.-|t", "")  -- Strip texture escapes
+                    -- Match "Item Level X" pattern using the localized ITEM_LEVEL global
+                    local pattern = ITEM_LEVEL:gsub("%%d", "(%%d+)")
+                    local ilvl = text:match(pattern)
+                    if ilvl then
+                        return tonumber(ilvl)
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+---------------------------------------------------------------------------
+-- Get slot item quality
+---------------------------------------------------------------------------
+local function GetSlotItemQuality(unit, slotId)
+    if not unit or not slotId then return nil end
+
+    local itemLink = GetInventoryItemLink(unit, slotId)
+    if not itemLink then return nil end
+
+    local ok, quality = pcall(C_Item.GetItemQualityByID, itemLink)
+    if ok then return quality end
+
+    return nil
+end
+
+---------------------------------------------------------------------------
+-- Check if mainhand is a 2H weapon (like LuheyUI)
+---------------------------------------------------------------------------
+local function IsMainHand2H(unit)
+    local itemLink = GetInventoryItemLink(unit, INVSLOT_MAINHAND)
+    if not itemLink then return false end
+
+    local ok, _, _, _, _, _, _, _, _, equipSlot = pcall(C_Item.GetItemInfo, itemLink)
+    if not ok then return false end
+    return equipSlot == "INVTYPE_2HWEAPON"
+end
+
+---------------------------------------------------------------------------
+-- Calculate average item level (like LuheyUI)
+-- Handles 2H weapons by counting mainhand twice
+---------------------------------------------------------------------------
+local function CalculateAverageILvl(unit)
+    local totalIlvl = 0
+    local slotCount = 0
+    local is2H = IsMainHand2H(unit)
+
+    for slotId, counted in pairs(COUNTED_SLOTS) do
+        if counted then
+            if slotId == INVSLOT_OFFHAND and is2H then
+                -- 2H weapon counts twice - add mainhand ilvl again
+                local mainIlvl = GetSlotItemLevel(unit, INVSLOT_MAINHAND)
+                if mainIlvl and mainIlvl > 0 then
+                    totalIlvl = totalIlvl + mainIlvl
+                    slotCount = slotCount + 1
+                end
+            else
+                local ilvl = GetSlotItemLevel(unit, slotId)
+                if ilvl and ilvl > 0 then
+                    totalIlvl = totalIlvl + ilvl
+                    slotCount = slotCount + 1
+                end
+            end
+        end
+    end
+
+    if slotCount > 0 then
+        return totalIlvl / slotCount
+    end
+    return 0
+end
+
+---------------------------------------------------------------------------
+-- Calculate average equipped quality (like LuheyUI)
+-- Used for coloring the overall ilvl display
+---------------------------------------------------------------------------
+local function CalculateAverageEquippedQuality(unit)
+    local totalQuality = 0
+    local itemCount = 0
+    local is2H = IsMainHand2H(unit)
+
+    for slotId, counted in pairs(COUNTED_SLOTS) do
+        if counted then
+            if slotId == INVSLOT_OFFHAND and is2H then
+                local mainQuality = GetSlotItemQuality(unit, INVSLOT_MAINHAND)
+                if mainQuality and mainQuality >= 1 then
+                    totalQuality = totalQuality + mainQuality
+                    itemCount = itemCount + 1
+                end
+            else
+                local quality = GetSlotItemQuality(unit, slotId)
+                if quality and quality >= 1 then
+                    totalQuality = totalQuality + quality
+                    itemCount = itemCount + 1
+                end
+            end
+        end
+    end
+
+    if itemCount > 0 then
+        return math.floor((totalQuality / itemCount) + 0.5)
+    end
+    return 1
+end
+
+---------------------------------------------------------------------------
+-- Get overall ilvl color based on average equipped quality (like LuheyUI)
+---------------------------------------------------------------------------
+local function GetOverallILvlColor(unit)
+    local avgQuality = CalculateAverageEquippedQuality(unit)
+    avgQuality = math.max(1, math.min(avgQuality, 7))
+    local r, g, b = C_Item.GetItemQualityColor(avgQuality)
+    return r, g, b
 end
 
 ---------------------------------------------------------------------------
@@ -400,62 +569,278 @@ end
 
 ---------------------------------------------------------------------------
 -- Calculate average item level for inspect target
--- Uses slot-by-slot calculation since GetAverageItemLevel is player-only
+-- Wrapper for the new CalculateAverageILvl function
 ---------------------------------------------------------------------------
 local function CalculateInspectAverageILvl(unit)
+    return CalculateAverageILvl(unit)
+end
+
+---------------------------------------------------------------------------
+-- Lite Mode Functions
+---------------------------------------------------------------------------
+
+-- Slot ID mapping for lite mode (slot name to slot ID)
+local LITE_SLOT_IDS = {
+    InspectHeadSlot = INVSLOT_HEAD,
+    InspectNeckSlot = INVSLOT_NECK,
+    InspectShoulderSlot = INVSLOT_SHOULDER,
+    InspectBackSlot = INVSLOT_BACK,
+    InspectChestSlot = INVSLOT_CHEST,
+    InspectWristSlot = INVSLOT_WRIST,
+    InspectHandsSlot = INVSLOT_HAND,
+    InspectWaistSlot = INVSLOT_WAIST,
+    InspectLegsSlot = INVSLOT_LEGS,
+    InspectFeetSlot = INVSLOT_FEET,
+    InspectFinger0Slot = INVSLOT_FINGER1,
+    InspectFinger1Slot = INVSLOT_FINGER2,
+    InspectTrinket0Slot = INVSLOT_TRINKET1,
+    InspectTrinket1Slot = INVSLOT_TRINKET2,
+    InspectMainHandSlot = INVSLOT_MAINHAND,
+    InspectSecondaryHandSlot = INVSLOT_OFFHAND,
+}
+
+-- Create centered FontString on slot for lite mode
+local function CreateLiteSlotText(slotFrame)
+    if not slotFrame then return nil end
+
     local shared = GetShared()
-    if not shared.GetSlotItemLevel or not shared.EQUIPMENT_SLOTS then
-        return 0
+    local font = shared.GetGlobalFont and shared.GetGlobalFont() or "Fonts\\FRIZQT__.TTF"
+    local settings = GetSettings()
+    local fontSize = settings.inspectLiteFontSize or 15
+
+    local text = slotFrame:CreateFontString(nil, "OVERLAY")
+    text:SetFont(font, fontSize, "OUTLINE")
+    text:SetPoint("CENTER", slotFrame, "CENTER", 0, 0)
+    text:SetJustifyH("CENTER")
+    text:SetJustifyV("MIDDLE")
+    text:Hide()
+
+    return text
+end
+
+-- Create overall iLvL display frame (positioned below wrist slot with offsets)
+local function CreateLiteOverallDisplay()
+    if liteOverallDisplay then return liteOverallDisplay end
+    if not InspectFrame or not InspectWristSlot then return nil end
+
+    local shared = GetShared()
+    local font = shared.GetGlobalFont and shared.GetGlobalFont() or "Fonts\\FRIZQT__.TTF"
+    local settings = GetSettings()
+    local fontSize = settings.inspectLiteOverallFontSize or 11
+    local offsetX = settings.inspectLiteOverallOffsetX or 0
+    local offsetY = settings.inspectLiteOverallOffsetY or -8
+
+    local frame = CreateFrame("Frame", nil, InspectFrame)
+    frame:SetSize(80, 24)
+    frame:SetPoint("TOP", InspectWristSlot, "BOTTOM", offsetX, offsetY)
+    frame:SetFrameLevel(InspectFrame:GetFrameLevel() + 15)
+
+    -- Label text "iLvL:"
+    local label = frame:CreateFontString(nil, "OVERLAY")
+    label:SetFont(font, fontSize, "OUTLINE")
+    label:SetPoint("LEFT", frame, "LEFT", 0, 0)
+    label:SetText("iLvL:")
+    label:SetTextColor(0.8, 0.8, 0.8, 1)
+
+    -- Value text (colored by quality)
+    local value = frame:CreateFontString(nil, "OVERLAY")
+    value:SetFont(font, fontSize, "OUTLINE")
+    value:SetPoint("LEFT", label, "RIGHT", 4, 0)
+
+    frame.label = label
+    frame.value = value
+    frame:Hide()
+
+    liteOverallDisplay = frame
+    return frame
+end
+
+-- Update single slot's lite text
+local function UpdateLiteSlotText(slotName, unit, settings, cachedFont)
+    local slotFrame = _G[slotName]
+    if not slotFrame then return end
+
+    local slotId = LITE_SLOT_IDS[slotName]
+    if not slotId then return end
+
+    -- Create overlay if needed
+    if not liteOverlays[slotName] then
+        liteOverlays[slotName] = CreateLiteSlotText(slotFrame)
     end
 
-    local totalIlvl = 0
-    local slotCount = 0
+    local text = liteOverlays[slotName]
+    if not text then return end
 
-    -- Slots that count toward average ilvl (exclude shirt/tabard)
-    local countedSlots = {
-        [1] = true,   -- Head
-        [2] = true,   -- Neck
-        [3] = true,   -- Shoulder
-        [5] = true,   -- Chest
-        [6] = true,   -- Waist
-        [7] = true,   -- Legs
-        [8] = true,   -- Feet
-        [9] = true,   -- Wrist
-        [10] = true,  -- Hands
-        [11] = true,  -- Finger0
-        [12] = true,  -- Finger1
-        [13] = true,  -- Trinket0
-        [14] = true,  -- Trinket1
-        [15] = true,  -- Back
-        [16] = true,  -- MainHand
-        [17] = true,  -- OffHand
-    }
+    -- Use cached settings/font if provided, otherwise fetch
+    settings = settings or GetSettings()
+    local font = cachedFont or (function()
+        local shared = GetShared()
+        return shared.GetGlobalFont and shared.GetGlobalFont() or "Fonts\\FRIZQT__.TTF"
+    end)()
 
-    for slotId, counted in pairs(countedSlots) do
-        if counted then
-            local ilvl = shared.GetSlotItemLevel(unit, slotId)
-            if ilvl and ilvl > 0 then
-                totalIlvl = totalIlvl + ilvl
-                slotCount = slotCount + 1
-            end
+    -- Update font size in case it changed
+    local fontSize = settings.inspectLiteFontSize or 15
+    text:SetFont(font, fontSize, "OUTLINE")
+
+    -- Check if we should show per-slot ilvl
+    if not settings.inspectLiteShowPerSlot then
+        text:Hide()
+        return
+    end
+
+    -- Get item link
+    local itemLink = GetInventoryItemLink(unit, slotId)
+    if not itemLink then
+        text:Hide()
+        return
+    end
+
+    -- Get ilvl using new C_TooltipInfo-based function
+    local ilvl = GetSlotItemLevel(unit, slotId)
+    if not ilvl or ilvl <= 0 then
+        text:Hide()
+        return
+    end
+
+    -- Get item quality for coloring
+    local quality = GetSlotItemQuality(unit, slotId)
+
+    -- Set text
+    text:SetText(tostring(math.floor(ilvl)))
+
+    -- Color by quality
+    if quality and quality >= 1 then
+        local r, g, b = C_Item.GetItemQualityColor(quality)
+        text:SetTextColor(r, g, b, 1)
+    else
+        text:SetTextColor(1, 1, 1, 1)
+    end
+
+    text:Show()
+end
+
+-- Update overall iLvL display
+local function UpdateLiteOverallDisplay(unit, settings, cachedFont)
+    local frame = liteOverallDisplay or CreateLiteOverallDisplay()
+    if not frame then return end
+
+    -- Use cached settings/font if provided, otherwise fetch
+    settings = settings or GetSettings()
+    local font = cachedFont or (function()
+        local shared = GetShared()
+        return shared.GetGlobalFont and shared.GetGlobalFont() or "Fonts\\FRIZQT__.TTF"
+    end)()
+
+    -- Update font sizes in case they changed
+    local fontSize = settings.inspectLiteOverallFontSize or 11
+    if frame.label then
+        frame.label:SetFont(font, fontSize, "OUTLINE")
+    end
+    if frame.value then
+        frame.value:SetFont(font, fontSize, "OUTLINE")
+    end
+
+    -- Update position in case offsets changed
+    local offsetX = settings.inspectLiteOverallOffsetX or 0
+    local offsetY = settings.inspectLiteOverallOffsetY or -8
+    frame:ClearAllPoints()
+    frame:SetPoint("TOP", InspectWristSlot, "BOTTOM", offsetX, offsetY)
+
+    -- Check if we should show overall ilvl
+    if not settings.inspectLiteShowOverall then
+        frame:Hide()
+        return
+    end
+
+    -- Calculate average ilvl
+    local avgIlvl = CalculateInspectAverageILvl(unit)
+    if avgIlvl <= 0 then
+        frame:Hide()
+        return
+    end
+
+    -- Get color based on average equipped quality (like LuheyUI)
+    local r, g, b = GetOverallILvlColor(unit)
+
+    -- Set value text
+    frame.value:SetText(string.format("%.1f", avgIlvl))
+    frame.value:SetTextColor(r, g, b, 1)
+
+    frame:Show()
+end
+
+-- Master update for all lite displays
+-- Per-slot and overall displays are independent - each checks its own toggle
+local function UpdateAllLiteDisplays(unit)
+    local settings = GetSettings()
+
+    -- Cache font lookup once for all updates
+    local shared = GetShared()
+    local cachedFont = shared.GetGlobalFont and shared.GetGlobalFont() or "Fonts\\FRIZQT__.TTF"
+
+    -- Update per-slot displays (controlled by inspectLiteShowPerSlot, checked inside UpdateLiteSlotText)
+    if settings.inspectLiteShowPerSlot then
+        for _, slotName in ipairs(INSPECT_SLOT_NAMES) do
+            UpdateLiteSlotText(slotName, unit, settings, cachedFont)
+        end
+    else
+        -- Hide per-slot overlays if disabled
+        for slotName, text in pairs(liteOverlays) do
+            if text then text:Hide() end
         end
     end
 
-    -- Handle 2H weapons (count mainhand twice if offhand is empty)
-    local mainHandLink = GetInventoryItemLink(unit, 16)
-    local offHandLink = GetInventoryItemLink(unit, 17)
-    if mainHandLink and not offHandLink then
-        local mainIlvl = shared.GetSlotItemLevel(unit, 16)
-        if mainIlvl and mainIlvl > 0 then
-            totalIlvl = totalIlvl + mainIlvl
-            slotCount = slotCount + 1
+    -- Update overall display (controlled by inspectLiteShowOverall, checked inside UpdateLiteOverallDisplay)
+    UpdateLiteOverallDisplay(unit, settings, cachedFont)
+end
+
+-- Hide all lite displays
+local function HideLiteDisplays()
+    for slotName, text in pairs(liteOverlays) do
+        if text then
+            text:Hide()
         end
     end
-
-    if slotCount > 0 then
-        return totalIlvl / slotCount
+    if liteOverallDisplay then
+        liteOverallDisplay:Hide()
     end
-    return 0
+end
+
+-- Show detailed overlays (restore visibility)
+local function ShowDetailedOverlays()
+    for _, overlay in pairs(inspectOverlays) do
+        if overlay then
+            overlay:Show()
+        end
+    end
+end
+
+-- Hide detailed overlays
+local function HideDetailedOverlays()
+    for _, overlay in pairs(inspectOverlays) do
+        if overlay then
+            overlay:Hide()
+        end
+    end
+end
+
+-- Mode toggle handler - switches between lite and detailed mode
+local function RefreshInspectDisplayMode()
+    local settings = GetSettings()
+
+    if settings.inspectEnabled then
+        -- Full overlay mode: always use detailed overlays
+        HideLiteDisplays()
+        ShowDetailedOverlays()
+    elseif settings.inspectLiteShowPerSlot or settings.inspectLiteShowOverall then
+        -- Lite mode (only when full overlays disabled): show enabled lite displays
+        HideDetailedOverlays()
+        UpdateAllLiteDisplays("target")
+    else
+        -- Both disabled: hide everything
+        HideLiteDisplays()
+        HideDetailedOverlays()
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -673,6 +1058,28 @@ local function CreateInspectSettingsButton()
     end
     if charDB.inspectSlotTextSize == nil then
         charDB.inspectSlotTextSize = 12
+    end
+    -- Initialize lite mode defaults
+    if charDB.inspectLiteMode == nil then
+        charDB.inspectLiteMode = false
+    end
+    if charDB.inspectLiteShowPerSlot == nil then
+        charDB.inspectLiteShowPerSlot = true
+    end
+    if charDB.inspectLiteShowOverall == nil then
+        charDB.inspectLiteShowOverall = true
+    end
+    if charDB.inspectLiteFontSize == nil then
+        charDB.inspectLiteFontSize = 15
+    end
+    if charDB.inspectLiteOverallFontSize == nil then
+        charDB.inspectLiteOverallFontSize = 11
+    end
+    if charDB.inspectLiteOverallOffsetX == nil then
+        charDB.inspectLiteOverallOffsetX = 0
+    end
+    if charDB.inspectLiteOverallOffsetY == nil then
+        charDB.inspectLiteOverallOffsetY = -8
     end
 
     local C = GetColors()
@@ -1027,9 +1434,23 @@ end
 local function UpdateInspectFrame()
     if not InspectFrame or not InspectFrame:IsShown() then return end
 
+    local settings = GetSettings()
     local shared = GetShared()
-    if shared.UpdateAllSlotOverlays then
-        shared.UpdateAllSlotOverlays("target", inspectOverlays)
+
+    if settings.inspectEnabled then
+        -- Full overlay mode: always use detailed overlays, never lite mode
+        HideLiteDisplays()
+        if shared.UpdateAllSlotOverlays then
+            shared.UpdateAllSlotOverlays("target", inspectOverlays)
+        end
+    elseif settings.inspectLiteShowPerSlot or settings.inspectLiteShowOverall then
+        -- Lite mode (only when full overlays disabled): show enabled lite displays
+        HideDetailedOverlays()
+        UpdateAllLiteDisplays("target")
+    else
+        -- All disabled: hide everything
+        HideLiteDisplays()
+        HideDetailedOverlays()
     end
 
     -- Update header display (name, ilvl, spec)
@@ -1046,14 +1467,21 @@ local function HookInspectFrame()
     if not InspectFrame then return end
 
     local settings = GetSettings()
-    if settings.inspectEnabled == false then return end
+    -- Skip if full overlays are disabled AND no lite features are enabled
+    local hasLiteFeature = settings.inspectLiteShowPerSlot or settings.inspectLiteShowOverall
+    if settings.inspectEnabled == false and not hasLiteFeature then return end
 
     local shared = GetShared()
 
     InspectFrame:HookScript("OnShow", function()
+        local currentSettings = GetSettings()
         currentInspectTab = 1
-        ApplyInspectPaneLayout()
-        InitializeInspectOverlays()
+
+        -- Only apply full layout/overlays when full overlay mode is enabled
+        if currentSettings.inspectEnabled then
+            ApplyInspectPaneLayout()
+            InitializeInspectOverlays()
+        end
 
         C_Timer.After(0.1, function()
             local unit = InspectFrame.unit or "target"
