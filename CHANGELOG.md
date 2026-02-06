@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.25 - 2026-02-06
+
+### Added
+- added heal prediction bars to player and target unit frames
+
+### Changed
+- keybind-text overrides are now per-character instead of per-profile
+- changed hiding logic for CDM resource bars to not interfere with frames anchored to them
+
+### Fixed
+- fix 'only show in combat' option not working for custom trackers
+- fix an issue with profiles that had 'nil' as their accent color
 ## v2.24 - 2026-02-06
 
 ### Added
