@@ -772,6 +772,7 @@ local defaults = {
             autoSelectGossip = false,  -- Auto-select single gossip options
             autoCombatLog = false,  -- Auto start/stop combat logging in M+ (opt-in)
             autoDeleteConfirm = false,  -- Auto-fill DELETE confirmation text
+            hideGuildChat = false,
             -- Pet Warning (pet-spec classes: Hunter, Warlock, DK, Mage)
             petCombatWarning = true,    -- Show combat warning in instances when pet missing/passive
             petWarningOffsetX = 0,      -- Warning frame X offset from center

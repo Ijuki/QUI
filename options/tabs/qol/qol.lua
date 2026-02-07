@@ -722,6 +722,15 @@ local function BuildGeneralTab(tabContent)
         autoDeleteCheck:SetPoint("TOPLEFT", PADDING, y)
         autoDeleteCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
         y = y - FORM_ROW
+
+        local hideGuildChatCheck = GUI:CreateFormCheckbox(tabContent, "Hide Guild/Community Chat Pane", "hideGuildChat", generalDB, function()
+            if _G.QUI_RefreshHideGuildChat then
+                _G.QUI_RefreshHideGuildChat()
+            end
+        end)
+        hideGuildChatCheck:SetPoint("TOPLEFT", PADDING, y)
+        hideGuildChatCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        y = y - FORM_ROW
     end
 
     y = y - 10

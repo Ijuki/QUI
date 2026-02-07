@@ -1,0 +1,25 @@
+{
+    "Lua.diagnostics.globals": [
+        "DEFAULT_CHAT_FRAME",
+        "GameTooltip",
+        "UIParent",
+        "SlashCmdList",
+        "NUM_CHAT_WINDOWS",
+        "EditModeManagerFrame",
+        "ReloadUI",
+        "RAID_CLASS_COLORS",
+        "ObjectiveTrackerFrame",
+        "FCF_SetChatWindowFontSize",
+        "ChatEdit_SendText",
+        "BossTargetFrameContainer",
+        "Round",
+        "QuickKeybindFrame",
+        "ShowUIPanel",
+        "hash_SlashCmdList",
+        "WOW_PROJECT_ID",
+        "WOW_PROJECT_MAINLINE",
+        "CreateTexturePool",
+        "CreateFramePool",
+        "AnimateTexCoords"
+    ]
+}
