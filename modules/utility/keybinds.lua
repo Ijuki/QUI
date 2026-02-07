@@ -72,11 +72,28 @@ local function GetViewerSettings(viewerName)
     return viewers[viewerName]
 end
 
--- Helper: get shared keybind overrides from DB (shared across all viewers)
+-- Helper: get current specialization ID
+local function GetCurrentSpecID()
+    local specIndex = GetSpecialization()
+    if not specIndex then return 0 end
+    local specID = GetSpecializationInfo(specIndex)
+    return specID or 0
+end
+
+-- Helper: get shared keybind overrides from DB (character and spec-specific)
+-- Uses specID as key, falling back to 0 for characters without a spec (below level 10)
 local function GetSharedOverrides()
     local QUICore = _G.QUI and _G.QUI.QUICore
-    if not QUICore or not QUICore.db or not QUICore.db.profile then return nil end
-    return QUICore.db.profile.keybindOverrides
+    if not QUICore or not QUICore.db or not QUICore.db.char then return nil end
+
+    local specID = GetCurrentSpecID()
+
+    -- Initialize spec-specific table if needed (char.keybindOverrides is guaranteed by AceDB defaults)
+    if not QUICore.db.char.keybindOverrides[specID] then
+        QUICore.db.char.keybindOverrides[specID] = {}
+    end
+
+    return QUICore.db.char.keybindOverrides[specID]
 end
 
 -- Helper: get an override keybind, if any, for a given spell/baseSpell (shared across viewers)
@@ -84,13 +101,16 @@ local function GetOverrideKeybind(spellID, baseSpellID)
     local overrides = GetSharedOverrides()
     if not overrides then return nil end
 
+    -- Guard against secret values being used as table keys (12.0 combat protection)
+    local isSecret = type(issecretvalue) == "function" and issecretvalue or nil
+
     -- Prefer explicit base spell override, then direct spellID
     -- Allow "" to mean "explicitly hide keybind"
-    if baseSpellID and overrides[baseSpellID] ~= nil then
+    if baseSpellID and not (isSecret and isSecret(baseSpellID)) and overrides[baseSpellID] ~= nil then
         return overrides[baseSpellID]
     end
 
-    if spellID and overrides[spellID] ~= nil then
+    if spellID and not (isSecret and isSecret(spellID)) and overrides[spellID] ~= nil then
         return overrides[spellID]
     end
 
@@ -101,9 +121,10 @@ end
 -- Uses negative itemID as key (since spellIDs are always positive)
 local function GetOverrideKeybindForItem(itemID)
     if not itemID then return nil end
+    if type(issecretvalue) == "function" and issecretvalue(itemID) then return nil end
     local overrides = GetSharedOverrides()
     if not overrides then return nil end
-    
+
     -- Use negative itemID as key to avoid conflicts with spellIDs
     local key = -tonumber(itemID)
     if overrides[key] ~= nil then
@@ -882,14 +903,22 @@ local function ApplyKeybindToIcon(icon, viewerName)
         return id
     end)
     
-    if ok then
+    if ok and result then
+        -- Verify result isn't a secret value (can't be used as table key)
+        if type(issecretvalue) == "function" and issecretvalue(result) then
+            result = nil
+        end
         spellID = result
     end
-    
+
     -- Try to get from action info if available
     if not spellID and icon.action then
         local actionOk, actionType, id = pcall(GetActionInfo, icon.action)
         if actionOk and actionType == "spell" then
+            -- Verify id isn't a secret value
+            if type(issecretvalue) == "function" and issecretvalue(id) then
+                id = nil
+            end
             spellID = id
         end
     end
@@ -960,6 +989,10 @@ local function ApplyKeybindToIcon(icon, viewerName)
             -- Use pcall for comparison since spellID may be a secret value
             local compareOk, isDifferent = pcall(function() return baseFromInfo ~= spellID end)
             if compareOk and isDifferent then
+                -- Verify baseFromInfo isn't a secret value
+                if type(issecretvalue) == "function" and issecretvalue(baseFromInfo) then
+                    baseFromInfo = nil
+                end
                 baseSpellID = baseFromInfo
                 -- Re-check for explicit override on base spell
                 if cdmOverridesEnabled then
@@ -989,6 +1022,10 @@ local function ApplyKeybindToIcon(icon, viewerName)
             -- Use pcall for comparison since spellID may be a secret value
             local compareOk, isDifferent = pcall(function() return resultBase ~= spellID end)
             if compareOk and isDifferent then
+                -- Verify resultBase isn't a secret value
+                if type(issecretvalue) == "function" and issecretvalue(resultBase) then
+                    resultBase = nil
+                end
                 baseSpellID = resultBase
                 -- Re-check override for this base spell
                 if cdmOverridesEnabled then
@@ -1080,20 +1117,13 @@ end
 -- Set or clear a keybind override for a spellID (shared across all viewers).
 local function SetKeybindOverride(spellID, keybindText)
     if not spellID then return end
-    
+
     -- Ensure spellID is a number (convert from string if needed)
     spellID = tonumber(spellID)
     if not spellID or spellID <= 0 then return end
 
-    local QUICore = _G.QUI and _G.QUI.QUICore
-    if not QUICore or not QUICore.db or not QUICore.db.profile then return end
-
-    -- Initialize shared overrides table if needed
-    if not QUICore.db.profile.keybindOverrides then
-        QUICore.db.profile.keybindOverrides = {}
-    end
-
-    local overrides = QUICore.db.profile.keybindOverrides
+    local overrides = GetSharedOverrides()
+    if not overrides then return end
 
     if keybindText == nil then
         -- Explicitly remove override (user clicked X)
@@ -1135,20 +1165,13 @@ end
 -- Uses negative itemID as key to avoid conflicts with spellIDs
 local function SetKeybindOverrideForItem(itemID, keybindText)
     if not itemID then return end
-    
+
     -- Ensure itemID is a number (convert from string if needed)
     itemID = tonumber(itemID)
     if not itemID or itemID <= 0 then return end
 
-    local QUICore = _G.QUI and _G.QUI.QUICore
-    if not QUICore or not QUICore.db or not QUICore.db.profile then return end
-
-    -- Initialize shared overrides table if needed
-    if not QUICore.db.profile.keybindOverrides then
-        QUICore.db.profile.keybindOverrides = {}
-    end
-
-    local overrides = QUICore.db.profile.keybindOverrides
+    local overrides = GetSharedOverrides()
+    if not overrides then return end
     local key = -itemID -- Use negative itemID as key
 
     if keybindText == nil then
@@ -1920,10 +1943,14 @@ local function ApplyRotationHelperToIcon(icon, viewerName, nextSpellID)
         return nil
     end)
     
-    if ok then
+    if ok and result then
+        -- Verify result isn't a secret value (can't be compared)
+        if type(issecretvalue) == "function" and issecretvalue(result) then
+            result = nil
+        end
         iconSpellID = result
     end
-    
+
     if not iconSpellID then
         if icon._rotationHelperOverlay then
             icon._rotationHelperOverlay:Hide()
@@ -1940,7 +1967,8 @@ local function ApplyRotationHelperToIcon(icon, viewerName, nextSpellID)
         end
         -- Check overrideSpellID (some spells morph)
         if not isNextSpell and icon.cooldownInfo and icon.cooldownInfo.overrideSpellID then
-            if icon.cooldownInfo.overrideSpellID == nextSpellID then
+            local compareOk, isMatch = pcall(function() return icon.cooldownInfo.overrideSpellID == nextSpellID end)
+            if compareOk and isMatch then
                 isNextSpell = true
             end
         end
@@ -1984,6 +2012,10 @@ local function UpdateAllRotationHelpers()
     -- Get the next recommended spell (false = don't consider GCD)
     local ok, nextSpellID = pcall(C_AssistedCombat.GetNextCastSpell, false)
     if not ok then
+        nextSpellID = nil
+    end
+    -- Guard against secret values from combat API
+    if nextSpellID and type(issecretvalue) == "function" and issecretvalue(nextSpellID) then
         nextSpellID = nil
     end
     

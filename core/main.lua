@@ -940,8 +940,7 @@ local defaults = {
             enabled = true,           -- Skin GroupLootHistoryFrame
         },
 
-        -- Keybind Overrides (spell/item ID → custom keybind text, shared across viewers)
-        keybindOverrides = {},
+        -- Keybind Overrides (stored per character/spec in db.char.keybindOverrides[specID])
         keybindOverridesEnabledCDM = true,
         keybindOverridesEnabledTrackers = true,
 
@@ -1869,6 +1868,12 @@ local defaults = {
                     opacity = 0.3,
                     texture = "QUI Stripes",
                 },
+                -- Heal prediction (incoming heals)
+                healPrediction = {
+                    enabled = false,
+                    color = { 0.2, 1, 0.2 },
+                    opacity = 0.5,
+                },
                 -- Castbar
                 castbar = {
                     enabled = true,
@@ -2063,6 +2068,12 @@ local defaults = {
                     color = { 1, 1, 1, 1 },
                     opacity = 0.3,
                     texture = "QUI Stripes",
+                },
+                -- Heal prediction (incoming heals)
+                healPrediction = {
+                    enabled = false,
+                    color = { 0.2, 1, 0.2 },
+                    opacity = 0.5,
                 },
                 -- Castbar
                 castbar = {
@@ -3429,6 +3440,9 @@ local defaults = {
             items = {},    -- [itemID] = { useSpellID, buffSpellID, duration, icon, name, scannedAt }
             autoScan = false,  -- Auto-scan setting (off by default)
         },
+    },
+    char = {
+        keybindOverrides = {},  -- [specID] = { [spellID] = keybindText, [-itemID] = keybindText }
     },
 }
 

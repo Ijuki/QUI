@@ -973,33 +973,89 @@ function GUI:CreateSubTabs(parent, tabs)
         end
     end
 
-    -- Dynamic relayout function for responsive sub-tabs
+    -- Dynamic relayout function for responsive sub-tabs (wraps to multiple rows)
     local function RelayoutSubTabs()
         local barWidth = buttonGroup:GetWidth()
         if barWidth < 1 then return end
 
         local separatorSpacing = 15
-        local availableWidth = barWidth - 20
+        local btnPadding = 40  -- 10px padding on each side of text
+        local availableWidth = barWidth - 20  -- 10px margin on each side
+        local rowHeight = 24
+        local rowGap = 2
+        local topPad = 3
 
-        local separatorCount = 0
-        for _, tabInfo in ipairs(tabs) do
-            if tabInfo.isSeparator then separatorCount = separatorCount + 1 end
+        -- Calculate natural (minimum) width for each button based on text
+        local naturalWidths = {}
+        for i, btn in ipairs(tabButtons) do
+            local textWidth = btn.text:GetStringWidth()
+            naturalWidths[i] = math.max(textWidth + btnPadding, 50)
         end
 
-        local totalSpacing = (#tabButtons - 1) * spacing + (separatorCount * separatorSpacing)
-        local newButtonWidth = math.floor((availableWidth - totalSpacing) / #tabButtons)
-        newButtonWidth = math.max(newButtonWidth, 50)
+        -- Greedy line-breaking: flow buttons left-to-right, wrap when they don't fit
+        local rows = { {} }
+        local currentRowWidth = 0
 
-        local xOffset = 10
-        for i, btn in ipairs(tabButtons) do
-            btn:SetWidth(newButtonWidth)
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", xOffset, -3)
-            xOffset = xOffset + newButtonWidth + spacing
-
-            if tabs[i] and tabs[i].isSeparator then
-                xOffset = xOffset + separatorSpacing
+        for i = 1, #tabButtons do
+            local gapBefore = 0
+            if #rows[#rows] > 0 then
+                gapBefore = spacing
+                -- Separator spacing comes after the previous button
+                local prevIdx = rows[#rows][#rows[#rows]]
+                if tabs[prevIdx] and tabs[prevIdx].isSeparator then
+                    gapBefore = gapBefore + separatorSpacing
+                end
             end
+
+            local neededWidth = gapBefore + naturalWidths[i]
+
+            if currentRowWidth + neededWidth > availableWidth and #rows[#rows] > 0 then
+                -- Start a new row
+                rows[#rows + 1] = {}
+                currentRowWidth = naturalWidths[i]
+            else
+                currentRowWidth = currentRowWidth + neededWidth
+            end
+
+            table.insert(rows[#rows], i)
+        end
+
+        local numRows = #rows
+
+        -- Layout each row: stretch buttons to fill the available width evenly
+        for rowIdx, rowBtnIndices in ipairs(rows) do
+            local rowSepCount = 0
+            for j = 1, #rowBtnIndices - 1 do
+                local btnIdx = rowBtnIndices[j]
+                if tabs[btnIdx] and tabs[btnIdx].isSeparator then
+                    rowSepCount = rowSepCount + 1
+                end
+            end
+
+            local totalRowSpacing = math.max(0, #rowBtnIndices - 1) * spacing + rowSepCount * separatorSpacing
+            local rowBtnWidth = math.floor((availableWidth - totalRowSpacing) / #rowBtnIndices)
+            rowBtnWidth = math.max(rowBtnWidth, 50)
+
+            local xOffset = 10
+            local yOffset = -(topPad + (rowIdx - 1) * (rowHeight + rowGap))
+
+            for j, btnIdx in ipairs(rowBtnIndices) do
+                local btn = tabButtons[btnIdx]
+                btn:SetWidth(rowBtnWidth)
+                btn:ClearAllPoints()
+                btn:SetPoint("TOPLEFT", xOffset, yOffset)
+                xOffset = xOffset + rowBtnWidth + spacing
+
+                if tabs[btnIdx] and tabs[btnIdx].isSeparator and j < #rowBtnIndices then
+                    xOffset = xOffset + separatorSpacing
+                end
+            end
+        end
+
+        -- Adjust the sub-tab bar height to fit all rows
+        local totalBarHeight = topPad + numRows * rowHeight + math.max(0, numRows - 1) * rowGap + 3
+        if mainFrame.subTabBar then
+            mainFrame.subTabBar:SetHeight(totalBarHeight)
         end
     end
 
@@ -3715,7 +3771,7 @@ function GUI:CreateMainFrame()
     local profile = db and db.profile
     local general = profile and profile.general
     local accentDB = general and general.addonAccentColor
-    if accentDB then
+    if accentDB and accentDB[1] and accentDB[2] and accentDB[3] then
         GUI:ApplyAccentColor(accentDB[1], accentDB[2], accentDB[3])
     end
 

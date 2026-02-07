@@ -14,8 +14,20 @@ local function Scale(x, frame)
     return x
 end
 
+-- Check if CDM visibility says we should be hidden (e.g. hideWhenMounted)
+local function IsCDMVisibilityHidden()
+    if not QUICore or not QUICore.db or not QUICore.db.profile then return false end
+    local vis = QUICore.db.profile.cdmVisibility
+    if not vis then return false end
+    if vis.hideWhenMounted and (IsMounted() or GetShapeshiftFormID() == 27) then return true end
+    return false
+end
+
 -- Visibility check for resource bars ("always", "combat", "hostile")
 local function ShouldShowBar(cfg)
+    -- CDM visibility overrides (e.g. hide when mounted) take priority
+    if IsCDMVisibilityHidden() then return false end
+
     local vis = cfg.visibility or "always"
     if vis == "always" then return true end
     if vis == "combat" then return InCombatLockdown() end
@@ -922,8 +934,11 @@ function QUICore:UpdatePowerBar()
     end
 
     -- Visibility mode check (always/combat/hostile)
-    if not PowerBarEditMode.active and not ShouldShowBar(cfg) then
-        bar:Hide()
+    -- Use alpha instead of Hide so anchored frames keep their reference
+    local visibilityHidden = not PowerBarEditMode.active and not ShouldShowBar(cfg)
+    if visibilityHidden then
+        bar:SetAlpha(0)
+        bar:Show()
         return
     end
 
@@ -1114,6 +1129,7 @@ function QUICore:UpdatePowerBar()
     -- Update ticks if this is a ticked power type
     self:UpdatePowerBarTicks(bar, resource, max)
 
+    bar:SetAlpha(1)
     bar:Show()
 
     -- Propagate to Secondary bar if it's locked to Primary
@@ -1991,8 +2007,11 @@ function QUICore:UpdateSecondaryPowerBar()
     end
 
     -- Visibility mode check (always/combat/hostile)
-    if not PowerBarEditMode.active and not ShouldShowBar(cfg) then
-        bar:Hide()
+    -- Use alpha instead of Hide so anchored frames keep their reference
+    local visibilityHidden = not PowerBarEditMode.active and not ShouldShowBar(cfg)
+    if visibilityHidden then
+        bar:SetAlpha(0)
+        bar:Show()
         return
     end
 
@@ -2484,6 +2503,7 @@ end
     end
 
 
+    bar:SetAlpha(1)
     bar:Show()
 end
 
