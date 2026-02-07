@@ -9,6 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.26 - 2026-02-07
+
+### Added
+- added 'responsive' sub-tab behaviour, wrapping buttons into a second row when necessary
+
+### Fixed
+- fixed resource bar visibility check overriding CDM visibility check when mounted
+- fixed an issue where a referenced variable was not initialized
+- added proper secret value guards in the keybinds module
 ## v2.25 - 2026-02-06
 
 ### Added
