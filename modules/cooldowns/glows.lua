@@ -234,218 +234,189 @@ function StopGlow(icon)
 end
 
 -- ======================================================
--- CDM Icon Method Hooking (reliable glow detection)
--- Uses Blizzard's built-in CDM icon methods instead of
--- manual spellID matching which fails during combat
+-- Deferred Glow Scan
+-- Checks all viewer icons via IsSpellOverlayed and applies/removes glows.
+-- Runs OUTSIDE Blizzard's CDM update cycle (via C_Timer.After(0)) so that
+-- LCG frame tree modifications never happen during internal CDM updates.
+-- This prevents the icon disappearance bug on retail where frame changes
+-- inside hooksecurefunc callbacks cascade into layout engine re-entries.
 -- ======================================================
 
--- Hook individual CDM icon's glow methods
-local function HookCDMIcon(icon)
-    if not icon then return end
-    if icon._QUIGlowHooked then return end
+local VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
+local scanPending = false
 
-    local viewerType = GetViewerType(icon)
-    if not viewerType then return end
+-- Forward declaration
+local ScheduleGlowScan
 
-    -- Hook the glow show event handler
-    if icon.OnSpellActivationOverlayGlowShowEvent then
-        hooksecurefunc(icon, "OnSpellActivationOverlayGlowShowEvent", function(self, spellID)
-            -- Check if this icon should respond to this spellID (wrapped in pcall for safety)
-            local shouldProcess = true
-            if self.NeedSpellActivationUpdate then
-                pcall(function()
-                    if not self:NeedSpellActivationUpdate(spellID) then
-                        shouldProcess = false
-                    end
-                end)
-            end
-            if not shouldProcess then return end
-
-            local settings = GetViewerSettings(viewerType)
-            if not settings then return end
-
-            if self:IsShown() then
-                StartGlow(self)
-            end
-        end)
-    end
-
-    -- Hook the glow hide event handler
-    if icon.OnSpellActivationOverlayGlowHideEvent then
-        hooksecurefunc(icon, "OnSpellActivationOverlayGlowHideEvent", function(self, spellID)
-            -- Check if this icon should respond to this spellID (wrapped in pcall for safety)
-            local shouldProcess = true
-            if self.NeedSpellActivationUpdate then
-                pcall(function()
-                    if not self:NeedSpellActivationUpdate(spellID) then
-                        shouldProcess = false
-                    end
-                end)
-            end
-            if not shouldProcess then return end
-
-            StopGlow(self)
-        end)
-    end
-
-    -- Hook RefreshOverlayGlow for initial state and refreshes
-    if icon.RefreshOverlayGlow then
-        hooksecurefunc(icon, "RefreshOverlayGlow", function(self)
-            local settings = GetViewerSettings(viewerType)
-            if not settings then return end
-
-            local shouldGlow = false
-
-            -- Method 1: Try IsSpellOverlayed API (wrapped in pcall for secret value protection)
-            pcall(function()
-                local spellID = self.GetSpellID and self:GetSpellID()
-                if spellID and IsSpellOverlayed and IsSpellOverlayed(spellID) then
-                    shouldGlow = true
-                end
-            end)
-
-            -- Method 2: Fallback - check icon's overlay frames directly
-            if not shouldGlow then
-                pcall(function()
-                    if self.overlay and self.overlay:IsShown() then
-                        shouldGlow = true
-                    elseif self.SpellActivationAlert and self.SpellActivationAlert:IsShown() then
-                        shouldGlow = true
-                    elseif self.OverlayGlow and self.OverlayGlow:IsShown() then
-                        shouldGlow = true
-                    end
-                end)
-            end
-
-            if shouldGlow then
-                StartGlow(self)
-            else
-                StopGlow(self)
-            end
-        end)
-    end
-
-    icon._QUIGlowHooked = true
+-- Lightweight icon frame check (mirrors cdm_viewer.lua's IsIconFrame)
+local function IsIconFrame(frame)
+    if not frame then return false end
+    return (frame.Icon or frame.icon) and (frame.Cooldown or frame.cooldown)
 end
 
--- Hook all icons in a viewer
-local function HookViewerIcons(viewerName)
+-- Scan a single viewer's icons and sync glow state
+local function ScanViewerGlows(viewerName, targetSpellID)
     local viewer = _G[viewerName]
     if not viewer then return end
 
-    local children = {viewer:GetChildren()}
-    for _, child in ipairs(children) do
-        if child and child ~= viewer.Selection then
-            HookCDMIcon(child)
+    local children = { viewer:GetChildren() }
+    for _, icon in ipairs(children) do
+        -- Filter: must be a real shown CDM icon (not custom CDM, not Selection, not non-icon children)
+        if icon and icon ~= viewer.Selection and not icon._isCustomCDMIcon
+            and icon:IsShown() and IsIconFrame(icon) then
+            local viewerType = GetViewerType(icon)
+            if viewerType then
+                local settings = GetViewerSettings(viewerType)
+                if settings then
+                    local shouldGlow = false
+                    local canDetermine = false
+
+                    pcall(function()
+                        local spellID = icon.GetSpellID and icon:GetSpellID()
+                        if spellID then
+                            -- Secret spellID = spell is mid-morph, skip this icon
+                            if type(issecretvalue) == "function" and issecretvalue(spellID) then
+                                return
+                            end
+                            -- When we have a targetSpellID from an event, skip unrelated icons
+                            if targetSpellID and spellID ~= targetSpellID then
+                                return
+                            end
+                            canDetermine = true
+                            if IsSpellOverlayed and IsSpellOverlayed(spellID) then
+                                shouldGlow = true
+                            end
+                        end
+                    end)
+
+                    -- Only modify glow state when we could reliably determine it.
+                    -- Icons with secret or nil spellIDs keep their current glow state.
+                    if canDetermine then
+                        if shouldGlow and not icon._QUICustomGlowActive then
+                            StartGlow(icon)
+                        elseif not shouldGlow and icon._QUICustomGlowActive then
+                            StopGlow(icon)
+                        end
+                    end
+                end
+            end
         end
     end
 end
 
--- Setup continuous hooking for new icons
-local function SetupViewerHooking(viewerName, trackerKey)
-    local viewer = _G[viewerName]
-    if not viewer then return end
-
-    -- Hook existing icons
-    HookViewerIcons(viewerName)
-
-    -- Watch for new icons via layout changes
-    if not viewer._QUIGlowLayoutHooked then
-        viewer:HookScript("OnSizeChanged", function()
-            C_Timer.After(0.1, function()
-                HookViewerIcons(viewerName)
-            end)
-        end)
-        viewer._QUIGlowLayoutHooked = true
+-- Run a glow scan across all viewers (optionally targeting a single spellID)
+local function RunGlowScan(targetSpellID)
+    scanPending = false
+    for _, viewerName in ipairs(VIEWER_NAMES) do
+        pcall(ScanViewerGlows, viewerName, targetSpellID)
     end
 end
 
--- ======================================================
--- Hook into Blizzard's glow system
--- ======================================================
-local function SetupGlowHooks()
-    -- Keep ActionButton hooks as backup for edge cases
-    -- These still work for some scenarios where CDM icon methods aren't available
-    if type(ActionButton_ShowOverlayGlow) == "function" then
-        hooksecurefunc("ActionButton_ShowOverlayGlow", function(button)
-            if not button then return end
-            local viewerType = GetViewerType(button)
-            if not viewerType then return end
-            local viewerSettings = GetViewerSettings(viewerType)
-            if not viewerSettings then return end
-            if button:IsShown() then
-                StartGlow(button)
-            end
-        end)
+-- Schedule a deferred glow scan for the next frame.
+-- Multiple calls within the same frame are coalesced into one scan.
+-- When targetSpellID is provided, only that spell's icon is updated (faster).
+-- A pending full scan always wins over a targeted one.
+local pendingTargetSpellID
+ScheduleGlowScan = function(targetSpellID)
+    if scanPending then
+        -- Already have a pending scan; widen to full scan if mixing targets
+        if pendingTargetSpellID and targetSpellID ~= pendingTargetSpellID then
+            pendingTargetSpellID = nil
+        end
+        return
     end
+    scanPending = true
+    pendingTargetSpellID = targetSpellID  -- nil = full scan
+    C_Timer.After(0, function()
+        RunGlowScan(pendingTargetSpellID)
+        pendingTargetSpellID = nil
+    end)
+end
 
-    if type(ActionButton_HideOverlayGlow) == "function" then
-        hooksecurefunc("ActionButton_HideOverlayGlow", function(button)
-            if not button then return end
-            local viewerType = GetViewerType(button)
-            if viewerType then
-                StopGlow(button)
-            end
-        end)
-    end
+-- ======================================================
+-- Event-Driven Glow Detection
+-- Listens for Blizzard's glow events and viewer changes,
+-- then triggers deferred scans. No hooks on individual CDM
+-- icon methods — all glow state changes happen outside
+-- Blizzard's update cycle.
+-- ======================================================
 
-    -- NEW: Setup CDM icon method hooks (more reliable than event-based spellID matching)
-    -- These hook directly into Blizzard's CDM icon methods for glow show/hide
-    C_Timer.After(0.5, function()
-        SetupViewerHooking("EssentialCooldownViewer", "Essential")
-        SetupViewerHooking("UtilityCooldownViewer", "Utility")
+local function HookViewerForScan(viewerName)
+    local viewer = _G[viewerName]
+    if not viewer or viewer._QUIGlowScanHooked then return end
+    viewer._QUIGlowScanHooked = true
+
+    -- New icons appear when Blizzard resizes the viewer
+    viewer:HookScript("OnSizeChanged", function()
+        ScheduleGlowScan()
     end)
 
-    -- Event frame for ensuring hooks are set up when icons change
+    -- Scan when viewer becomes visible
+    viewer:HookScript("OnShow", function()
+        ScheduleGlowScan()
+    end)
+end
+
+local function SetupGlowDetection()
+    -- Hook viewer containers for new icon detection
+    for _, viewerName in ipairs(VIEWER_NAMES) do
+        HookViewerForScan(viewerName)
+    end
+
+    -- Listen for glow events and state changes
     local eventFrame = CreateFrame("Frame")
+    eventFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_SHOW")
+    eventFrame:RegisterEvent("SPELL_ACTIVATION_OVERLAY_GLOW_HIDE")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    eventFrame:SetScript("OnEvent", function(self, event)
-        -- Ensure all icons are hooked (new icons may have been created)
-        C_Timer.After(0.2, function()
-            SetupViewerHooking("EssentialCooldownViewer", "Essential")
-            SetupViewerHooking("UtilityCooldownViewer", "Utility")
-        end)
+    eventFrame:SetScript("OnEvent", function(_, event, spellID)
+        if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+            -- Targeted scan for the specific spell that changed
+            ScheduleGlowScan(spellID)
+        else
+            -- Full scan for world entry, combat end, etc.
+            ScheduleGlowScan()
+        end
     end)
+
+    -- Low-frequency fallback scan to catch edge cases where event-driven
+    -- detection misses a glow state change (e.g. icon replaced with an
+    -- already-active proc, no SHOW event fires for it)
+    C_Timer.NewTicker(3, function()
+        ScheduleGlowScan()
+    end)
+
+    -- Initial scan
+    ScheduleGlowScan()
 end
 
 -- ======================================================
 -- Refresh all glows (called when settings change)
 -- ======================================================
 local function RefreshAllGlows()
-    -- Store which icons had glows before refresh
-    local iconsWithGlows = {}
-    for icon, _ in pairs(activeGlowIcons) do
-        if icon then
-            iconsWithGlows[icon] = true
-        end
+    -- Collect keys first to avoid modifying the table during iteration
+    local toStop = {}
+    for icon in pairs(activeGlowIcons) do
+        toStop[#toStop + 1] = icon
     end
-    
-    -- Stop all existing custom glows
-    for icon, _ in pairs(activeGlowIcons) do
-        if icon then
-            StopGlow(icon)
-        end
+    for _, icon in ipairs(toStop) do
+        StopGlow(icon)
     end
     wipe(activeGlowIcons)
-    
-    -- Re-apply glows to icons that had them before
-    for icon, _ in pairs(iconsWithGlows) do
-        if icon and icon:IsShown() then
-            StartGlow(icon)
-        end
-    end
+
+    -- Re-scan to apply with current settings
+    ScheduleGlowScan()
 end
 
 -- ======================================================
 -- Initialize
 -- ======================================================
-local glowHooksSetup = false
+local glowSetupDone = false
 
-local function EnsureGlowHooks()
-    if glowHooksSetup then return end
-    glowHooksSetup = true
-    SetupGlowHooks()
+local function EnsureGlowSetup()
+    if glowSetupDone then return end
+    glowSetupDone = true
+    SetupGlowDetection()
 end
 
 local initFrame = CreateFrame("Frame")
@@ -453,11 +424,15 @@ initFrame:RegisterEvent("ADDON_LOADED")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self, event, arg)
     if event == "ADDON_LOADED" and arg == "Blizzard_CooldownManager" then
-        -- Set up hooks immediately - no delay!
-        EnsureGlowHooks()
+        EnsureGlowSetup()
     elseif event == "PLAYER_LOGIN" then
-        -- Backup: ensure hooks are set up by login
-        EnsureGlowHooks()
+        -- Backup: ensure setup by login even if CDM loaded earlier
+        EnsureGlowSetup()
+    end
+    -- Unregister once setup is done to stop receiving unnecessary events
+    if glowSetupDone then
+        self:UnregisterEvent("ADDON_LOADED")
+        self:UnregisterEvent("PLAYER_LOGIN")
     end
 end)
 
@@ -470,9 +445,7 @@ QUI.CustomGlows = {
     RefreshAllGlows = RefreshAllGlows,
     GetViewerType = GetViewerType,
     activeGlowIcons = activeGlowIcons,
-    -- CDM icon hooking (for external trigger if needed)
-    HookCDMIcon = HookCDMIcon,
-    HookViewerIcons = HookViewerIcons,
+    ScheduleGlowScan = ScheduleGlowScan,
 }
 
 -- Global function for config panel to call
