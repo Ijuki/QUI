@@ -36,6 +36,8 @@
         "getglobal",
         "UIErrorsFrame",
         "BackdropTemplateMixin",
-        "SOUNDKIT"
+        "SOUNDKIT",
+        "GetUnitName",
+        "ITEM_QUALITY_COLORS"
     ]
 }
