@@ -561,14 +561,22 @@ local function CollectIcons(viewer, trackerKey)
         local child = select(i, viewer:GetChildren())
         -- Skip custom CDM icons from child enumeration (we inject them separately)
         if child and child ~= viewer.Selection and not child._isCustomCDMIcon and IsIconFrame(child) then
-            -- Collect shown icons OR icons we previously hid, but only if they
-            -- have an actual spell texture (skip empty Blizzard placeholder frames)
-            if (child:IsShown() or child._ncdmHidden) and HasValidTexture(child) then
-                table.insert(icons, child)
-            else
-                -- Clear our hidden flag on textureless frames so they aren't
-                -- perpetually re-collected; Blizzard will Show() them when ready
-                child._ncdmHidden = nil
+            if child:IsShown() or child._ncdmHidden then
+                if HasValidTexture(child) then
+                    -- Track that this icon had a valid texture (last-known-good state)
+                    child._ncdmHadTexture = true
+                    table.insert(icons, child)
+                elseif InCombatLockdown() and child._ncdmHadTexture then
+                    -- During combat, keep icons that previously had a valid texture.
+                    -- Spell morphs (e.g. Devourer DH) momentarily strip the texture;
+                    -- we trust the icon will get its texture back shortly.
+                    table.insert(icons, child)
+                else
+                    -- Clear flags on textureless frames out of combat so they
+                    -- aren't perpetually re-collected; Blizzard will Show() them when ready
+                    child._ncdmHidden = nil
+                    child._ncdmHadTexture = nil
+                end
             end
         end
     end

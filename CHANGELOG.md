@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.26.2 - 2026-02-07
+
+### Changed
+- updated LibCustomGlow
+
+### Fixed
+- fix autocast shine and button glow on CDM
+## v2.26.1 - 2026-02-07
+
+### Changed
+- Defer proc and glow updates by a frame to not run within Blizzard update cycle. This is an attempt to solve the issue of the whole CDM disappearing for some specs when they proc certain spells (i.e. Devourer DH). *Let me know, if this breaks things, that I have not discovered yet in my testing, then I will revert the change.*
 ## v2.26 - 2026-02-07
 
 ### Added
