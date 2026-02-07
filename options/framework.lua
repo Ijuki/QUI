@@ -2898,22 +2898,13 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
     local scrollFrame = CreateFrame("ScrollFrame", nil, menuFrame)
     scrollFrame:SetPoint("TOPLEFT", 0, 0)
     scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
-    scrollFrame:EnableMouseWheel(true)
-
     -- Scroll content (child frame)
     local scrollContent = CreateFrame("Frame", nil, scrollFrame)
     scrollContent:SetWidth(menuFrame:GetWidth() or 200)
     scrollFrame:SetScrollChild(scrollContent)
     menuFrame.scrollContent = scrollContent
 
-    -- Mouse wheel scrolling
-    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local currentScroll = self:GetVerticalScroll()
-        local maxScroll = math.max(0, scrollContent:GetHeight() - menuFrame:GetHeight())
-        local newScroll = currentScroll - (delta * 20)
-        newScroll = math.max(0, math.min(newScroll, maxScroll))
-        self:SetVerticalScroll(newScroll)
-    end)
+    ns.ApplyScrollWheel(scrollFrame)
 
     -- Update scroll content width when menu opens
     menuFrame:SetScript("OnShow", function(self)
@@ -4722,6 +4713,7 @@ function GUI:ShowExportPopup(title, exportString)
         scrollFrame:SetScript("OnSizeChanged", function(self)
             editBox:SetWidth(self:GetWidth() - 10)
         end)
+        ns.ApplyScrollWheel(scrollFrame)
 
         -- Select All button
         local selectBtn = self:CreateButton(popup, "Select All", 100, 26, function()
@@ -4833,6 +4825,7 @@ function GUI:ShowImportPopup(config)
         scrollFrame:SetScript("OnSizeChanged", function(self)
             editBox:SetWidth(self:GetWidth() - 10)
         end)
+        ns.ApplyScrollWheel(scrollFrame)
 
         -- Button container (buttons are created/updated dynamically)
         popup.buttons = {}
@@ -4872,7 +4865,7 @@ function GUI:ShowImportPopup(config)
     local function DoImport(replaceAll)
         local str = ImportPopup.editBox:GetText()
         if not str or str == "" then
-            print("|cffff0000QuaziiUI:|r No import string provided")
+            print("|cffff0000QUI:|r No import string provided")
             return
         end
 
@@ -4884,13 +4877,13 @@ function GUI:ShowImportPopup(config)
         end
 
         if ok then
-            print("|cff34D399QuaziiUI:|r " .. (msg or "Import successful"))
+            print("|cff34D399QUI:|r " .. (msg or "Import successful"))
             ImportPopup:Hide()
             if config.onSuccess then
                 config.onSuccess()
             end
         else
-            print("|cffff0000QuaziiUI:|r " .. (msg or "Import failed"))
+            print("|cffff0000QUI:|r " .. (msg or "Import failed"))
         end
     end
 
