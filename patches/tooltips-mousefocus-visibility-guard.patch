@@ -1,0 +1,22 @@
+diff --git a/modules/qol/tooltips.lua b/modules/qol/tooltips.lua
+index eba11a1..879ad25 100755
+--- a/modules/qol/tooltips.lua
++++ b/modules/qol/tooltips.lua
+@@ -54,8 +54,15 @@ local function IsFrameBlockingMouse()
+     -- WorldFrame means mouse is over the 3D world, not a UI panel
+     if focus == WorldFrame then return false end
+ 
+-    -- If there's any other visible frame under the mouse, it's blocking
+-    return focus:IsVisible()
++    local isVisible = focus.IsVisible
++    if type(isVisible) == "function" then
++        local ok, visible = pcall(isVisible, focus)
++        if ok then
++            return visible and true or false
++        end
++    end
++
++    return true
+ end
+ 
+ -- State

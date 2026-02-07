@@ -1443,6 +1443,27 @@ local function RebuildActiveSet(bar)
 
     local config = bar.config
     local hideNonUsable = config.hideNonUsable
+    local inCombatLockdown = InCombatLockdown()
+
+    local function SetIconVisibility(icon, visible)
+        if visible then
+            if inCombatLockdown then
+                if icon:IsShown() then
+                    icon:SetAlpha(1)
+                end
+            else
+                icon:Show()
+            end
+        else
+            if inCombatLockdown then
+                if icon:IsShown() then
+                    icon:SetAlpha(0)
+                end
+            else
+                icon:Hide()
+            end
+        end
+    end
 
     -- Iterate the FULL configured list (bar.icons), not activeIcons
     -- This ensures we pick up newly-talented spells when switching talent loadouts
@@ -1468,15 +1489,15 @@ local function RebuildActiveSet(bar)
                 icon._usable = true
                 icon.isVisible = true  -- Mark as visible for layout
                 icon.tex:SetDesaturated(false)  -- Ensure known spells are full color
-                icon:Show()
+                SetIconVisibility(icon, true)
             else
                 -- Unknown spell: hide if hideNonUsable is on, otherwise show desaturated (but not tracked)
                 if hideNonUsable then
-                    icon:Hide()
                     icon.isVisible = false  -- Mark as NOT visible for layout (allows collapse)
+                    SetIconVisibility(icon, false)
                 else
-                    icon:Show()
                     icon.isVisible = true  -- Still visible (just desaturated)
+                    SetIconVisibility(icon, true)
                     icon.tex:SetDesaturated(true)  -- Grey out unknown spells
                     icon.cooldown:Clear()  -- No cooldown tracking for unknown spells
                 end

@@ -1,0 +1,39 @@
+diff --git a/modules/character/character.lua b/modules/character/character.lua
+index 4a1121d..417eb57 100755
+--- a/modules/character/character.lua
++++ b/modules/character/character.lua
+@@ -953,12 +953,32 @@ local function HideBlizzardDecorations()
+             slot.BottomRightSlotTexture:Hide()
+         end
+ 
+-        -- Hide ALL non-icon regions (decorative textures)
++        -- Hide decorative slot textures but preserve dynamic state overlays
++        -- (e.g. equipment set ignore/lock markers)
+         for i = 1, select("#", slot:GetRegions()) do
+             local region = select(i, slot:GetRegions())
+             if region and region.GetObjectType and region:GetObjectType() == "Texture" then
+                 local isIcon = region == slot.icon or region == slot.Icon
+-                if not isIcon then
++                local drawLayer = region.GetDrawLayer and select(1, region:GetDrawLayer()) or nil
++                local regionName = region.GetName and region:GetName() or ""
++                local keepStateOverlay =
++                    (type(regionName) == "string" and (
++                        regionName:find("Ignore", 1, true) or
++                        regionName:find("Locked", 1, true) or
++                        regionName:find("Check", 1, true)
++                    ))
++
++                if not keepStateOverlay and region.GetAtlas then
++                    local okAtlas, atlas = pcall(region.GetAtlas, region)
++                    if okAtlas and type(atlas) == "string" then
++                        local atlasLower = atlas:lower()
++                        if atlasLower:find("ignore", 1, true) or atlasLower:find("forbidden", 1, true) or atlasLower:find("lock", 1, true) then
++                            keepStateOverlay = true
++                        end
++                    end
++                end
++
++                if not isIcon and not keepStateOverlay and (drawLayer == "BACKGROUND" or drawLayer == "BORDER" or drawLayer == "ARTWORK") then
+                     region:SetAlpha(0)
+                 end
+             end
