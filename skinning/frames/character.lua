@@ -440,6 +440,40 @@ end
 ---------------------------------------------------------------------------
 
 -- Skin individual equipment set entry
+local function GetClassSelectionColor()
+    local _, classTag = UnitClass("player")
+    local classColor = classTag and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classTag]
+    if classColor then
+        return classColor.r, classColor.g, classColor.b, 1
+    end
+
+    local sr, sg, sb = GetSkinColors()
+    return sr, sg, sb, 1
+end
+
+local function UpdateEquipmentSetEntrySelection(entry)
+    if not entry then return end
+    local selected = false
+
+    if entry.SelectedBar and entry.SelectedBar.IsShown and entry.SelectedBar:IsShown() then
+        selected = true
+    end
+
+    if entry.SelectedBar and entry.SelectedBar.SetAlpha then
+        entry.SelectedBar:SetAlpha(selected and 0.22 or 0.08)
+    end
+
+    if entry.quiSelectedBorder then
+        if selected then
+            local cr, cg, cb, ca = GetClassSelectionColor()
+            entry.quiSelectedBorder:SetBackdropBorderColor(cr, cg, cb, ca)
+            entry.quiSelectedBorder:Show()
+        else
+            entry.quiSelectedBorder:Hide()
+        end
+    end
+end
+
 local function SkinEquipmentSetEntry(entry)
     if entry.quiCharSkinned then return end
 
@@ -475,6 +509,31 @@ local function SkinEquipmentSetEntry(entry)
         entry.HighlightBar:SetColorTexture(sr, sg, sb, 0.15)
     end
 
+    if not entry.quiSelectedBorder then
+        local border = CreateFrame("Frame", nil, entry, "BackdropTemplate")
+        border:SetPoint("TOPLEFT", entry, "TOPLEFT", -1, 1)
+        border:SetPoint("BOTTOMRIGHT", entry, "BOTTOMRIGHT", 1, -1)
+        border:SetFrameLevel((entry:GetFrameLevel() or 1) + 10)
+        local px = QUICore:GetPixelSize(border)
+        border:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = math.max(px * 2, px),
+        })
+        border:Hide()
+        entry.quiSelectedBorder = border
+    end
+
+    if entry.SelectedBar and not entry.SelectedBar._quiSelectionHooked then
+        entry.SelectedBar:HookScript("OnShow", function()
+            UpdateEquipmentSetEntrySelection(entry)
+        end)
+        entry.SelectedBar:HookScript("OnHide", function()
+            UpdateEquipmentSetEntrySelection(entry)
+        end)
+        entry.SelectedBar._quiSelectionHooked = true
+    end
+
+    UpdateEquipmentSetEntrySelection(entry)
     entry.quiCharSkinned = true
 end
 
@@ -612,6 +671,7 @@ RefreshEquipmentManagerColors = function()
             if entry.HighlightBar then
                 entry.HighlightBar:SetColorTexture(sr, sg, sb, 0.15)
             end
+            UpdateEquipmentSetEntrySelection(entry)
         end)
     end
 

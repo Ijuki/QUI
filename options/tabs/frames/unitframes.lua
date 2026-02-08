@@ -60,6 +60,13 @@ local function CreateUnitFramesPage(parent)
             tabContent:SetHeight(100)
             return
         end
+        if not ufdb.general then
+            ufdb.general = {}
+        end
+        local ufGeneral = ufdb.general
+        if ufGeneral.showPVPIndicator == nil then
+            ufGeneral.showPVPIndicator = true
+        end
 
         -- Use the main profile general settings (not ufdb.general)
         local general = db.general
@@ -291,9 +298,19 @@ local function CreateUnitFramesPage(parent)
         tooltipHeader:SetPoint("TOPLEFT", PAD, y)
         y = y - tooltipHeader.gap
 
-        local tooltipCheck = GUI:CreateFormCheckbox(tabContent, "Show Tooltip for Unitframes", "showTooltips", ufdb.general, RefreshNewUF)
+        local tooltipCheck = GUI:CreateFormCheckbox(tabContent, "Show Tooltip for Unitframes", "showTooltips", ufGeneral, RefreshNewUF)
         tooltipCheck:SetPoint("TOPLEFT", PAD, y)
         tooltipCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+        y = y - FORM_ROW
+
+        -- Unit frame indicators section
+        local pvpHeader = GUI:CreateSectionHeader(tabContent, "Unit Frame Indicators")
+        pvpHeader:SetPoint("TOPLEFT", PAD, y)
+        y = y - pvpHeader.gap
+
+        local pvpIndicatorCheck = GUI:CreateFormCheckbox(tabContent, "Show PvP Indicator", "showPVPIndicator", ufGeneral, RefreshNewUF)
+        pvpIndicatorCheck:SetPoint("TOPLEFT", PAD, y)
+        pvpIndicatorCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
 
         -- Smoother Updates section
@@ -307,7 +324,7 @@ local function CreateUnitFramesPage(parent)
         smoothDesc:SetJustifyH("LEFT")
         y = y - 24
 
-        local smoothCheck = GUI:CreateFormCheckbox(tabContent, "Smoother Animation", "smootherAnimation", ufdb.general, RefreshNewUF)
+        local smoothCheck = GUI:CreateFormCheckbox(tabContent, "Smoother Animation", "smootherAnimation", ufGeneral, RefreshNewUF)
         smoothCheck:SetPoint("TOPLEFT", PAD, y)
         smoothCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW

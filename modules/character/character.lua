@@ -114,10 +114,10 @@ local defaultSettings = {
     secondaryStatFormat = "both",
     showTooltips = false,
     -- Inspect-specific overlay settings (separate from character)
-    showInspectItemName = true,
+    showInspectItemName = false,
     showInspectItemLevel = true,
     showInspectEnchants = true,
-    showInspectGems = true,
+    showInspectGems = false,
 }
 
 local function GetSettings()
@@ -625,10 +625,30 @@ local function UpdateSlotOverlay(overlay, unit)
     local isInspect = unit ~= "player"
     local showItemName, showItemLevel, showEnchants, showGems
     if isInspect then
-        showItemName = settings.showInspectItemName ~= false
+        -- Inspect frame is intentionally minimal: only ilvl + enchant text.
+        showItemName = false
         showItemLevel = settings.showInspectItemLevel ~= false
         showEnchants = settings.showInspectEnchants ~= false
-        showGems = settings.showInspectGems ~= false
+        showGems = false
+
+        -- With item names hidden on inspect, pull ilvl/enchant up one line.
+        local useLeftSide = overlay.slotInfo.side == "right" or overlay.slotInfo.id == INVSLOT_MAINHAND
+        local anchorPoint = useLeftSide and "TOPRIGHT" or "TOPLEFT"
+        local anchorRel = useLeftSide and "TOPLEFT" or "TOPRIGHT"
+        local bottomAnchor = useLeftSide and "BOTTOMRIGHT" or "BOTTOMLEFT"
+        local xOffset = useLeftSide and -4 or 4
+        local justify = useLeftSide and "RIGHT" or "LEFT"
+
+        if overlay.itemLevel then
+            overlay.itemLevel:ClearAllPoints()
+            overlay.itemLevel:SetPoint(anchorPoint, overlay, anchorRel, xOffset, 2)
+            overlay.itemLevel:SetJustifyH(justify)
+        end
+        if overlay.enchant then
+            overlay.enchant:ClearAllPoints()
+            overlay.enchant:SetPoint(anchorPoint, overlay.itemLevel, bottomAnchor, 0, -1)
+            overlay.enchant:SetJustifyH(justify)
+        end
     else
         showItemName = settings.showItemName ~= false
         showItemLevel = settings.showItemLevel ~= false

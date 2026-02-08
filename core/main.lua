@@ -860,7 +860,7 @@ local defaults = {
             },
             buffCount = {
                 show = true,
-                position = "BOTTOM",  -- TOP, BOTTOM, LEFT, RIGHT
+                position = "TOP",  -- TOP, BOTTOM, LEFT, RIGHT
                 fontSize = 10,
                 font = "Quazii",  -- Font name from LibSharedMedia
                 color = { 1, 1, 1, 1 },  -- White default
@@ -1797,6 +1797,7 @@ local defaults = {
                 fontSize = 12,
                 fontOutline = "OUTLINE",                  -- NONE, OUTLINE, THICKOUTLINE
                 showTooltips = true,                      -- Show tooltips on unit frame mouseover
+                showPVPIndicator = true,                  -- Show PvP text indicator on unit frames
                 smootherAnimation = false,                -- Uncap 60 FPS throttle for smoother castbar animation
                 -- Hostility colors (for NPC unit frames)
                 hostilityColorHostile = { 0.8, 0.2, 0.2, 1 },   -- Red (enemies)

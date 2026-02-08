@@ -791,6 +791,15 @@ UpdateDisplay = function()
 
     local missing = GetMissingBuffs()
 
+    -- One-time migration: move buff count text above icons for existing profiles
+    -- that still use the old default ("BOTTOM").
+    if settings.buffCount and not settings.buffCount._quiCountPosMigrated then
+        if settings.buffCount.position == nil or settings.buffCount.position == "BOTTOM" then
+            settings.buffCount.position = "TOP"
+        end
+        settings.buffCount._quiCountPosMigrated = true
+    end
+
     if #missing == 0 then
         mainFrame:Hide()
         return
@@ -853,7 +862,7 @@ UpdateDisplay = function()
 
                 -- Apply position with offsets
                 icon.countText:ClearAllPoints()
-                local countPos = countSettings.position or "BOTTOM"
+                local countPos = countSettings.position or "TOP"
                 local offsetX = countSettings.offsetX or 0
                 local offsetY = countSettings.offsetY or 0
                 if countPos == "TOP" then

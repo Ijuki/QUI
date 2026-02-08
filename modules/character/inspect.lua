@@ -45,10 +45,10 @@ local function GetSettings()
     -- Fallback defaults if shared not ready
     return {
         inspectEnabled = true,
-        showInspectItemName = true,
+        showInspectItemName = false,
         showInspectItemLevel = true,
         showInspectEnchants = true,
-        showInspectGems = true,
+        showInspectGems = false,
         inspectPanelScale = 1.0,
         inspectSlotTextSize = 12,
         inspectEnchantClassColor = true,
@@ -77,6 +77,16 @@ local function GetColors()
         text = { 0.953, 0.957, 0.965, 1 },
         border = { 0.2, 0.25, 0.3, 1 },
     }
+end
+
+---------------------------------------------------------------------------
+-- Get the currently inspected unit (fallback to target)
+---------------------------------------------------------------------------
+local function GetInspectUnit()
+    if InspectFrame and InspectFrame.unit and UnitExists(InspectFrame.unit) then
+        return InspectFrame.unit
+    end
+    return "target"
 end
 
 ---------------------------------------------------------------------------
@@ -501,9 +511,9 @@ local function UpdateInspectSlotBorder(slot, unit)
     if not slot or not slot._quiBorderFrame then return end
 
     local slotID = slot:GetID()
-    unit = unit or "target"
+    unit = unit or GetInspectUnit()
 
-    -- Get item quality for inspected target (pcall for edge cases where item data isn't cached)
+    -- Get item quality for inspected unit (pcall for edge cases where item data isn't cached)
     local itemLink = GetInventoryItemLink(unit, slotID)
     local quality = nil
     if itemLink then
@@ -835,7 +845,7 @@ local function RefreshInspectDisplayMode()
     elseif settings.inspectLiteShowPerSlot or settings.inspectLiteShowOverall then
         -- Lite mode (only when full overlays disabled): show enabled lite displays
         HideDetailedOverlays()
-        UpdateAllLiteDisplays("target")
+        UpdateAllLiteDisplays(GetInspectUnit())
     else
         -- Both disabled: hide everything
         HideLiteDisplays()
@@ -917,7 +927,7 @@ local function UpdateInspectILvlDisplay()
     if not displayFrame.text then return end
 
     local shared = GetShared()
-    local unit = InspectFrame.unit or "target"
+    local unit = GetInspectUnit()
 
     -- Validate that unit matches our stored GUID (handles target changes mid-inspect)
     if currentInspectGUID and UnitGUID(unit) ~= currentInspectGUID then
@@ -1059,6 +1069,15 @@ local function CreateInspectSettingsButton()
     if charDB.inspectSlotTextSize == nil then
         charDB.inspectSlotTextSize = 12
     end
+    if charDB.showInspectItemLevel == nil then
+        charDB.showInspectItemLevel = true
+    end
+    if charDB.showInspectEnchants == nil then
+        charDB.showInspectEnchants = true
+    end
+    -- Keep inspect compact by design: ilvl + enchant only.
+    charDB.showInspectItemName = false
+    charDB.showInspectGems = false
     -- Initialize lite mode defaults
     if charDB.inspectLiteMode == nil then
         charDB.inspectLiteMode = false
@@ -1254,11 +1273,6 @@ local function CreateInspectSettingsButton()
     overlayHeader:SetPoint("TOPLEFT", PAD, y)
     y = y - overlayHeader.gap
 
-    local showItemName = GUI:CreateFormCheckbox(scrollChild, "Show Equipment Name", "showInspectItemName", charDB, RefreshInspect)
-    showItemName:SetPoint("TOPLEFT", PAD, y)
-    showItemName:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
     local showIlvl = GUI:CreateFormCheckbox(scrollChild, "Show Item Level", "showInspectItemLevel", charDB, RefreshInspect)
     showIlvl:SetPoint("TOPLEFT", PAD, y)
     showIlvl:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
@@ -1267,11 +1281,6 @@ local function CreateInspectSettingsButton()
     local showEnchants = GUI:CreateFormCheckbox(scrollChild, "Show Enchant Status", "showInspectEnchants", charDB, RefreshInspect)
     showEnchants:SetPoint("TOPLEFT", PAD, y)
     showEnchants:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local showGems = GUI:CreateFormCheckbox(scrollChild, "Show Gem Indicators", "showInspectGems", charDB, RefreshInspect)
-    showGems:SetPoint("TOPLEFT", PAD, y)
-    showGems:SetPoint("RIGHT", scrollChild, "RIGHT", -PAD, 0)
     y = y - FORM_ROW
 
     y = y - 10
@@ -1340,10 +1349,10 @@ local function CreateInspectSettingsButton()
     local resetBtn = GUI:CreateButton(inspectSettingsPanel, "Reset", 80, 24, function()
         -- Reset all inspect settings to defaults
         charDB.inspectPanelScale = 1.0
-        charDB.showInspectItemName = true
+        charDB.showInspectItemName = false
         charDB.showInspectItemLevel = true
         charDB.showInspectEnchants = true
-        charDB.showInspectGems = true
+        charDB.showInspectGems = false
         charDB.inspectSlotTextSize = 12
         charDB.inspectEnchantClassColor = true
         charDB.inspectEnchantTextColor = {0.204, 0.827, 0.6}
@@ -1402,7 +1411,7 @@ local function ApplyInspectPaneLayout()
         C_Timer.After(0.05, function()
             RepositionInspectSlots()
             PositionInspectModelScene()
-            UpdateAllInspectSlotBorders("target")
+            UpdateAllInspectSlotBorders(GetInspectUnit())
         end)
     end)
 
@@ -1421,7 +1430,7 @@ local function InitializeInspectOverlays()
     for _, slotInfo in ipairs(shared.EQUIPMENT_SLOTS) do
         local slotFrame = _G["Inspect" .. slotInfo.name .. "Slot"]
         if slotFrame then
-            inspectOverlays[slotInfo.id] = shared.CreateSlotOverlay(slotFrame, slotInfo, "target")
+            inspectOverlays[slotInfo.id] = shared.CreateSlotOverlay(slotFrame, slotInfo, GetInspectUnit())
         end
     end
 
@@ -1436,17 +1445,18 @@ local function UpdateInspectFrame()
 
     local settings = GetSettings()
     local shared = GetShared()
+    local unit = GetInspectUnit()
 
     if settings.inspectEnabled then
         -- Full overlay mode: always use detailed overlays, never lite mode
         HideLiteDisplays()
         if shared.UpdateAllSlotOverlays then
-            shared.UpdateAllSlotOverlays("target", inspectOverlays)
+            shared.UpdateAllSlotOverlays(unit, inspectOverlays)
         end
     elseif settings.inspectLiteShowPerSlot or settings.inspectLiteShowOverall then
         -- Lite mode (only when full overlays disabled): show enabled lite displays
         HideDetailedOverlays()
-        UpdateAllLiteDisplays("target")
+        UpdateAllLiteDisplays(unit)
     else
         -- All disabled: hide everything
         HideLiteDisplays()
@@ -1457,7 +1467,7 @@ local function UpdateInspectFrame()
     UpdateInspectILvlDisplay()
 
     -- Update slot borders based on item quality
-    UpdateAllInspectSlotBorders("target")
+    UpdateAllInspectSlotBorders(unit)
 end
 
 ---------------------------------------------------------------------------
@@ -1484,7 +1494,7 @@ local function HookInspectFrame()
         end
 
         C_Timer.After(0.1, function()
-            local unit = InspectFrame.unit or "target"
+            local unit = GetInspectUnit()
             -- Use pcall to protect against edge cases (unit out of range mid-check)
             local ok, canInspect = pcall(function() return UnitExists(unit) and CanInspect(unit) end)
             if ok and canInspect then

@@ -230,7 +230,7 @@ local function BuildRaidBuffsTab(tabContent)
 
         -- Initialize buffCount settings if not present
         if not settings.buffCount then
-            settings.buffCount = { show = true, position = "BOTTOM", fontSize = 10, color = { 1, 1, 1, 1 } }
+            settings.buffCount = { show = true, position = "TOP", fontSize = 10, color = { 1, 1, 1, 1 } }
         end
         local countSettings = settings.buffCount
 
