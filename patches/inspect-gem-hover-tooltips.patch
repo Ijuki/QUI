@@ -1,0 +1,141 @@
+diff --git a/modules/character/character.lua b/modules/character/character.lua
+index f76b13a..3535fb9 100755
+--- a/modules/character/character.lua
++++ b/modules/character/character.lua
+@@ -411,6 +411,37 @@ local function GetGemInfo(unit, slotId)
+     return gems, totalSockets
+ end
+ 
++local function ShowInspectGemTooltip(gemFrame)
++    if not gemFrame or not gemFrame.gemData then return end
++
++    local gemData = gemFrame.gemData
++    GameTooltip:SetOwner(gemFrame, "ANCHOR_RIGHT")
++
++    if gemData.filled and gemData.link then
++        local ok = pcall(GameTooltip.SetHyperlink, GameTooltip, gemData.link)
++        if not ok then
++            GameTooltip:ClearLines()
++            GameTooltip:SetText("Gem", 1, 1, 1)
++            if gemData.type and gemData.type ~= "" then
++                GameTooltip:AddLine(gemData.type, 0.75, 0.75, 0.75)
++            end
++            GameTooltip:Show()
++        end
++        return
++    end
++
++    GameTooltip:ClearLines()
++    GameTooltip:SetText("Empty Socket", 0.8, 0.8, 0.8)
++    if gemData.type and gemData.type ~= "" and gemData.type ~= "Empty" then
++        GameTooltip:AddLine(gemData.type, 0.75, 0.75, 0.75)
++    end
++    GameTooltip:Show()
++end
++
++local function HideInspectGemTooltip()
++    GameTooltip:Hide()
++end
++
+ ---------------------------------------------------------------------------
+ -- Get durability for a slot
+ ---------------------------------------------------------------------------
+@@ -551,10 +582,24 @@ local function CreateSlotOverlay(slotFrame, slotInfo, unit)
+ 
+     -- Gem icons on OUTER side of column (reversed from before)
+     overlay.gems = {}
++    local useInspectGemButtons = unit ~= "player"
+     for i = 1, 4 do
+-        local gem = overlay:CreateTexture(nil, "OVERLAY")
++        local gem
++        if useInspectGemButtons then
++            gem = CreateFrame("Button", nil, overlay)
++            gem:EnableMouse(true)
++            gem:RegisterForClicks("AnyUp")
++            gem.gemData = nil
++            gem.icon = gem:CreateTexture(nil, "OVERLAY")
++            gem.icon:SetAllPoints()
++            gem.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
++            gem:SetScript("OnEnter", ShowInspectGemTooltip)
++            gem:SetScript("OnLeave", HideInspectGemTooltip)
++        else
++            gem = overlay:CreateTexture(nil, "OVERLAY")
++            gem:SetTexCoord(0.08, 0.92, 0.08, 0.92)
++        end
+         gem:SetSize(GEM_SIZE, GEM_SIZE)
+-        gem:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+ 
+         -- Position gems on OUTER side
+         if slotInfo.side == "left" then
+@@ -625,11 +670,11 @@ local function UpdateSlotOverlay(overlay, unit)
+     local isInspect = unit ~= "player"
+     local showItemName, showItemLevel, showEnchants, showGems
+     if isInspect then
+-        -- Inspect frame is intentionally minimal: only ilvl + enchant text.
++        -- Inspect frame is intentionally minimal: ilvl + enchant text + gem sockets.
+         showItemName = false
+         showItemLevel = settings.showInspectItemLevel ~= false
+         showEnchants = settings.showInspectEnchants ~= false
+-        showGems = false
++        showGems = true
+ 
+         -- With item names hidden on inspect, pull ilvl/enchant up one line.
+         local useLeftSide = overlay.slotInfo.side == "right" or overlay.slotInfo.id == INVSLOT_MAINHAND
+@@ -767,9 +812,16 @@ local function UpdateSlotOverlay(overlay, unit)
+ 
+     -- Update gem icons (actual textures, including empty sockets)
+     if showGems then
+-        local gems, totalSockets = GetGemInfo(unit, slotId)
+-        for i, gemTex in ipairs(overlay.gems) do
++        local gems = GetGemInfo(unit, slotId)
++        for i, gemObj in ipairs(overlay.gems) do
++            local gemTex = gemObj.icon or gemObj
++            if gemObj.gemData ~= nil then
++                gemObj.gemData = nil
++            end
+             if gems[i] then
++                if gemObj.gemData ~= nil then
++                    gemObj.gemData = gems[i]
++                end
+                 if gems[i].filled then
+                     -- Filled socket: show gem icon
+                     local gemIcon = gems[i].icon
+@@ -778,29 +830,32 @@ local function UpdateSlotOverlay(overlay, unit)
+                         gemTex:SetTexture(gemIcon)
+                         gemTex:SetDesaturated(false)
+                         gemTex:SetVertexColor(1, 1, 1, 1)
+-                        gemTex:Show()
++                        gemObj:Show()
+                     else
+                         -- Fallback to colored square if icon not available
+                         local gemType = gems[i].type or "Prismatic"
+                         local color = GEM_COLORS[gemType] or GEM_COLORS.Prismatic
+                         gemTex:SetColorTexture(color[1], color[2], color[3], color[4])
+                         gemTex:SetDesaturated(false)
+-                        gemTex:Show()
++                        gemObj:Show()
+                     end
+                 else
+                     -- Empty socket: show grey socket icon
+                     gemTex:SetTexture("Interface\\ItemSocketingFrame\\UI-EmptySocket-Prismatic")
+                     gemTex:SetDesaturated(true)
+                     gemTex:SetVertexColor(0.6, 0.6, 0.6, 0.9)
+-                    gemTex:Show()
++                    gemObj:Show()
+                 end
+             else
+-                gemTex:Hide()
++                gemObj:Hide()
+             end
+         end
+     else
+-        for _, gemTex in ipairs(overlay.gems) do
+-            gemTex:Hide()
++        for _, gemObj in ipairs(overlay.gems) do
++            if gemObj.gemData ~= nil then
++                gemObj.gemData = nil
++            end
++            gemObj:Hide()
+         end
+     end
+ 

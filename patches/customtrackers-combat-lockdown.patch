@@ -1,8 +1,8 @@
 diff --git a/modules/trackers/customtrackers.lua b/modules/trackers/customtrackers.lua
-index abcc414..a8a8e92 100755
+index 1c6c29f..31ea655 100644
 --- a/modules/trackers/customtrackers.lua
 +++ b/modules/trackers/customtrackers.lua
-@@ -1443,6 +1443,27 @@ local function RebuildActiveSet(bar)
+@@ -1482,6 +1482,27 @@ local function RebuildActiveSet(bar)
  
      local config = bar.config
      local hideNonUsable = config.hideNonUsable
@@ -30,20 +30,9 @@ index abcc414..a8a8e92 100755
  
      -- Iterate the FULL configured list (bar.icons), not activeIcons
      -- This ensures we pick up newly-talented spells when switching talent loadouts
-@@ -1468,15 +1489,15 @@ local function RebuildActiveSet(bar)
-                 icon._usable = true
-                 icon.isVisible = true  -- Mark as visible for layout
-                 icon.tex:SetDesaturated(false)  -- Ensure known spells are full color
--                icon:Show()
-+                SetIconVisibility(icon, true)
-             else
-                 -- Unknown spell: hide if hideNonUsable is on, otherwise show desaturated (but not tracked)
-                 if hideNonUsable then
--                    icon:Hide()
-                     icon.isVisible = false  -- Mark as NOT visible for layout (allows collapse)
-+                    SetIconVisibility(icon, false)
-                 else
--                    icon:Show()
+@@ -1528,6 +1549,7 @@ local function RebuildActiveSet(bar)
+                         icon:Show()
+                     end
                      icon.isVisible = true  -- Still visible (just desaturated)
 +                    SetIconVisibility(icon, true)
                      icon.tex:SetDesaturated(true)  -- Grey out unknown spells

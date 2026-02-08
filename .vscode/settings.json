@@ -38,6 +38,13 @@
         "BackdropTemplateMixin",
         "SOUNDKIT",
         "GetUnitName",
-        "ITEM_QUALITY_COLORS"
+        "ITEM_QUALITY_COLORS",
+        "INVSLOT_FIRST_EQUIPPED",
+        "INVSLOT_LAST_EQUIPPED",
+        "PlayerSpellsFrame",
+        "ExportUtil",
+        "AuraUtil",
+        "PlayerUtil",
+        "LinkUtil"
     ]
 }

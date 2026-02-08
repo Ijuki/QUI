@@ -243,6 +243,35 @@ ConsumablesFrame:SetSize(DEFAULT_BUTTON_SIZE * 6 + BUTTON_SPACING * 5, DEFAULT_B
 ConsumablesFrame:Hide()
 ConsumablesFrame.buttons = {}
 
+local pendingConsumablesVisibility = nil
+
+local function SetConsumablesFrameVisible(shouldShow)
+    if InCombatLockdown() then
+        pendingConsumablesVisibility = shouldShow and true or false
+        return
+    end
+
+    if shouldShow then
+        ConsumablesFrame:Show()
+        return
+    end
+
+    ConsumablesFrame:Hide()
+    for _, button in pairs(ConsumablesFrame.buttons) do
+        if type(button) == "table" and button.click then
+            button.click:Hide()
+        end
+    end
+end
+
+local function ApplyPendingConsumablesVisibility()
+    if pendingConsumablesVisibility == nil then return end
+    if InCombatLockdown() then return end
+    local shouldShow = pendingConsumablesVisibility
+    pendingConsumablesVisibility = nil
+    SetConsumablesFrameVisible(shouldShow)
+end
+
 -- Close button
 local closeButton = CreateFrame("Button", nil, ConsumablesFrame)
 closeButton:SetSize(DEFAULT_BUTTON_SIZE * 4, 18)
@@ -265,7 +294,7 @@ closeButton:SetScript("OnLeave", function(self)
     self.bg:SetColorTexture(0.15, 0.15, 0.15, 0.9)
     self.text:SetTextColor(0.8, 0.8, 0.8, 1)
 end)
-closeButton:SetScript("OnClick", function() ConsumablesFrame:Hide() end)
+closeButton:SetScript("OnClick", function() SetConsumablesFrameVisible(false) end)
 ConsumablesFrame.closeButton = closeButton
 
 ---------------------------------------------------------------------------
@@ -807,6 +836,11 @@ end
 ---------------------------------------------------------------------------
 
 local function ShowConsumablesStandalone()
+    if InCombatLockdown() then
+        pendingConsumablesVisibility = true
+        return
+    end
+
     InitializeButtons()
     UpdateConsumables()
 
@@ -832,26 +866,25 @@ local function ShowConsumablesStandalone()
         end
     end
 
-    ConsumablesFrame:Show()
+    SetConsumablesFrameVisible(true)
 end
 
 local function OnReadyCheck(starter, timer)
     local settings = GetSettings()
     if not settings or settings.consumableCheckEnabled == false then return end
     if settings.consumableOnReadyCheck == false then return end
+    if InCombatLockdown() then
+        pendingConsumablesVisibility = true
+        return
+    end
 
     PositionConsumablesFrame()
     UpdateConsumables()
-    ConsumablesFrame:Show()
+    SetConsumablesFrameVisible(true)
 end
 
 local function OnReadyCheckFinished()
-    ConsumablesFrame:Hide()
-    if not InCombatLockdown() then
-        for _, button in pairs(ConsumablesFrame.buttons) do
-            if type(button) == "table" and button.click then button.click:Hide() end
-        end
-    end
+    SetConsumablesFrameVisible(false)
 end
 
 local function OnInstanceEnter()
@@ -1018,6 +1051,7 @@ combatFrame:SetScript("OnEvent", function(self, event)
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
         UpdateConsumables()
+        ApplyPendingConsumablesVisibility()
     end
 end)
 
@@ -1039,6 +1073,7 @@ end)
 ---------------------------------------------------------------------------
 
 _G.QUI_RefreshConsumables = function()
+    if InCombatLockdown() then return end
     if ConsumablesFrame:IsShown() then
         local point, relativeTo, relativePoint, x, y = ConsumablesFrame:GetPoint()
         InitializeButtons()
@@ -1049,6 +1084,7 @@ _G.QUI_RefreshConsumables = function()
 end
 
 _G.QUI_RepositionConsumables = function()
+    if InCombatLockdown() then return end
     if ConsumablesFrame:IsShown() then
         InitializeButtons()
         UpdateConsumables()
@@ -1061,4 +1097,4 @@ end
 _G.QUI_ToggleConsumablesMover = ToggleMover
 
 _G.QUI_ShowConsumables = function() ShowConsumablesStandalone() end
-_G.QUI_HideConsumables = function() ConsumablesFrame:Hide() end
+_G.QUI_HideConsumables = function() SetConsumablesFrameVisible(false) end
