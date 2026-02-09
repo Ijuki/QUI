@@ -49,6 +49,10 @@ local function BuildGeneralTab(tabContent)
         if ns and ns.NCDM and ns.NCDM.RefreshAll then
             ns.NCDM:RefreshAll()
         end
+        -- Refresh loot window fonts
+        if QUICore and QUICore.Loot and QUICore.Loot.RefreshColors then
+            QUICore.Loot:RefreshColors()
+        end
         -- Trigger CDM layout refresh
         C_Timer.After(0.1, function()
             if QUICore and QUICore.ApplyViewerLayout then

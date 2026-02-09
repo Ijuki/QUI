@@ -962,6 +962,7 @@ function Loot:ApplyLootHistoryTheme()
         HistoryFrame.ResizeButton.quiBackdrop:SetBackdropColor(bgColor[1], bgColor[2], bgColor[3], 0.8)
         HistoryFrame.ResizeButton.quiBackdrop:SetBackdropBorderColor(unpack(borderColor))
         if HistoryFrame.ResizeButton.quiText then
+            HistoryFrame.ResizeButton.quiText:SetFont(LSM:Fetch("font", GetGeneralFont()), 12, "OUTLINE")
             HistoryFrame.ResizeButton.quiText:Show()
             HistoryFrame.ResizeButton.quiText:SetTextColor(unpack(textColor))
         end
@@ -1172,15 +1173,21 @@ end
 function Loot:ApplyLootTheme()
     if not lootFrame then return end
     local bgColor, borderColor, textColor = GetThemeColors()
+    local fontPath = LSM:Fetch("font", GetGeneralFont())
 
     lootFrame:SetBackdropColor(unpack(bgColor))
     lootFrame:SetBackdropBorderColor(unpack(borderColor))
+    lootFrame.header:SetFont(fontPath, 12, "OUTLINE")
     lootFrame.header:SetTextColor(unpack(textColor))
+    lootFrame.closeBtn.text:SetFont(fontPath, 14, "OUTLINE")
 
-    -- Update slot highlight colors
+    -- Update slot fonts and highlight colors
     for i = 1, MAX_LOOT_SLOTS do
         local slot = lootFrame.slots[i]
         if slot then
+            slot.name:SetFont(fontPath, 11, "OUTLINE")
+            slot.count:SetFont(fontPath, 10, "OUTLINE")
+            slot.transmogMarker:SetFont(fontPath, 12, "OUTLINE")
             slot:GetHighlightTexture():SetVertexColor(borderColor[1], borderColor[2], borderColor[3], 0.2)
         end
     end
@@ -1189,6 +1196,7 @@ end
 -- Apply theme colors to roll frames
 function Loot:ApplyRollTheme()
     local bgColor, borderColor, textColor = GetThemeColors()
+    local fontPath = LSM:Fetch("font", GetGeneralFont())
 
     for i = 1, MAX_ROLL_FRAMES do
         local frame = rollFramePool[i]
@@ -1196,6 +1204,7 @@ function Loot:ApplyRollTheme()
             frame:SetBackdropColor(bgColor[1], bgColor[2], bgColor[3], 0.95)
             frame:SetBackdropBorderColor(borderColor[1], borderColor[2], borderColor[3], 0.3)  -- Subtle border
             frame.timer:SetStatusBarColor(borderColor[1], borderColor[2], borderColor[3], 1)  -- Accent color
+            frame.name:SetFont(fontPath, 12, "OUTLINE")
         end
     end
 end
