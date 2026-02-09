@@ -143,6 +143,7 @@ local function BuildAutohideTab(tabContent)
 
         local combatOptions = {
             {key = "hideErrorMessages", label = "Hide Error Messages (Red Text)"},
+            {key = "hideInfoMessages", label = "Hide Info Messages (i.e. Quest Prog)"},
         }
 
         for _, opt in ipairs(combatOptions) do

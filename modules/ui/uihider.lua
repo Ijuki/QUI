@@ -30,6 +30,7 @@ local DEFAULTS = {
     hideExperienceBar = false,
     hideReputationBar = false,
     hideErrorMessages = false,
+    hideInfoMessages = false,
     hideWorldMapBlackout = false,
 }
 
@@ -511,17 +512,30 @@ end
         -- else: Do nothing - let other addons/Blizzard manage the bar when QUI isn't hiding
     end
 
-    -- UIErrorsFrame (red error messages like "Out of range", "Not enough mana")
+    -- UIErrorsFrame (error and info messages)
     if UIErrorsFrame then
-        if settings.hideErrorMessages then
+        local hideErrors = settings.hideErrorMessages
+        local hideInfo = settings.hideInfoMessages
+
+        if hideErrors and hideInfo then
             UIErrorsFrame:Hide()
-            UIErrorsFrame:EnableMouse(false)  -- Prevent hidden frame from blocking clicks
+            UIErrorsFrame:EnableMouse(false)
             UIErrorsFrame:UnregisterAllEvents()
         else
             UIErrorsFrame:Show()
-            UIErrorsFrame:EnableMouse(false)  -- Error messages don't need mouse input
-            UIErrorsFrame:RegisterEvent("UI_ERROR_MESSAGE")
-            UIErrorsFrame:RegisterEvent("UI_INFO_MESSAGE")
+            UIErrorsFrame:EnableMouse(false)
+
+            if hideErrors then
+                UIErrorsFrame:UnregisterEvent("UI_ERROR_MESSAGE")
+            else
+                UIErrorsFrame:RegisterEvent("UI_ERROR_MESSAGE")
+            end
+
+            if hideInfo then
+                UIErrorsFrame:UnregisterEvent("UI_INFO_MESSAGE")
+            else
+                UIErrorsFrame:RegisterEvent("UI_INFO_MESSAGE")
+            end
         end
     end
 

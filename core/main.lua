@@ -3131,6 +3131,7 @@ local defaults = {
             hideTalkingHead = true,
             muteTalkingHead = false,
             hideErrorMessages = false,
+            hideInfoMessages = false,
             hideMinimapZoomButtons = true,
             hideWorldMapBlackout = true,
             hideTalkingHeadFrame = true,
