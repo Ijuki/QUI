@@ -3433,6 +3433,42 @@ local defaults = {
             swipeColor = {0, 0, 0, 0.6},
         },
 
+        -- DandersFrames Integration: Anchor DF containers to QUI elements
+        dandersFrames = {
+            party = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            raid = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            pinned1 = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            pinned2 = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+        },
+
         -- HUD Layering: Control frame level ordering for HUD elements
         -- Higher values appear above lower values (range 0-10)
         hudLayering = {
@@ -5185,6 +5221,25 @@ function QUICore:SetupEncounterWarningsSecretValuePatch()
             end
 
             error(err, 0)
+        end
+
+        -- Also patch the global EncounterWarnings instance directly.
+        -- When the addon loads, XML templates create frame instances via Mixin()
+        -- which copies the ORIGINAL Init onto them before our mixin patch runs.
+        -- Wrapping SetIsEditing on the instance catches the entire call chain:
+        -- SetIsEditing → OnEditingChanged → ShowWarning → view:ShowWarning → Text:Init
+        local ew = _G.EncounterWarnings
+        if ew and type(ew.SetIsEditing) == "function" then
+            local origSetIsEditing = ew.SetIsEditing
+            ew.SetIsEditing = function(ewSelf, ...)
+                local ok2, err2 = pcall(origSetIsEditing, ewSelf, ...)
+                if not ok2 then
+                    if type(err2) == "string" and err2:find("secret value") then
+                        return
+                    end
+                    error(err2, 0)
+                end
+            end
         end
 
         self.__encounterWarningsPatched = true
