@@ -7,5 +7,6 @@
     <Script file="main.lua"/>
     <Script file="viewer_skinning.lua"/>
     <Script file="profile_io.lua"/>
+    <Script file="font_system.lua"/>
     <Script file="scaling.lua"/>
 </Ui>
