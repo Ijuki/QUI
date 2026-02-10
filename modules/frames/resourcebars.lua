@@ -1,6 +1,7 @@
 local ADDON_NAME, ns = ...
 local QUICore = ns.Addon
 local LSM = LibStub("LibSharedMedia-3.0")
+local UIKit = ns.UIKit
 
 local GetCore = ns.Helpers.GetCore
 
@@ -918,10 +919,8 @@ function QUICore:GetPowerBar()
 
 
     -- BACKGROUND
-    bar.Background = bar:CreateTexture(nil, "BACKGROUND")
-    bar.Background:SetAllPoints()
     local bgColor = cfg.bgColor or { 0.15, 0.15, 0.15, 1 }
-    bar.Background:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    bar.Background = UIKit.CreateBackground(bar, bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
 
     -- STATUS BAR
     bar.StatusBar = CreateFrame("StatusBar", nil, bar)
@@ -930,18 +929,8 @@ function QUICore:GetPowerBar()
     bar.StatusBar:SetStatusBarTexture(tex)
     bar.StatusBar:SetFrameLevel(bar:GetFrameLevel())
 
-
     -- BORDER (pixel-perfect)
-    local borderPx = cfg.borderSize or 1
-    local borderSize = borderPx > 0 and QUICore:Pixels(borderPx, bar) or 0
-    bar.Border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-    bar.Border:SetPoint("TOPLEFT", bar, -borderSize, borderSize)
-    bar.Border:SetPoint("BOTTOMRIGHT", bar, borderSize, -borderSize)
-    bar.Border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = borderSize,
-    })
-    bar.Border:SetBackdropBorderColor(0, 0, 0, 1)
+    UIKit.CreateBackdropBorder(bar, cfg.borderSize or 1, 0, 0, 0, 1)
 
     -- TEXT FRAME (same strata, +2 levels to render above bar content but stay within element's layer band)
     bar.TextFrame = CreateFrame("Frame", nil, bar)

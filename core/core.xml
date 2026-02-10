@@ -9,4 +9,5 @@
     <Script file="profile_io.lua"/>
     <Script file="font_system.lua"/>
     <Script file="scaling.lua"/>
+    <Script file="uikit.lua"/>
 </Ui>
