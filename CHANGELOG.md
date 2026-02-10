@@ -15,6 +15,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+
+
+## v2.29.3 - 2026-02-09
+
+### Added
+- added separate setting to hide info messages (so you can hide errors, but still have quest prog messages)
+## v2.29.2 - 2026-02-09
+
+### Changed
+- disable castbar previews on profile change, this should fix the perma castbar preview issue (happened, when profile settings got copied with previews on)
+## v2.29.1 - 2026-02-09
+
+### Fixed
+- attempt to catch Blizzard's errors for them (Edit Mode lua errors)
+## v2.29.0 - 2026-02-09
+
+### Added
+- **added feature to anchor DandersFrames party/raid/pinned frames to QUI elements**
+- added message history feature for chat input
+- added option to swap primary and secondary resource bar positions for some specs, and also to hide primary when they are swapped
+- added position mover for bnet notification toasts
+
+
+### Changed
+- dynamically shortening castbar spelltexts if bar is too short
+
+
+### Fixed
+- fixed stack text being overlayed by swipe texture on unitframe buffs and debuffs
+- fixed global font setting not being honored by the loot window
+- fixed an issue where circular anchoring dependencies would move all involved frames off screen
 ## v2.28.1 - 2026-02-09
 
 ### Fixed

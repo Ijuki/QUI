@@ -3157,6 +3157,7 @@ local defaults = {
             hideTalkingHead = true,
             muteTalkingHead = false,
             hideErrorMessages = false,
+            hideInfoMessages = false,
             hideMinimapZoomButtons = true,
             hideWorldMapBlackout = true,
             hideTalkingHeadFrame = true,
@@ -3435,6 +3436,42 @@ local defaults = {
             swipeColor = {0, 0, 0, 0.6},
         },
 
+        -- DandersFrames Integration: Anchor DF containers to QUI elements
+        dandersFrames = {
+            party = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            raid = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            pinned1 = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            pinned2 = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+        },
+
         -- HUD Layering: Control frame level ordering for HUD elements
         -- Higher values appear above lower values (range 0-10)
         hudLayering = {
@@ -3709,6 +3746,25 @@ function QUICore:OnProfileChanged(event, db, profileKey)
         end)
     end
     
+    -- Reset castbar previewMode flags before refreshing unit frames.
+    -- previewMode is a transient UI state (options panel toggle) that should not
+    -- persist across profile changes, but it lives in the DB and gets copied along.
+    if self.db.profile.quiUnitFrames then
+        for _, unitKey in ipairs({"player", "target", "focus"}) do
+            local unitDB = self.db.profile.quiUnitFrames[unitKey]
+            if unitDB and unitDB.castbar then
+                unitDB.castbar.previewMode = false
+            end
+        end
+        -- Also clear boss castbar previews
+        for i = 1, 8 do
+            local bossDB = self.db.profile.quiUnitFrames["boss" .. i]
+            if bossDB and bossDB.castbar then
+                bossDB.castbar.previewMode = false
+            end
+        end
+    end
+
     -- Refresh Unit Frames (including castbars) on profile change
     C_Timer.After(0.2, function()
         if _G.QUI_RefreshUnitFrames then
@@ -5187,6 +5243,25 @@ function QUICore:SetupEncounterWarningsSecretValuePatch()
             end
 
             error(err, 0)
+        end
+
+        -- Also patch the global EncounterWarnings instance directly.
+        -- When the addon loads, XML templates create frame instances via Mixin()
+        -- which copies the ORIGINAL Init onto them before our mixin patch runs.
+        -- Wrapping SetIsEditing on the instance catches the entire call chain:
+        -- SetIsEditing → OnEditingChanged → ShowWarning → view:ShowWarning → Text:Init
+        local ew = _G.EncounterWarnings
+        if ew and type(ew.SetIsEditing) == "function" then
+            local origSetIsEditing = ew.SetIsEditing
+            ew.SetIsEditing = function(ewSelf, ...)
+                local ok2, err2 = pcall(origSetIsEditing, ewSelf, ...)
+                if not ok2 then
+                    if type(err2) == "string" and err2:find("secret value") then
+                        return
+                    end
+                    error(err2, 0)
+                end
+            end
         end
 
         self.__encounterWarningsPatched = true
