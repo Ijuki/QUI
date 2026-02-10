@@ -1566,6 +1566,8 @@ local defaults = {
                 format = "24h",          -- "24h" or "12h"
                 color = {0.6, 0.6, 0.6}, -- Gray color
             },
+            -- Channel label display in chat links
+            channelLabelMode = "full",   -- "full" or "number"
             -- Copy button mode: "always", "hover", "hidden", "disabled"
             copyButtonMode = "always",
             -- Intro message on login

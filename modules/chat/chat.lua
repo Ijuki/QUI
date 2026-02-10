@@ -149,6 +149,37 @@ local function AddTimestamp(text)
 end
 
 ---------------------------------------------------------------------------
+-- Channel label formatting
+---------------------------------------------------------------------------
+local function FormatChannelLabels(text)
+    local settings = GetSettings()
+    if not settings or settings.channelLabelMode ~= "number" then
+        return text
+    end
+
+    -- Some chat messages can be protected/secret values - format safely.
+    local success, result = pcall(function()
+        return text:gsub("(|Hchannel:[^|]+|h)%[(.-)%](|h)", function(linkStart, label, linkEnd)
+            local channelNumber = label:match("^(%d+)%s*%.")
+            if not channelNumber then
+                channelNumber = label:match("^(%d+)%s")
+            end
+
+            if channelNumber then
+                return string.format("%s[%s.]%s", linkStart, channelNumber, linkEnd)
+            end
+
+            return linkStart .. "[" .. label .. "]" .. linkEnd
+        end)
+    end)
+
+    if success then
+        return result
+    end
+    return text
+end
+
+---------------------------------------------------------------------------
 -- URL Detection - Make URLs clickable
 ---------------------------------------------------------------------------
 local function MakeURLsClickable(text)
@@ -186,7 +217,7 @@ local function MakeURLsClickable(text)
 end
 
 ---------------------------------------------------------------------------
--- Hook chat frame AddMessage to process URLs
+-- Hook chat frame AddMessage to process message transforms
 ---------------------------------------------------------------------------
 local function HookChatMessages(chatFrame)
     if chatFrame.__quiChatMessageHooked then return end
@@ -195,8 +226,18 @@ local function HookChatMessages(chatFrame)
     local origAddMessage = chatFrame.AddMessage
     chatFrame.AddMessage = function(self, text, ...)
         if text and type(text) == "string" then
-            text = AddTimestamp(text)
-            text = MakeURLsClickable(text)
+            -- Process in a protected block for secret/protected chat values.
+            local success, processed = pcall(function()
+                local out = text
+                out = AddTimestamp(out)
+                out = FormatChannelLabels(out)
+                out = MakeURLsClickable(out)
+                return out
+            end)
+
+            if success and type(processed) == "string" then
+                text = processed
+            end
         end
         return origAddMessage(self, text, ...)
     end
@@ -1140,10 +1181,8 @@ local function SkinChatFrame(chatFrame)
     -- Apply font styling (always enabled)
     StyleFontStrings(chatFrame)
 
-    -- Hook URL detection
-    if settings.urls and settings.urls.enabled then
-        HookChatMessages(chatFrame)
-    end
+    -- Hook message transforms (timestamps/channel labels/URLs).
+    HookChatMessages(chatFrame)
 
     -- Setup message fade (handles both enabling and disabling)
     SetupMessageFade(chatFrame)

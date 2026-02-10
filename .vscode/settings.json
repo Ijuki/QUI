@@ -45,6 +45,20 @@
         "ExportUtil",
         "AuraUtil",
         "PlayerUtil",
-        "LinkUtil"
+        "LinkUtil",
+        "LE_PARTY_CATEGORY_INSTANCE",
+        "INVSLOT_BACK",
+        "INVSLOT_CHEST",
+        "INVSLOT_FINGER1",
+        "INVSLOT_FINGER2",
+        "INVSLOT_MAINHAND",
+        "INVSLOT_FEET",
+        "INVSLOT_WRIST",
+        "INVSLOT_HAND",
+        "INVSLOT_LEGS",
+        "STAT_HASTE",
+        "STAT_CRITICAL_STRIKE",
+        "STAT_VERSATILITY",
+        "STAT_MASTERY"
     ]
 }
