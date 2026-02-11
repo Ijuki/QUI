@@ -238,7 +238,7 @@ end
 local function GetBarColor(unitKey, castSettings)
     if unitKey == "player" and castSettings.useClassColor then
         local _, class = UnitClass("player")
-        if class and RAID_CLASS_COLORS[class] then
+        if not IsSecretValue(class) and class and RAID_CLASS_COLORS[class] then
             local c = RAID_CLASS_COLORS[class]
             return {c.r, c.g, c.b, 1}
         end
