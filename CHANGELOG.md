@@ -22,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.30.2 - 2026-02-12
+
+### Fixed
+- fixed custom glows not showing, only blizzard proc glows
 ## v2.30.1 - 2026-02-12
 
 ### Fixed
