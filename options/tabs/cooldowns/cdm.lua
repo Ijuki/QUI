@@ -2760,21 +2760,23 @@ local function CreateCDMSetupPage(parent)
                     local primaryBorderSize = primaryCfg.borderSize or 1
                     local secondaryHeight = secondary.height or 8
                     local secondaryBorderSize = secondary.borderSize or 1
+                    local primaryOuterThickness = primaryHeight + (2 * primaryBorderSize)
+                    local secondaryOuterThickness = secondaryHeight + (2 * secondaryBorderSize)
                     local isVertical = secondary.orientation == "VERTICAL"
 
                     if isVertical then
                         -- Vertical secondary: goes to the RIGHT of Primary
                         local primaryActualWidth = primaryBar:GetWidth()
                         local primaryVisualRight = primaryCenterX + (primaryActualWidth / 2)
-                        local secondaryBarCenterX = primaryVisualRight + (secondaryHeight / 2)
+                        local secondaryBarCenterX = primaryVisualRight + (secondaryOuterThickness / 2)
                         local targetWidth = primaryWidth + (2 * primaryBorderSize) - (2 * secondaryBorderSize)
                         secondary.lockedBaseX = math.floor(secondaryBarCenterX - screenCenterX + 0.5)
                         secondary.lockedBaseY = math.floor(primaryCenterY - screenCenterY + 0.5)
                         secondary.width = math.floor(targetWidth + 0.5)
                     else
                         -- Horizontal bar: Secondary goes ABOVE Primary
-                        local primaryVisualTop = primaryCenterY + (primaryHeight / 2) + primaryBorderSize
-                        local secondaryBarCenterY = primaryVisualTop + (secondaryHeight / 2) + secondaryBorderSize
+                        local primaryVisualTop = primaryCenterY + (primaryOuterThickness / 2)
+                        local secondaryBarCenterY = primaryVisualTop + (secondaryOuterThickness / 2)
                         local targetWidth = primaryWidth + (2 * primaryBorderSize) - (2 * secondaryBorderSize)
                         secondary.lockedBaseY = math.floor(secondaryBarCenterY - screenCenterY + 0.5) - 1
                         secondary.lockedBaseX = math.floor(primaryCenterX - screenCenterX + 0.5)
