@@ -1,26 +1,17 @@
 local addonName, ns = ...
 
-local function GetCore()
-    return (_G.QUI and _G.QUI.QUICore) or ns.Addon
-end
-
-local function GetPixelSize(frame, default)
-    local core = GetCore()
-    if core and type(core.GetPixelSize) == "function" then
-        local px = core:GetPixelSize(frame)
-        if type(px) == "number" and px > 0 then
-            return px
-        end
-    end
-    return default or 1
-end
+local Helpers = ns.Helpers
+local GetCore = Helpers.GetCore
+local SkinBase = ns.SkinBase
 
 ---------------------------------------------------------------------------
 -- OBJECTIVE TRACKER SKINNING
 -- Applies QUI color scheme with dynamic content-height backdrop
 ---------------------------------------------------------------------------
 
-local FONT_FLAGS = "OUTLINE"
+local function GetFontFlags()
+    return Helpers.GetGeneralFontOutline()
+end
 
 -- Debounce flag to prevent multiple concurrent backdrop updates
 local pendingBackdropUpdate = false
@@ -32,27 +23,55 @@ local function GetSettings()
     return settings
 end
 
--- Get skinning colors
-local function GetColors()
-    local QUI = _G.QUI
-    local sr, sg, sb, sa = 0.2, 1.0, 0.6, 1
-    local bgr, bgg, bgb, bga = 0.05, 0.05, 0.05, 0.95
-
-    if QUI and QUI.GetSkinColor then
-        sr, sg, sb, sa = QUI:GetSkinColor()
-    end
-    if QUI and QUI.GetSkinBgColor then
-        bgr, bgg, bgb, bga = QUI:GetSkinBgColor()
-    end
-
-    return sr, sg, sb, sa, bgr, bgg, bgb, bga
-end
-
 -- Safely set text color from a color table with bounds validation
 local function SafeSetTextColor(fontString, colorTable)
     if not fontString or not colorTable then return end
     if type(colorTable) ~= "table" or #colorTable < 3 then return end
     fontString:SetTextColor(colorTable[1] or 1, colorTable[2] or 1, colorTable[3] or 1, colorTable[4] or 1)
+end
+
+-- Get font path from user profile via Helpers
+local function GetFontPath()
+    return Helpers.GetGeneralFont()
+end
+
+-- Apply font and color to a single line (objective text)
+local function StyleLine(line, fontPath, textFontSize, textColor)
+    if not line then return end
+    if line.Text then
+        line.Text:SetFont(fontPath, textFontSize, GetFontFlags())
+        SafeSetTextColor(line.Text, textColor)
+
+        -- Recalculate line height after font change to handle multi-line wrapping
+        local textHeight = line.Text:GetStringHeight()
+        if textHeight and textHeight > 0 then
+            local currentHeight = line:GetHeight()
+            local minHeight = textHeight + 4
+            if currentHeight < minHeight then
+                line:SetHeight(minHeight)
+            end
+        end
+    end
+    if line.Dash then
+        line.Dash:SetFont(fontPath, textFontSize, GetFontFlags())
+        SafeSetTextColor(line.Dash, textColor)
+    end
+end
+
+-- Apply font and color to a block (quest name header + all objective lines)
+local function StyleBlock(block, fontPath, titleFontSize, textFontSize, titleColor, textColor)
+    if not block then return end
+
+    if titleFontSize > 0 and block.HeaderText then
+        block.HeaderText:SetFont(fontPath, titleFontSize, GetFontFlags())
+        SafeSetTextColor(block.HeaderText, titleColor)
+    end
+
+    if textFontSize > 0 and block.usedLines then
+        for _, line in pairs(block.usedLines) do
+            StyleLine(line, fontPath, textFontSize, textColor)
+        end
+    end
 end
 
 -- Get LibCustomGlow for quest icon glows
@@ -85,7 +104,7 @@ end
 local function StyleCompletionCheck(check)
     if not check or check.quiStyled then return end
 
-    local sr, sg, sb = GetColors()
+    local sr, sg, sb = SkinBase.GetSkinColors()
     check:SetAtlas("checkmark-minimal")
     check:SetDesaturated(true)
     check:SetVertexColor(sr, sg, sb)
@@ -93,22 +112,27 @@ local function StyleCompletionCheck(check)
     check.quiStyled = true
 end
 
--- Handle quest block icons (called when blocks are added)
-local function HandleQuestBlockIcons(tracker, block)
-    if not block then return end
+-- Apply full block skinning (fonts, colors, icons) to a single block
+local function ApplyBlockSkinning(tracker, block)
+    if not block or not block:IsShown() then return end
 
-    -- Style quest item button (the clickable item icon)
+    local settings = GetSettings()
+    if not settings or not settings.skinObjectiveTracker then return end
+
+    local fontPath = GetFontPath()
+    local titleFontSize = settings.objectiveTrackerTitleFontSize or 10
+    local textFontSize = settings.objectiveTrackerTextFontSize or 10
+    local titleColor = settings.objectiveTrackerTitleColor
+    local textColor = settings.objectiveTrackerTextColor
+
+    -- Style icons (POI button, completion check)
     local itemButton = block.ItemButton or block.itemButton
-    if itemButton then
-        StyleQuestPOIIcon(itemButton)
-    end
-
-    -- Style completion checkmark
+    if itemButton then StyleQuestPOIIcon(itemButton) end
     local check = block.currentLine and block.currentLine.Check
-    if check then
-        StyleCompletionCheck(check)
-    end
-    -- Note: POI button glow is hidden via HidePOIButtonGlows() called from ScheduleBackdropUpdate
+    if check then StyleCompletionCheck(check) end
+
+    -- Style block header and all objective lines
+    StyleBlock(block, fontPath, titleFontSize, textFontSize, titleColor, textColor)
 end
 
 -- List of tracker modules
@@ -513,7 +537,7 @@ local function ApplyQUIBackdrop(trackerFrame, sr, sg, sb, sa, bgr, bgg, bgb, bga
             end
             -- Apply edit mode opacity to our backdrop (get fresh colors)
             if self.quiBackdrop then
-                local _, _, _, _, currBgR, currBgG, currBgB = GetColors()
+                local _, _, _, _, currBgR, currBgG, currBgB = SkinBase.GetSkinColors()
                 self.quiBackdrop:SetBackdropColor(currBgR, currBgG, currBgB, alpha)
             end
         end)
@@ -539,7 +563,7 @@ local function ApplyQUIBackdrop(trackerFrame, sr, sg, sb, sa, bgr, bgg, bgb, bga
     local settings = GetSettings()
     local hideBorder = settings and settings.hideObjectiveTrackerBorder
 
-    local otPx = GetPixelSize(trackerFrame.quiBackdrop, 1)
+    local otPx = SkinBase.GetPixelSize(trackerFrame.quiBackdrop, 1)
     trackerFrame.quiBackdrop:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -557,54 +581,6 @@ local function ApplyQUIBackdrop(trackerFrame, sr, sg, sb, sa, bgr, bgg, bgb, bga
     UpdateBackdropAnchors()
 end
 
--- Get font path
-local function GetFontPath()
-    local QUI = _G.QUI
-    return QUI and QUI.GetGlobalFont and QUI:GetGlobalFont() or STANDARD_TEXT_FONT
-end
-
--- Apply font and color to a single line (objective text)
-local function StyleLine(line, fontPath, textFontSize, textColor)
-    if not line then return end
-    if line.Text then
-        line.Text:SetFont(fontPath, textFontSize, FONT_FLAGS)
-        SafeSetTextColor(line.Text, textColor)
-
-        -- Recalculate line height after font change to handle multi-line wrapping
-        -- GetStringHeight returns the actual rendered height including wrapped lines
-        local textHeight = line.Text:GetStringHeight()
-        if textHeight and textHeight > 0 then
-            local currentHeight = line:GetHeight()
-            local minHeight = textHeight + 4  -- Add small padding
-            if currentHeight < minHeight then
-                line:SetHeight(minHeight)
-            end
-        end
-    end
-    if line.Dash then
-        line.Dash:SetFont(fontPath, textFontSize, FONT_FLAGS)
-        SafeSetTextColor(line.Dash, textColor)
-    end
-end
-
--- Apply font and color to a block (quest name header + all objective lines)
-local function StyleBlock(block, fontPath, titleFontSize, textFontSize, titleColor, textColor)
-    if not block then return end
-
-    -- Style block header (quest/achievement title)
-    if titleFontSize > 0 and block.HeaderText then
-        block.HeaderText:SetFont(fontPath, titleFontSize, FONT_FLAGS)
-        SafeSetTextColor(block.HeaderText, titleColor)
-    end
-
-    -- Style all lines in the block (objectives)
-    if textFontSize > 0 and block.usedLines then
-        for _, line in pairs(block.usedLines) do
-            StyleLine(line, fontPath, textFontSize, textColor)
-        end
-    end
-end
-
 -- Apply font sizes and colors to all tracker elements
 -- moduleFontSize: module headers (QUESTS, ACHIEVEMENTS, etc.)
 -- titleFontSize: quest/achievement titles
@@ -618,7 +594,7 @@ local function ApplyFontStyles(moduleFontSize, titleFontSize, textFontSize, modu
         if tracker then
             -- Style module header text (e.g., "QUESTS", "ACHIEVEMENTS")
             if moduleFontSize > 0 and tracker.Header and tracker.Header.Text then
-                tracker.Header.Text:SetFont(fontPath, moduleFontSize, FONT_FLAGS)
+                tracker.Header.Text:SetFont(fontPath, moduleFontSize, GetFontFlags())
                 SafeSetTextColor(tracker.Header.Text, moduleColor)
             end
 
@@ -637,7 +613,7 @@ local function ApplyFontStyles(moduleFontSize, titleFontSize, textFontSize, modu
     local TrackerFrame = _G.ObjectiveTrackerFrame
     if TrackerFrame and TrackerFrame.Header and TrackerFrame.Header.Text then
         if moduleFontSize > 0 then
-            TrackerFrame.Header.Text:SetFont(fontPath, moduleFontSize, FONT_FLAGS)
+            TrackerFrame.Header.Text:SetFont(fontPath, moduleFontSize, GetFontFlags())
             SafeSetTextColor(TrackerFrame.Header.Text, moduleColor)
         end
     end
@@ -678,7 +654,7 @@ local function HookLineCreation()
             local currentTitleSize = currentSettings and currentSettings.objectiveTrackerTitleFontSize or 0
             local currentTitleColor = currentSettings and currentSettings.objectiveTrackerTitleColor
             if currentTitleSize > 0 and self.HeaderText then
-                self.HeaderText:SetFont(GetFontPath(), currentTitleSize, FONT_FLAGS)
+                self.HeaderText:SetFont(GetFontPath(), currentTitleSize, GetFontFlags())
                 SafeSetTextColor(self.HeaderText, currentTitleColor)
             end
         end)
@@ -696,7 +672,7 @@ local function SkinObjectiveTracker()
     local TrackerFrame = _G.ObjectiveTrackerFrame
     if not TrackerFrame then return end
 
-    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetColors()
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = SkinBase.GetSkinColors()
 
     -- Sync Blizzard's height with our max height setting
     SyncBlizzardHeight()
@@ -763,9 +739,9 @@ local function SkinObjectiveTracker()
                 hooksecurefunc(tracker, "LayoutContents", ScheduleBackdropUpdate)
             end
 
-            -- Hook AddBlock to style quest icons with glows (#65)
+            -- Hook AddBlock to style new blocks
             if tracker.AddBlock and not tracker.quiAddBlockHooked then
-                hooksecurefunc(tracker, "AddBlock", HandleQuestBlockIcons)
+                hooksecurefunc(tracker, "AddBlock", ApplyBlockSkinning)
                 tracker.quiAddBlockHooked = true
             end
 
@@ -784,7 +760,7 @@ local function SkinObjectiveTracker()
     if manager and manager.SetOpacity and not manager.quiOpacityHooked then
         hooksecurefunc(manager, "SetOpacity", function(self, opacityPercent)
             local alpha = (opacityPercent or 0) / 100
-            local _, _, _, _, currBgR, currBgG, currBgB = GetColors()
+            local _, _, _, _, currBgR, currBgG, currBgB = SkinBase.GetSkinColors()
             if TrackerFrame.quiBackdrop then
                 TrackerFrame.quiBackdrop:SetBackdropColor(currBgR, currBgG, currBgB, alpha)
             end
@@ -807,7 +783,7 @@ local function RefreshObjectiveTracker()
     local TrackerFrame = _G.ObjectiveTrackerFrame
     if not TrackerFrame then return end
 
-    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetColors()
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = SkinBase.GetSkinColors()
 
     -- Sync Blizzard's height with our max height setting
     SyncBlizzardHeight()
@@ -829,7 +805,7 @@ local function RefreshObjectiveTracker()
         end
 
         -- Apply backdrop (edgeSize 0 hides border, px shows it)
-        local updPx = GetPixelSize(TrackerFrame.quiBackdrop, 1)
+        local updPx = SkinBase.GetPixelSize(TrackerFrame.quiBackdrop, 1)
         TrackerFrame.quiBackdrop:SetBackdrop({
             bgFile = "Interface\\Buttons\\WHITE8x8",
             edgeFile = "Interface\\Buttons\\WHITE8x8",

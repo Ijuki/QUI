@@ -1,40 +1,23 @@
 -- customglows.lua
 -- Custom glow effects for Essential and Utility cooldown viewers
--- Uses Blizzard's SpellActivationAlert system for proper sizing
--- Falls back to LibCustomGlow for additional glow styles
+-- Uses LibCustomGlow for custom glow styles (Pixel Glow, Autocast Shine, Button Glow)
+-- Replaces Blizzard's SpellActivationAlert with the configured custom glow
 
 local _, ns = ...
 local Helpers = ns.Helpers
 
--- Get LibCustomGlow for fallback styles
+-- Get LibCustomGlow for custom glow styles
 local LCG = LibStub and LibStub("LibCustomGlow-1.0", true)
 
--- Get IsSpellOverlayed API for reliable glow state detection
+-- Get IsSpellOverlayed API for glow state detection (fallback)
 local IsSpellOverlayed = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
 
 -- Track which icons currently have active glows
 local activeGlowIcons = {}  -- [icon] = true
 
--- Glow templates for proc effects
-local GlowTemplates = {
-    LoopGlow = {
-        {
-            name = "Default Blizzard Glow",
-            atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook",
-            rows = 6, columns = 5, frames = 30, duration = 1.0,
-        },
-        {
-            name = "Blue Assist Glow",
-            atlas = "RotationHelper-ProcLoopBlue-Flipbook",
-            rows = 6, columns = 5, frames = 30, duration = 1.0,
-        },
-        {
-            name = "Classic Ants",
-            texture = "Interface\\SpellActivationOverlay\\IconAlertAnts",
-            rows = 5, columns = 5, frames = 25, duration = 0.8,
-        },
-    },
-}
+-- Track active glow spell names from SPELL_ACTIVATION_OVERLAY_GLOW events.
+-- Used for name-based matching since CDM cooldownIDs != actual spell IDs.
+local activeGlowSpellNames = {}  -- [spellName] = true
 
 -- ======================================================
 -- Settings Access
@@ -52,19 +35,19 @@ end
 -- ======================================================
 local function GetViewerType(icon)
     if not icon then return nil end
-    
-    local parent = icon:GetParent()
-    if not parent then return nil end
-    
-    local parentName = parent:GetName()
-    if not parentName then return nil end
-    
+
+    local ok, parent = pcall(icon.GetParent, icon)
+    if not ok or not parent then return nil end
+
+    local nameOk, parentName = pcall(parent.GetName, parent)
+    if not nameOk or not parentName then return nil end
+
     if parentName:find("EssentialCooldown") then
         return "Essential"
     elseif parentName:find("UtilityCooldown") then
         return "Utility"
     end
-    
+
     return nil
 end
 
@@ -115,40 +98,74 @@ local function GetViewerSettings(viewerType)
 end
 
 -- ======================================================
--- Customize Blizzard's SpellActivationAlert
+-- Suppress Blizzard's glow on an icon
+-- Hides SpellActivationAlert/OverlayGlow and hooks Show
+-- to prevent them from reappearing.
 -- ======================================================
-local function CustomizeBlizzardGlow(button, viewerSettings)
-    if not button then return false end
-    
-    local region = button.SpellActivationAlert
-    if not region then return false end
-    
-    -- Get the loop flipbook texture
-    local loopFlipbook = region.ProcLoopFlipbook
-    if not loopFlipbook then return false end
-    
-    -- Apply custom color
-    local color = viewerSettings.color or {0.95, 0.95, 0.32, 1}
-    loopFlipbook:SetDesaturated(true)  -- Desaturate first so color applies properly
-    loopFlipbook:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
-    
-    -- Also color the start flipbook if it exists
-    local startFlipbook = region.ProcStartFlipbook
-    if startFlipbook then
-        startFlipbook:SetDesaturated(true)
-        startFlipbook:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
-    end
-    
-    -- Mark as customized
-    button._QUICustomGlowActive = true
-    activeGlowIcons[button] = true
-    
-    return true
+local function SuppressBlizzardGlow(icon)
+    if not icon then return end
+
+    pcall(function()
+        local alert = icon.SpellActivationAlert
+        if alert then
+            alert:Hide()
+            alert:SetAlpha(0)
+            -- Persistent hook: keep it hidden even if Blizzard re-shows it
+            if not alert._QUI_NoShow then
+                alert._QUI_NoShow = true
+                hooksecurefunc(alert, "Show", function(self)
+                    self:Hide()
+                    self:SetAlpha(0)
+                end)
+            end
+        end
+    end)
+
+    pcall(function()
+        if icon.OverlayGlow then
+            icon.OverlayGlow:Hide()
+            icon.OverlayGlow:SetAlpha(0)
+            if not icon.OverlayGlow._QUI_NoShow then
+                icon.OverlayGlow._QUI_NoShow = true
+                hooksecurefunc(icon.OverlayGlow, "Show", function(self)
+                    self:Hide()
+                    self:SetAlpha(0)
+                end)
+            end
+        end
+    end)
+end
+
+-- ======================================================
+-- Check if Blizzard's glow is visually active on an icon
+-- (before we suppress it)
+-- ======================================================
+local function HasBlizzardGlow(icon)
+    if not icon then return false end
+
+    local found = false
+    pcall(function()
+        if icon.SpellActivationAlert and icon.SpellActivationAlert:IsShown() then
+            found = true
+        end
+    end)
+    if found then return true end
+
+    pcall(function()
+        if icon.OverlayGlow and icon.OverlayGlow:IsShown() then
+            found = true
+        end
+    end)
+    return found
 end
 
 -- ======================================================
 -- LibCustomGlow application (supports 3 glow types)
 -- ======================================================
+
+-- Forward declaration (StopGlow is defined after ApplyLibCustomGlow)
+local StopGlow
+
 local function ApplyLibCustomGlow(icon, viewerSettings)
     if not LCG then return false end
     if not icon then return false end
@@ -206,26 +223,28 @@ end
 -- ======================================================
 local function StartGlow(icon)
     if not icon then return end
-    
+
     -- Already has our glow? Skip
     if icon._QUICustomGlowActive then return end
-    
+
     local viewerType = GetViewerType(icon)
     if not viewerType then return end
-    
+
     local viewerSettings = GetViewerSettings(viewerType)
     if not viewerSettings then return end
-    
-    -- Always use LibCustomGlow since we hide Blizzard's SpellActivationAlert
+
+    -- Suppress Blizzard's glow on this icon
+    SuppressBlizzardGlow(icon)
+
     -- Set the flag FIRST so cooldowneffects.lua doesn't interfere
     icon._QUICustomGlowActive = true
     activeGlowIcons[icon] = true
-    
+
     ApplyLibCustomGlow(icon, viewerSettings)
 end
 
 -- Stop all glow effects on an icon
-function StopGlow(icon)
+StopGlow = function(icon)
     if not icon then return end
 
     -- Stop all LibCustomGlow effect types
@@ -241,11 +260,12 @@ end
 
 -- ======================================================
 -- Deferred Glow Scan
--- Checks all viewer icons via IsSpellOverlayed and applies/removes glows.
+-- Checks all viewer icons and applies/removes glows.
+-- Uses multiple detection methods:
+--   1. Visual: is Blizzard's SpellActivationAlert showing?
+--   2. API: does IsSpellOverlayed return true for the icon's spell?
 -- Runs OUTSIDE Blizzard's CDM update cycle (via C_Timer.After(0)) so that
 -- LCG frame tree modifications never happen during internal CDM updates.
--- This prevents the icon disappearance bug on retail where frame changes
--- inside hooksecurefunc callbacks cascade into layout engine re-entries.
 -- ======================================================
 
 local VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
@@ -258,6 +278,59 @@ local ScheduleGlowScan
 local function IsIconFrame(frame)
     if not frame then return false end
     return (frame.Icon or frame.icon) and (frame.Cooldown or frame.cooldown)
+end
+
+-- Get the ACTUAL spell ID from a CDM icon for use with IsSpellOverlayed.
+-- IMPORTANT: icon.cooldownID is a CDM tracking ID (e.g. 18459), NOT a WoW spell ID.
+-- We need the real spell ID from cooldownInfo for overlay detection.
+local function GetIconSpellID(icon)
+    local spellID
+    pcall(function()
+        -- Priority 1: cooldownInfo.overrideSpellID (morphed/current form)
+        if icon.cooldownInfo then
+            if icon.cooldownInfo.overrideSpellID then
+                local id = icon.cooldownInfo.overrideSpellID
+                if not (type(issecretvalue) == "function" and issecretvalue(id)) then
+                    spellID = id
+                end
+            end
+            -- Priority 2: cooldownInfo.spellID (base spell ID)
+            if not spellID and icon.cooldownInfo.spellID then
+                local id = icon.cooldownInfo.spellID
+                if not (type(issecretvalue) == "function" and issecretvalue(id)) then
+                    spellID = id
+                end
+            end
+        end
+        -- Priority 3: GetSpellID method (some icons may have this)
+        if not spellID and icon.GetSpellID then
+            local id = icon:GetSpellID()
+            if id and not (type(issecretvalue) == "function" and issecretvalue(id)) then
+                spellID = id
+            end
+        end
+        -- NOTE: Do NOT use icon.cooldownID or icon.spellID here — in WoW 12.0
+        -- these are CDM tracking IDs, not actual WoW spell IDs.
+    end)
+    return spellID
+end
+
+-- Get the spell name from a CDM icon for name-based glow matching.
+local function GetIconSpellName(icon)
+    local name
+    pcall(function()
+        if icon.cooldownInfo and icon.cooldownInfo.name then
+            local n = icon.cooldownInfo.name
+            -- Verify it's a real string (not secret)
+            if type(n) == "string" then
+                name = n
+            else
+                local ok, _ = pcall(function() return n:len() end)
+                if ok then name = n end
+            end
+        end
+    end)
+    return name
 end
 
 -- Scan a single viewer's icons and sync glow state
@@ -277,23 +350,44 @@ local function ScanViewerGlows(viewerName, targetSpellID)
                     local shouldGlow = false
                     local canDetermine = false
 
-                    pcall(function()
-                        local spellID = icon.GetSpellID and icon:GetSpellID()
+                    -- Method 1: Check if Blizzard's glow is visually showing
+                    if HasBlizzardGlow(icon) then
+                        shouldGlow = true
+                        canDetermine = true
+                    end
+
+                    -- Method 2: Check via IsSpellOverlayed API (using actual spell ID from cooldownInfo)
+                    if not canDetermine then
+                        local spellID = GetIconSpellID(icon)
                         if spellID then
-                            -- Secret spellID = spell is mid-morph, skip this icon
-                            if type(issecretvalue) == "function" and issecretvalue(spellID) then
-                                return
-                            end
                             -- When we have a targetSpellID from an event, skip unrelated icons
-                            if targetSpellID and spellID ~= targetSpellID then
-                                return
+                            if targetSpellID then
+                                local matchOk, matches = pcall(function() return spellID == targetSpellID end)
+                                if not matchOk or not matches then
+                                    spellID = nil  -- Skip this icon
+                                end
                             end
-                            canDetermine = true
-                            if IsSpellOverlayed and IsSpellOverlayed(spellID) then
-                                shouldGlow = true
+                            if spellID then
+                                canDetermine = true
+                                if IsSpellOverlayed and IsSpellOverlayed(spellID) then
+                                    shouldGlow = true
+                                end
                             end
                         end
-                    end)
+                    end
+
+                    -- Method 3: Name-based matching against tracked glow events
+                    -- Catches cases where spell IDs don't match (CDM uses different IDs)
+                    if not canDetermine or (canDetermine and not shouldGlow) then
+                        local spellName = GetIconSpellName(icon)
+                        if spellName and activeGlowSpellNames[spellName] then
+                            shouldGlow = true
+                            canDetermine = true
+                        elseif spellName and not canDetermine then
+                            -- We have a name but it's not glowing — that's a valid determination
+                            canDetermine = true
+                        end
+                    end
 
                     -- Only modify glow state when we could reliably determine it.
                     -- Icons with secret or nil spellIDs keep their current glow state.
@@ -339,12 +433,13 @@ ScheduleGlowScan = function(targetSpellID)
     end)
 end
 
+-- NOTE: ActionButton_ShowOverlayGlow / ActionButton_HideOverlayGlow
+-- do NOT exist in WoW 12.0. Glow detection is handled entirely via
+-- SPELL_ACTIVATION_OVERLAY_GLOW events + name-based matching.
+
 -- ======================================================
--- Event-Driven Glow Detection
--- Listens for Blizzard's glow events and viewer changes,
--- then triggers deferred scans. No hooks on individual CDM
--- icon methods — all glow state changes happen outside
--- Blizzard's update cycle.
+-- Event-Driven Glow Detection (fallback for cases where
+-- ActionButton hooks don't fire)
 -- ======================================================
 
 local function HookViewerForScan(viewerName)
@@ -376,8 +471,23 @@ local function SetupGlowDetection()
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:SetScript("OnEvent", function(_, event, spellID)
-        if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" or event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
-            -- Targeted scan for the specific spell that changed
+        if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
+            -- Track this spell name as glowing (for name-based matching)
+            pcall(function()
+                local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+                if name then
+                    activeGlowSpellNames[name] = true
+                end
+            end)
+            ScheduleGlowScan(spellID)
+        elseif event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
+            -- Remove this spell name from glowing set
+            pcall(function()
+                local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+                if name then
+                    activeGlowSpellNames[name] = nil
+                end
+            end)
             ScheduleGlowScan(spellID)
         else
             -- Full scan for world entry, combat end, etc.
@@ -485,3 +595,4 @@ _G.QUI_StopAllCustomGlows = function()
     wipe(activeGlowIcons)
     print("|cFF00FF00[QUI]|r All custom glows stopped")
 end
+

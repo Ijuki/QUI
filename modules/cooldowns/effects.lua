@@ -65,13 +65,13 @@ local function HideBlizzardGlows(button)
     
     -- ALWAYS hide Blizzard's glows - our custom glow uses LibCustomGlow which is separate
     -- Don't call ActionButton_HideOverlayGlow as it may interfere with proc detection
-    
+
     -- Hide the SpellActivationAlert overlay (the golden swirl glow frame)
     if button.SpellActivationAlert then
         button.SpellActivationAlert:Hide()
         button.SpellActivationAlert:SetAlpha(0)
     end
-    
+
     -- Hide OverlayGlow frame if it exists (Blizzard's default)
     if button.OverlayGlow then
         button.OverlayGlow:Hide()

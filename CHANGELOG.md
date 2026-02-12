@@ -20,6 +20,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+
+## v2.30.2 - 2026-02-12
+
+### Fixed
+- fixed custom glows not showing, only blizzard proc glows
+## v2.30.1 - 2026-02-12
+
+### Fixed
+- fixed glows not showing up on CDM
+- fixed new quests not being skinned in objective tracker
+## v2.30.0 - 2026-02-12
+
+### Changed
+- this release is mainly a larger scale refactoring of the existing code base
+
+### Fixed
+- fixed Blizzard castbar randomly showing after zoning
 ## v2.29.4 - 2026-02-10
 
 ### Fixed

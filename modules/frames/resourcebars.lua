@@ -1,10 +1,9 @@
 local ADDON_NAME, ns = ...
 local QUICore = ns.Addon
 local LSM = LibStub("LibSharedMedia-3.0")
+local UIKit = ns.UIKit
 
-local function GetCore()
-    return (_G.QUI and _G.QUI.QUICore) or ns.Addon
-end
+local GetCore = ns.Helpers.GetCore
 
 -- Pixel-perfect scaling helper
 local function Scale(x, frame)
@@ -920,10 +919,8 @@ function QUICore:GetPowerBar()
 
 
     -- BACKGROUND
-    bar.Background = bar:CreateTexture(nil, "BACKGROUND")
-    bar.Background:SetAllPoints()
     local bgColor = cfg.bgColor or { 0.15, 0.15, 0.15, 1 }
-    bar.Background:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    bar.Background = UIKit.CreateBackground(bar, bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
 
     -- STATUS BAR
     bar.StatusBar = CreateFrame("StatusBar", nil, bar)
@@ -932,18 +929,8 @@ function QUICore:GetPowerBar()
     bar.StatusBar:SetStatusBarTexture(tex)
     bar.StatusBar:SetFrameLevel(bar:GetFrameLevel())
 
-
     -- BORDER (pixel-perfect)
-    local borderPx = cfg.borderSize or 1
-    local borderSize = borderPx > 0 and QUICore:Pixels(borderPx, bar) or 0
-    bar.Border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-    bar.Border:SetPoint("TOPLEFT", bar, -borderSize, borderSize)
-    bar.Border:SetPoint("BOTTOMRIGHT", bar, borderSize, -borderSize)
-    bar.Border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = borderSize,
-    })
-    bar.Border:SetBackdropBorderColor(0, 0, 0, 1)
+    UIKit.CreateBackdropBorder(bar, cfg.borderSize or 1, 0, 0, 0, 1)
 
     -- TEXT FRAME (same strata, +2 levels to render above bar content but stay within element's layer band)
     bar.TextFrame = CreateFrame("Frame", nil, bar)
@@ -1054,12 +1041,16 @@ function QUICore:UpdatePowerBar()
             local primaryBorderSize = cfg.borderSize or 1
             local secondaryHeight = secCfg.height or 8
             local secondaryBorderSize = secCfg.borderSize or 1
+            local primaryOuterThickness = primaryHeight + (2 * primaryBorderSize)
+            local secondaryOuterThickness = secondaryHeight + (2 * secondaryBorderSize)
             local baseCenterX = cfg.offsetX or 0
             local baseCenterY = cfg.offsetY or 25
 
-            -- Mirror the locked-to-primary "above" calculation using config offsets
-            local primaryVisualTop = baseCenterY + (primaryHeight / 2) + primaryBorderSize
-            local aboveCenterY = primaryVisualTop + (secondaryHeight / 2) + secondaryBorderSize - 1
+            -- In swapped mode, Secondary is first moved onto Primary while preserving bottom edge.
+            -- Then Primary moves above that swapped Secondary without overlap.
+            local swappedSecondaryCenterY = baseCenterY + ((secondaryOuterThickness - primaryOuterThickness) / 2)
+            local swappedSecondaryTop = swappedSecondaryCenterY + (secondaryOuterThickness / 2)
+            local aboveCenterY = swappedSecondaryTop + (primaryOuterThickness / 2)
 
             offsetX = QUICore:PixelRound(baseCenterX + (secCfg.offsetX or 0), bar)
             offsetY = QUICore:PixelRound(aboveCenterY + (secCfg.offsetY or 0), bar)
@@ -1675,10 +1666,8 @@ function QUICore:GetSecondaryPowerBar()
     bar:SetWidth(QUICore:PixelRound(width, bar))
 
     -- BACKGROUND
-    bar.Background = bar:CreateTexture(nil, "BACKGROUND")
-    bar.Background:SetAllPoints()
     local bgColor = cfg.bgColor or { 0.15, 0.15, 0.15, 1 }
-    bar.Background:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    bar.Background = UIKit.CreateBackground(bar, bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
 
     -- STATUS BAR (for non-fragmented resources)
     bar.StatusBar = CreateFrame("StatusBar", nil, bar)
@@ -1687,18 +1676,8 @@ function QUICore:GetSecondaryPowerBar()
     bar.StatusBar:SetStatusBarTexture(tex)
     bar.StatusBar:SetFrameLevel(bar:GetFrameLevel())
 
-
     -- BORDER (pixel-perfect)
-    local secBorderPx = cfg.borderSize or 1
-    local borderSize = secBorderPx > 0 and QUICore:Pixels(secBorderPx, bar) or 0
-    bar.Border = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-    bar.Border:SetPoint("TOPLEFT", bar, -borderSize, borderSize)
-    bar.Border:SetPoint("BOTTOMRIGHT", bar, borderSize, -borderSize)
-    bar.Border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = borderSize,
-    })
-    bar.Border:SetBackdropBorderColor(0, 0, 0, 1)
+    UIKit.CreateBackdropBorder(bar, cfg.borderSize or 1, 0, 0, 0, 1)
 
     -- TEXT FRAME (same strata, +2 levels to render above bar content but stay within element's layer band)
     bar.TextFrame = CreateFrame("Frame", nil, bar)
@@ -2155,6 +2134,20 @@ function QUICore:UpdateSecondaryPowerBar()
         if primaryCfg then
             local offsetX = QUICore:PixelRound(primaryCfg.offsetX or 0, bar)
             local offsetY = QUICore:PixelRound(primaryCfg.offsetY or 25, bar)
+            local primaryOuterThickness = (primaryCfg.height or 8) + ((primaryCfg.borderSize or 1) * 2)
+            local secondaryOuterThickness = (cfg.height or 8) + ((cfg.borderSize or 1) * 2)
+
+            -- Keep the edge nearest the viewer aligned when swapping.
+            -- This prevents overlap when primary/secondary heights differ.
+            if isVertical then
+                local deltaX = QUICore:PixelRound((secondaryOuterThickness - primaryOuterThickness) / 2, bar)
+                offsetX = offsetX + deltaX
+            else
+                -- Keep bottom edges aligned after swap:
+                -- secondaryCenter = primaryCenter + (secondaryOuter - primaryOuter) / 2
+                local deltaY = QUICore:PixelRound((secondaryOuterThickness - primaryOuterThickness) / 2, bar)
+                offsetY = offsetY + deltaY
+            end
 
             if bar._cachedX ~= offsetX or bar._cachedY ~= offsetY or bar._cachedAutoMode ~= "swappedToPrimary" then
                 bar:ClearAllPoints()
