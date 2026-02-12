@@ -2567,30 +2567,66 @@ Datatexts:Register("currencies", {
             local allCurrencies = GetTrackedCurrencies()  -- Get all tracked currencies
             local ordered = {}
             local seen = {}
+            local currenciesById = {}
+            local idByName = {}
+            for _, curr in ipairs(allCurrencies) do
+                currenciesById[curr.id] = curr
+                idByName[curr.name] = curr.id
+            end
 
             -- Get the configured order from settings
             local db = QUICore.db and QUICore.db.profile and QUICore.db.profile.datatext
-            local currencyOrder = db and db.currencyOrder or {"none", "none", "none"}
+            local currencyOrder = db and db.currencyOrder or {}
+            local currencyEnabled = db and db.currencyEnabled or nil
 
-            -- Add currencies in configured order
-            for slotIndex = 1, 3 do
-                local configValue = currencyOrder[slotIndex]
-                if configValue ~= "none" then
-                    -- Find currency by ID; also support legacy name-based values.
-                    for _, curr in ipairs(allCurrencies) do
-                        if curr.id == tostring(configValue) or curr.name == configValue then
-                            table.insert(ordered, curr)
-                            seen[curr.id] = true
-                            break
+            -- Resolve configured order to tracked IDs, supporting legacy name-based entries.
+            local resolvedIds = {}
+            if type(currencyOrder) == "table" then
+                for _, rawValue in ipairs(currencyOrder) do
+                    local value = rawValue
+                    if type(value) == "number" then
+                        value = tostring(value)
+                    end
+                    if type(value) == "string" and value ~= "" and value ~= "none" then
+                        local resolvedId = value
+                        if not currenciesById[resolvedId] then
+                            local numericValue = tonumber(value)
+                            if numericValue and currenciesById[tostring(numericValue)] then
+                                resolvedId = tostring(numericValue)
+                            else
+                                resolvedId = idByName[value]
+                            end
+                        end
+                        if resolvedId and currenciesById[resolvedId] and not seen[resolvedId] then
+                            seen[resolvedId] = true
+                            resolvedIds[#resolvedIds + 1] = resolvedId
                         end
                     end
                 end
             end
 
-            -- Add remaining currencies in default order
+            -- Append newly tracked currencies not yet in order.
             for _, curr in ipairs(allCurrencies) do
                 if not seen[curr.id] then
-                    table.insert(ordered, curr)
+                    seen[curr.id] = true
+                    resolvedIds[#resolvedIds + 1] = curr.id
+                end
+            end
+
+            -- Return first six checked currencies in configured order.
+            for _, currencyId in ipairs(resolvedIds) do
+                local isEnabled = true
+                if type(currencyEnabled) == "table" and currencyEnabled[currencyId] == false then
+                    isEnabled = false
+                end
+                if isEnabled then
+                    local curr = currenciesById[currencyId]
+                    if curr then
+                        ordered[#ordered + 1] = curr
+                        if #ordered >= 6 then
+                            break
+                        end
+                    end
                 end
             end
 
@@ -2605,8 +2641,14 @@ Datatexts:Register("currencies", {
                 maxToShow = 1      -- Compact: 1 currency (also handles 0/nil)
             elseif slotWidth < 120 then
                 maxToShow = 2      -- Medium: 2 currencies
+            elseif slotWidth < 165 then
+                maxToShow = 3
+            elseif slotWidth < 210 then
+                maxToShow = 4
+            elseif slotWidth < 255 then
+                maxToShow = 5
             else
-                maxToShow = 3      -- Full: all 3 currencies
+                maxToShow = 6
             end
 
             local displayString = ""

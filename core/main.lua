@@ -2874,11 +2874,8 @@ local defaults = {
             },
 
             -- Currencies datatext settings
-            currencyOrder = {
-                "none",  -- Slot 1
-                "none",  -- Slot 2
-                "none",  -- Slot 3
-            },  -- Order of currencies to display (IDs or "none")
+            currencyOrder = {},  -- Ordered currency IDs selected by user (up to 6)
+            currencyEnabled = {}, -- Per-currency toggle map (id -> true/false)
         },
         
         -- Additional Datapanels (user-created, independent of minimap)
