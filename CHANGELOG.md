@@ -23,6 +23,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.32.0 - 2026-02-13
+
+### Added
+- add auto combat logging feature for raids
+
+### Changed
+
+### Fixed
+- fixed edge case where the castbar would disappear mid-cast when casting instantly after dropping combat
+- add more InCombatLockdown checks in cooldown and buff bar modules
+- fixed issue where the objective tracker would trigger show/hide and resize events in combat
+- fixed totem event related tainted swipe updates
+- force castbar preview cleanup when exiting edit mode
+## v2.31.0 - 2026-02-12
+
+### Added
+- added options to order currencies in datatexts
+
+### Fixed
+- fixed taint issues with cdm swipes
+- properly place swapped resource bars
 ## v2.30.2 - 2026-02-12
 
 ### Fixed

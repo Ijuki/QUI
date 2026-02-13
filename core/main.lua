@@ -331,6 +331,7 @@ local defaults = {
             fastAutoLoot = true,
             autoSelectGossip = false,  -- Auto-select single gossip options
             autoCombatLog = false,  -- Auto start/stop combat logging in M+ (opt-in)
+<<<<<<< HEAD
             autoDeleteConfirm = false,  -- Auto-fill DELETE confirmation text
             hideGuildChat = false,
             -- Pet Warning (pet-spec classes: Hunter, Warlock, DK, Mage)
@@ -354,6 +355,10 @@ local defaults = {
             consumableAnchorMode = true,          -- Anchor to ready check frame
             consumableIconOffset = 5,             -- Icon offset from anchor
             consumableIconSize = 40,              -- Icon size in pixels
+=======
+            autoCombatLogRaid = false,  -- Auto start/stop combat logging in raids (opt-in)
+            autoDeleteConfirm = true,  -- Auto-fill DELETE confirmation text
+>>>>>>> 2d7600bd717187bd8b9353bdf0dfd3d4b2951cc4
             -- Pet Warning (pet-spec classes: Hunter, Warlock, DK, Mage)
             petCombatWarning = true,    -- Show combat warning in instances when pet missing/passive
             petWarningOffsetX = 0,      -- Warning frame X offset from center

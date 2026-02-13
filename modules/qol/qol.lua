@@ -260,6 +260,8 @@ end
 ---------------------------------------------------------------------------
 
 local wasLoggingBeforeChallenge = false
+local raidAutoLoggingActive = false
+local wasInRaidInstance = false
 
 local function OnChallengeModeStart()
     local settings = GetSettings()
@@ -297,6 +299,86 @@ local function CheckResumeLogging()
     end
 end
 
+<<<<<<< HEAD
+=======
+local function IsInRaidInstance()
+    local inInstance, instanceType = IsInInstance()
+    return inInstance and instanceType == "raid"
+end
+
+local function UpdateRaidAutoLogging()
+    local settings = GetSettings()
+    local inRaidInstance = IsInRaidInstance()
+
+    if not settings or not settings.autoCombatLogRaid then
+        -- If disabled while active, only stop if QUI started it.
+        if raidAutoLoggingActive and LoggingCombat() then
+            LoggingCombat(false)
+            print("|cFF30D1FFQUI:|r Combat logging stopped")
+        end
+        raidAutoLoggingActive = false
+        wasInRaidInstance = inRaidInstance
+        return
+    end
+
+    if inRaidInstance and not wasInRaidInstance then
+        raidAutoLoggingActive = false
+
+        if not LoggingCombat() then
+            LoggingCombat(true)
+            raidAutoLoggingActive = true
+            print("|cFF30D1FFQUI:|r Combat logging started for raid")
+        end
+    elseif not inRaidInstance and wasInRaidInstance then
+        -- Only stop if QUI started it on raid entry.
+        if raidAutoLoggingActive and LoggingCombat() then
+            LoggingCombat(false)
+            print("|cFF30D1FFQUI:|r Combat logging stopped")
+        end
+        raidAutoLoggingActive = false
+    end
+
+    wasInRaidInstance = inRaidInstance
+end
+
+---------------------------------------------------------------------------
+-- DELETE CONFIRMATION: AUTO-FILL
+---------------------------------------------------------------------------
+
+local deletePopups = {
+    ["DELETE_ITEM"] = true,
+    ["DELETE_GOOD_ITEM"] = true,
+    ["DELETE_GOOD_QUEST_ITEM"] = true,
+    ["DELETE_QUEST_ITEM"] = true,
+}
+
+hooksecurefunc("StaticPopup_Show", function(which)
+    if not deletePopups[which] then return end
+
+    local settings = GetSettings()
+    if not settings or not settings.autoDeleteConfirm then return end
+
+    -- Find the popup frame that's showing this dialog
+    for i = 1, STATICPOPUP_NUMDIALOGS or 4 do
+        local frame = _G["StaticPopup" .. i]
+        if frame and frame.which == which and frame:IsShown() then
+            local editBox = frame.editBox or _G["StaticPopup" .. i .. "EditBox"]
+            if editBox then
+                editBox:SetText(DELETE_ITEM_CONFIRM_STRING or "DELETE")
+                -- Trigger OnTextChanged to enable the confirm button
+                local handler = editBox:GetScript("OnTextChanged")
+                if handler then
+                    handler(editBox)
+                end
+                -- Note: Cannot auto-click - DeleteCursorItem() is protected
+            end
+            break
+        end
+    end
+end)
+
+---------------------------------------------------------------------------
+>>>>>>> 2d7600bd717187bd8b9353bdf0dfd3d4b2951cc4
 -- EVENT REGISTRATION
 ---------------------------------------------------------------------------
 
@@ -312,6 +394,7 @@ qolFrame:RegisterEvent("CHALLENGE_MODE_START")
 qolFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 qolFrame:RegisterEvent("CHALLENGE_MODE_RESET")
 qolFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+qolFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 
 qolFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "MERCHANT_SHOW" then
@@ -336,5 +419,8 @@ qolFrame:SetScript("OnEvent", function(self, event, ...)
         OnChallengeModeEnd()
     elseif event == "PLAYER_ENTERING_WORLD" then
         C_Timer.After(2, CheckResumeLogging)
+        C_Timer.After(2, UpdateRaidAutoLogging)
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
+        UpdateRaidAutoLogging()
     end
 end)
