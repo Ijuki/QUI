@@ -653,7 +653,8 @@ local function LayoutViewer(viewerName, trackerKey)
 
     local settings = GetTrackerSettings(trackerKey)
     if not settings or not settings.enabled then return end
-    if InCombatLockdown() then return end
+    -- Allow re-layout in combat so spell morphs/procs don't leave the bars in a
+    -- Blizzard-sized state until combat ends. Skinning work still defers in combat.
 
     -- Prevent re-entry during layout
     if NCDM.applying[trackerKey] then return end
@@ -1029,7 +1030,6 @@ local function HookViewer(viewerName, trackerKey)
 
     -- Step 1 & 3: OnShow hook - enable polling and single deferred layout
     viewer:HookScript("OnShow", function(self)
-        if InCombatLockdown() then return end
         -- Enable polling when viewer becomes visible
         if self.__ncdmUpdateFrame then
             self.__ncdmUpdateFrame:Show()
@@ -1057,7 +1057,6 @@ local function HookViewer(viewerName, trackerKey)
     viewer:HookScript("OnSizeChanged", function(self)
         -- Increment layout counter so OnUpdate knows Blizzard changed something
         self.__ncdmBlizzardLayoutCount = (self.__ncdmBlizzardLayoutCount or 0) + 1
-        if InCombatLockdown() then return end
         if self.__cdmLayoutSuppressed or self.__cdmLayoutRunning then
             return
         end
