@@ -363,6 +363,19 @@ local defaults = {
             petCombatWarning = true,    -- Show combat warning in instances when pet missing/passive
             petWarningOffsetX = 0,      -- Warning frame X offset from center
             petWarningOffsetY = -200,   -- Warning frame Y offset from center
+            -- Focus Cast Alert (warn when hostile focus is casting and interrupt is ready)
+            focusCastAlert = {
+                enabled = false,
+                text = "Focus is casting. Kick!",
+                anchorTo = "screen", -- "screen", "essential", "focus"
+                offsetX = 0,
+                offsetY = -120,
+                font = "", -- empty = global QUI font
+                fontSize = 26,
+                fontOutline = "OUTLINE", -- "", "OUTLINE", "THICKOUTLINE"
+                textColor = {1, 0.2, 0.2, 1},
+                useClassColor = false,
+            },
             -- Consumable Check (disabled by default)
             consumableCheckEnabled = false,       -- Master toggle
             consumableOnReadyCheck = true,        -- Show on ready check
@@ -1086,6 +1099,8 @@ local defaults = {
             useClassColorSecondWind = false,
             secondWindColor = { 1.0, 0.8, 0.2, 1 },       -- FFCC33
             secondWindBackgroundColor = { 0.102, 0.102, 0.102, 0.301 }, -- 1A1A1A with lower alpha
+            useThrillOfTheSkiesColor = true,               -- Change bar color when Thrill of the Skies buff is active
+            thrillOfTheSkiesColor = { 1.0, 0.5, 0.0, 1 }, -- FF8000 (orange)
             visibility = "FLYING_ONLY",
             fadeDelay = 1,
             fadeDuration = 0.3,
@@ -1150,6 +1165,7 @@ local defaults = {
             anchorToCursor = true,             -- Follow cursor vs default anchor
             hideInCombat = true,               -- Suppress tooltips during combat
             classColorName = false,            -- Color player names by class
+            fontSize = 12,                     -- Tooltip text font size
             skinTooltips = true,               -- Apply QUI theme to tooltips
             bgColor = {0.05, 0.05, 0.05, 1},  -- Custom background color
             bgOpacity = 0.95,                  -- Background opacity (0-1)
@@ -1158,7 +1174,6 @@ local defaults = {
             borderColor = {0.2, 1.0, 0.6, 1}, -- Border color (default = mint accent)
             borderUseClassColor = false,       -- Use player class color for border
             borderUseAccentColor = false,      -- Use addon accent color for border
-            hideHealthBar = false,             -- Hide health bar on unit tooltips
             showSpellIDs = false,              -- Show spell ID and icon ID on buff/debuff tooltips
             -- Per-Context Visibility (SHOW/HIDE/SHIFT/CTRL/ALT)
             visibility = {
