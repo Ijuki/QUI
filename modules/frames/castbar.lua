@@ -76,6 +76,9 @@ end
 -- Simpler approach: trust type check, don't over-validate
 local function SafeToNumber(v)
     if v == nil then return nil end
+    if type(IsSecretValue) == "function" and IsSecretValue(v) then
+        return nil
+    end
     -- If already a number, return it directly (trust type check)
     if type(v) == "number" then return v end
     -- Try tonumber for non-number types
@@ -491,15 +494,17 @@ local function UpdateCastbarElements(anchorFrame, unitKey, castSettings)
 
     -- Constrain spell text width so it doesn't overflow the status bar
     if anchorFrame.spellText and anchorFrame.statusBar then
-        local barWidth = anchorFrame.statusBar:GetWidth()
+        local barWidth = SafeToNumber(anchorFrame.statusBar:GetWidth())
         if barWidth and barWidth > 0 then
             local spellPad = math.abs(currentCastSettings.spellTextOffsetX or 4)
             local timePad = math.abs(currentCastSettings.timeTextOffsetX or -4)
             local timeWidth = 0
             if showTimeText and anchorFrame.timeText then
-                timeWidth = anchorFrame.timeText:GetStringWidth()
-                -- If no active cast, estimate from font size (covers "00.0" style text)
-                if timeWidth == 0 then
+                local measuredWidth = anchorFrame.timeText:GetStringWidth()
+                timeWidth = SafeToNumber(measuredWidth) or 0
+
+                -- If no active cast or restricted value, estimate from font size ("00.0" style text)
+                if timeWidth <= 0 then
                     timeWidth = (currentCastSettings.fontSize or 10) * 3.5
                 end
             end
