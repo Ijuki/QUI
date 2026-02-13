@@ -59,6 +59,7 @@
         "STAT_HASTE",
         "STAT_CRITICAL_STRIKE",
         "STAT_VERSATILITY",
-        "STAT_MASTERY"
+        "STAT_MASTERY",
+        "UNKNOWN"
     ]
 }

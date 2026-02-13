@@ -299,8 +299,6 @@ local function CheckResumeLogging()
     end
 end
 
-<<<<<<< HEAD
-=======
 local function IsInRaidInstance()
     local inInstance, instanceType = IsInInstance()
     return inInstance and instanceType == "raid"
@@ -378,7 +376,6 @@ hooksecurefunc("StaticPopup_Show", function(which)
 end)
 
 ---------------------------------------------------------------------------
->>>>>>> 2d7600bd717187bd8b9353bdf0dfd3d4b2951cc4
 -- EVENT REGISTRATION
 ---------------------------------------------------------------------------
 
