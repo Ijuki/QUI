@@ -48,7 +48,7 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
         y = y - castbarHeader.gap
 
         if not unitDB.castbar then
-            unitDB.castbar = { enabled = true, width = 250, height = 25, offsetX = 0, offsetY = -25, widthAdjustment = 0, fontSize = 12, iconSize = 25, iconScale = 1.0, color = {1, 0.7, 0, 1}, bgColor = {0.149, 0.149, 0.149, 1}, borderSize = 1, iconBorderSize = 2, texture = "Solid" }
+            unitDB.castbar = { enabled = true, width = 250, height = 25, offsetX = 0, offsetY = -25, widthAdjustment = 0, fontSize = 12, iconSize = 25, iconScale = 1.0, color = {1, 0.7, 0, 1}, notInterruptibleColor = {0.7, 0.2, 0.2, 1}, bgColor = {0.149, 0.149, 0.149, 1}, borderSize = 1, iconBorderSize = 2, texture = "Solid" }
         end
         local castDB = unitDB.castbar
         if not castDB.fontSize then castDB.fontSize = 12 end
@@ -63,6 +63,9 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
         end
         if castDB.bgColor == nil then
             castDB.bgColor = {0.149, 0.149, 0.149, 1}  -- #262626
+        end
+        if castDB.notInterruptibleColor == nil then
+            castDB.notInterruptibleColor = {0.7, 0.2, 0.2, 1}
         end
         if castDB.borderSize == nil then
             castDB.borderSize = 1
@@ -152,6 +155,13 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
         castBgColorPicker:SetPoint("TOPLEFT", PAD, y)
         castBgColorPicker:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
+
+        if unitKey == "target" or unitKey == "focus" then
+            local notInterruptibleColorPicker = GUI:CreateFormColorPicker(tabContent, "Uninterruptible Cast Color", "notInterruptibleColor", castDB, RefreshUnit)
+            notInterruptibleColorPicker:SetPoint("TOPLEFT", PAD, y)
+            notInterruptibleColorPicker:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+        end
 
         local castTextureDropdown = GUI:CreateFormDropdown(tabContent, "Bar Texture", GetTextureList(), "texture", castDB, RefreshUnit)
         castTextureDropdown:SetPoint("TOPLEFT", PAD, y)
@@ -427,6 +437,14 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
             end
             if sourceDB.bgColor then
                 targetDB.bgColor = {sourceDB.bgColor[1], sourceDB.bgColor[2], sourceDB.bgColor[3], sourceDB.bgColor[4]}
+            end
+            if sourceDB.notInterruptibleColor then
+                targetDB.notInterruptibleColor = {
+                    sourceDB.notInterruptibleColor[1],
+                    sourceDB.notInterruptibleColor[2],
+                    sourceDB.notInterruptibleColor[3],
+                    sourceDB.notInterruptibleColor[4]
+                }
             end
             if sourceDB.empoweredStageColors then
                 targetDB.empoweredStageColors = {}

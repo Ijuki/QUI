@@ -161,6 +161,9 @@ local function InitializeDefaultSettings(castSettings)
     if castSettings.timeTextOffsetX == nil then castSettings.timeTextOffsetX = -4 end
     if castSettings.timeTextOffsetY == nil then castSettings.timeTextOffsetY = 0 end
     if castSettings.showTimeText == nil then castSettings.showTimeText = true end
+    if castSettings.notInterruptibleColor == nil then
+        castSettings.notInterruptibleColor = {0.7, 0.2, 0.2, 1}
+    end
 
     -- Empowered cast settings
     if castSettings.empoweredLevelTextAnchor == nil then castSettings.empoweredLevelTextAnchor = "CENTER" end
@@ -249,6 +252,10 @@ local function GetBarColor(unitKey, castSettings)
     return castSettings.color or DEFAULT_BAR_COLOR
 end
 
+local function GetNotInterruptibleColor(castSettings)
+    return castSettings.notInterruptibleColor or NOT_INTERRUPTIBLE_COLOR
+end
+
 local function ApplyBarColor(statusBar, barColor)
     local r, g, b, a = GetSafeColor(barColor, DEFAULT_BAR_COLOR)
     statusBar:SetStatusBarColor(r, g, b, a)
@@ -259,23 +266,80 @@ local function ApplyBackgroundColor(bgBar, bgColor)
     bgBar:SetVertexColor(r, g, b, a)
 end
 
-local function ApplyCastColor(statusBar, notInterruptible, customColor)
-    -- Safely handle secret values (TWW API protection)
-    -- Wrap entire check in pcall - if ANY comparison fails, default to interruptible (false)
-    local isNotInterruptible = false
-    local ok, result = pcall(function()
-        return notInterruptible == true
-    end)
-    if ok and result then
-        isNotInterruptible = true
+-- Create helper textures used for secret-safe interruptibility rendering:
+-- 1) hidden alpha helper receives SetAlphaFromBoolean result
+-- 2) visible overlay tints the filled cast texture for non-interruptible casts
+local function GetInterruptibilityColorObjects(statusBar)
+    if not statusBar then
+        return nil, nil
     end
 
-    if isNotInterruptible then
-        local r, g, b, a = GetSafeColor(NOT_INTERRUPTIBLE_COLOR)
-        statusBar:SetStatusBarColor(r, g, b, a)
+    if not statusBar.interruptibilityColorHelper then
+        local helper = statusBar:CreateTexture(nil, "BACKGROUND")
+        helper:SetSize(1, 1)
+        helper:SetColorTexture(0, 0, 0, 0)
+        helper:SetAlpha(0)
+        helper:Hide()
+        statusBar.interruptibilityColorHelper = helper
+    end
+
+    if not statusBar.notInterruptibleOverlay then
+        local overlay = statusBar:CreateTexture(nil, "OVERLAY")
+        overlay:SetTexture("Interface\\Buttons\\WHITE8x8")
+        overlay:SetAlpha(0)
+        overlay:Hide()
+        statusBar.notInterruptibleOverlay = overlay
+    end
+
+    return statusBar.interruptibilityColorHelper, statusBar.notInterruptibleOverlay
+end
+
+local function ApplyCastColor(statusBar, notInterruptible, customColor, notInterruptibleColor)
+    if not statusBar then
+        return
+    end
+
+    -- Always apply the normal cast color directly to the StatusBar.
+    local normalR, normalG, normalB, normalA = GetSafeColor(customColor, DEFAULT_BAR_COLOR)
+    statusBar:SetStatusBarColor(normalR, normalG, normalB, normalA)
+
+    -- Apply non-interruptible color via a dedicated overlay whose alpha is
+    -- driven by SetAlphaFromBoolean, so we never compare secret values.
+    local helper, overlay = GetInterruptibilityColorObjects(statusBar)
+    if not helper or not overlay then
+        return
+    end
+
+    local fillTexture = statusBar.GetStatusBarTexture and statusBar:GetStatusBarTexture()
+    overlay:ClearAllPoints()
+    if fillTexture then
+        overlay:SetPoint("TOPLEFT", fillTexture, "TOPLEFT", 0, 0)
+        overlay:SetPoint("BOTTOMRIGHT", fillTexture, "BOTTOMRIGHT", 0, 0)
+        local texturePath = fillTexture.GetTexture and fillTexture:GetTexture()
+        if texturePath then
+            overlay:SetTexture(texturePath)
+        else
+            overlay:SetTexture("Interface\\Buttons\\WHITE8x8")
+        end
     else
-        local r, g, b, a = GetSafeColor(customColor, DEFAULT_BAR_COLOR)
-        statusBar:SetStatusBarColor(r, g, b, a)
+        overlay:SetPoint("TOPLEFT", statusBar, "TOPLEFT", 0, 0)
+        overlay:SetPoint("BOTTOMRIGHT", statusBar, "BOTTOMRIGHT", 0, 0)
+        overlay:SetTexture("Interface\\Buttons\\WHITE8x8")
+    end
+
+    local lockedR, lockedG, lockedB, lockedA = GetSafeColor(notInterruptibleColor, NOT_INTERRUPTIBLE_COLOR)
+    overlay:SetVertexColor(lockedR, lockedG, lockedB, lockedA)
+
+    if helper.SetAlphaFromBoolean and notInterruptible ~= nil then
+        pcall(helper.SetAlphaFromBoolean, helper, notInterruptible, 1, 0)
+        overlay:SetAlpha(helper:GetAlpha())
+        overlay:Show()
+    elseif type(notInterruptible) == "boolean" then
+        overlay:SetAlpha(notInterruptible and 1 or 0)
+        overlay:Show()
+    else
+        overlay:SetAlpha(0)
+        overlay:Hide()
     end
 end
 
@@ -561,7 +625,7 @@ local function ClearEmpoweredState(bar)
     if bar.bgBar then bar.bgBar:Show() end
 
     if bar.statusBar then
-        ApplyCastColor(bar.statusBar, false, bar.customColor)
+        ApplyCastColor(bar.statusBar, false, bar.customColor, bar.customNotInterruptibleColor)
     end
 
     if bar.empoweredLevelText then
@@ -603,7 +667,7 @@ local function SimulateCast(castbar, castSettings, unitKey, bossIndex)
     -- Set initial visual state
     if castbar.statusBar then
         castbar.statusBar:SetStatusBarTexture(GetTexturePath(castSettings.texture))
-        ApplyCastColor(castbar.statusBar, false, castbar.customColor)
+        ApplyCastColor(castbar.statusBar, false, castbar.customColor, castbar.customNotInterruptibleColor)
         castbar.statusBar:SetMinMaxValues(0, castTime)
         castbar.statusBar:SetValue(0)
         castbar.statusBar:SetReverseFill(false)
@@ -986,6 +1050,7 @@ function QUI_Castbar:CreateCastbar(unitFrame, unit, unitKey)
     
     local barColor = GetBarColor(unitKey, castSettings)
     anchorFrame.customColor = barColor
+    anchorFrame.customNotInterruptibleColor = GetNotInterruptibleColor(castSettings)
     ApplyBarColor(statusBar, barColor)
     ApplyBackgroundColor(bgBar, castSettings.bgColor)
     statusBar:SetStatusBarTexture(GetTexturePath(castSettings.texture))
@@ -1159,7 +1224,7 @@ local function UpdateCastbarVisuals(castbar, castSettings, unitKey, texture, tex
     end
 
     -- Set color using helper (always apply, regardless of timer mode)
-    ApplyCastColor(castbar.statusBar, notInterruptible, castbar.customColor)
+    ApplyCastColor(castbar.statusBar, notInterruptible, castbar.customColor, castbar.customNotInterruptibleColor)
 end
 
 -- Update empowered cast state
@@ -1582,11 +1647,11 @@ function QUI_Castbar:SetupCastbar(castbar, unit, unitKey, castSettings)
         -- Interruptible state changes
         UNIT_SPELLCAST_INTERRUPTIBLE = function(self)
             self.notInterruptible = false
-            ApplyCastColor(self.statusBar, false, self.customColor)
+            ApplyCastColor(self.statusBar, false, self.customColor, self.customNotInterruptibleColor)
         end,
         UNIT_SPELLCAST_NOT_INTERRUPTIBLE = function(self)
             self.notInterruptible = true
-            ApplyCastColor(self.statusBar, true, self.customColor)
+            ApplyCastColor(self.statusBar, true, self.customColor, self.customNotInterruptibleColor)
         end,
     }
     
@@ -1817,7 +1882,7 @@ function QUI_Castbar:SetupBossCastbar(castbar, unit, bossIndex, castSettings)
 
             self.statusBar:SetReverseFill(false)
 
-            ApplyCastColor(self.statusBar, notInterruptible, self.customColor)
+            ApplyCastColor(self.statusBar, notInterruptible, self.customColor, self.customNotInterruptibleColor)
 
             if isEmpowered and numStages and numStages > 0 then
                 UpdateEmpoweredStages(self, numStages)
@@ -1897,10 +1962,10 @@ function QUI_Castbar:SetupBossCastbar(castbar, unit, bossIndex, castSettings)
             self:Cast(spellID, false)
         elseif event == "UNIT_SPELLCAST_INTERRUPTIBLE" then
             self.notInterruptible = false
-            ApplyCastColor(self.statusBar, false, self.customColor)
+            ApplyCastColor(self.statusBar, false, self.customColor, self.customNotInterruptibleColor)
         elseif event == "UNIT_SPELLCAST_NOT_INTERRUPTIBLE" then
             self.notInterruptible = true
-            ApplyCastColor(self.statusBar, true, self.customColor)
+            ApplyCastColor(self.statusBar, true, self.customColor, self.customNotInterruptibleColor)
         end
     end)
 end
@@ -1962,6 +2027,7 @@ function QUI_Castbar:CreateBossCastbar(unitFrame, unit, bossIndex)
     -- Apply colors and textures
     local barColor = castSettings.color or {1, 0.7, 0, 1}
     anchorFrame.customColor = barColor
+    anchorFrame.customNotInterruptibleColor = GetNotInterruptibleColor(castSettings)
     ApplyBarColor(statusBar, barColor)
     ApplyBackgroundColor(bgBar, castSettings.bgColor)
     statusBar:SetStatusBarTexture(GetTexturePath(castSettings.texture))
@@ -2120,7 +2186,7 @@ function QUI_Castbar:CreateBossCastbar(unitFrame, unit, bossIndex)
 
             self.statusBar:SetReverseFill(false)
 
-            ApplyCastColor(self.statusBar, notInterruptible, self.customColor)
+            ApplyCastColor(self.statusBar, notInterruptible, self.customColor, self.customNotInterruptibleColor)
 
             -- Start OnUpdate handler
             self:SetScript("OnUpdate", BossCastBar_OnUpdate)
@@ -2171,10 +2237,10 @@ function QUI_Castbar:CreateBossCastbar(unitFrame, unit, bossIndex)
             TryApplyDeferredCastbarRefresh(self)
         elseif event == "UNIT_SPELLCAST_INTERRUPTIBLE" then
             self.notInterruptible = false
-            ApplyCastColor(self.statusBar, false, self.customColor)
+            ApplyCastColor(self.statusBar, false, self.customColor, self.customNotInterruptibleColor)
         elseif event == "UNIT_SPELLCAST_NOT_INTERRUPTIBLE" then
             self.notInterruptible = true
-            ApplyCastColor(self.statusBar, true, self.customColor)
+            ApplyCastColor(self.statusBar, true, self.customColor, self.customNotInterruptibleColor)
         end
     end)
 
@@ -2289,9 +2355,10 @@ local function ApplyLiveCastbarSettings(castbar, unitKey, castSettings)
     else
         castbar.customColor = GetBarColor(unitKey, castSettings)
     end
+    castbar.customNotInterruptibleColor = GetNotInterruptibleColor(castSettings)
 
     if castbar.statusBar then
-        ApplyCastColor(castbar.statusBar, castbar.notInterruptible, castbar.customColor)
+        ApplyCastColor(castbar.statusBar, castbar.notInterruptible, castbar.customColor, castbar.customNotInterruptibleColor)
     end
 
     if castbar.icon then
