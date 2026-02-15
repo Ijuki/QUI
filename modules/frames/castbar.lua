@@ -357,8 +357,15 @@ local function PositionCastbarByAnchor(anchorFrame, castSettings, unitFrame, bar
         local widthAdj = QUICore:PixelRound(castSettings.widthAdjustment or 0, anchorFrame)
         local viewer = _G["EssentialCooldownViewer"]
         if viewer then
-            anchorFrame:SetPoint("TOPLEFT", viewer, "BOTTOMLEFT", offsetX - widthAdj, offsetY)
-            anchorFrame:SetPoint("TOPRIGHT", viewer, "BOTTOMRIGHT", offsetX + widthAdj, offsetY)
+            -- Keep castbar spacing visually consistent with the active bottom CDM row.
+            -- In horizontal CDM layouts, row yOffset can move the visible bottom row
+            -- without changing the viewer frame bounds.
+            local bottomRowYOffset = 0
+            if viewer.__cdmLayoutDirection ~= "VERTICAL" then
+                bottomRowYOffset = QUICore:PixelRound(viewer.__cdmBottomRowYOffset or 0, anchorFrame)
+            end
+            anchorFrame:SetPoint("TOPLEFT", viewer, "BOTTOMLEFT", offsetX - widthAdj, offsetY + bottomRowYOffset)
+            anchorFrame:SetPoint("TOPRIGHT", viewer, "BOTTOMRIGHT", offsetX + widthAdj, offsetY + bottomRowYOffset)
         else
             anchorFrame:SetPoint("TOPLEFT", unitFrame, "BOTTOMLEFT", offsetX, offsetY)
         end
@@ -368,8 +375,13 @@ local function PositionCastbarByAnchor(anchorFrame, castSettings, unitFrame, bar
         local widthAdj = QUICore:PixelRound(castSettings.widthAdjustment or 0, anchorFrame)
         local viewer = _G["UtilityCooldownViewer"]
         if viewer then
-            anchorFrame:SetPoint("TOPLEFT", viewer, "BOTTOMLEFT", offsetX - widthAdj, offsetY)
-            anchorFrame:SetPoint("TOPRIGHT", viewer, "BOTTOMRIGHT", offsetX + widthAdj, offsetY)
+            -- Mirror Essential logic so Utility-anchored castbars behave consistently.
+            local bottomRowYOffset = 0
+            if viewer.__cdmLayoutDirection ~= "VERTICAL" then
+                bottomRowYOffset = QUICore:PixelRound(viewer.__cdmBottomRowYOffset or 0, anchorFrame)
+            end
+            anchorFrame:SetPoint("TOPLEFT", viewer, "BOTTOMLEFT", offsetX - widthAdj, offsetY + bottomRowYOffset)
+            anchorFrame:SetPoint("TOPRIGHT", viewer, "BOTTOMRIGHT", offsetX + widthAdj, offsetY + bottomRowYOffset)
         else
             anchorFrame:SetPoint("TOPLEFT", unitFrame, "BOTTOMLEFT", offsetX, offsetY)
         end
