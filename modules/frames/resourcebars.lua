@@ -200,6 +200,14 @@ local SwapCandidateSpecs = {
     { specID = 263,  name = "Enhancement",  classColor = "0070DD" },  -- Shaman
 }
 ns.SwapCandidateSpecs = SwapCandidateSpecs
+local SwapCandidateSpecByID = {}
+for _, info in ipairs(SwapCandidateSpecs) do
+    SwapCandidateSpecByID[info.specID] = true
+end
+
+local function IsSwapCandidateSpec(specID)
+    return specID and SwapCandidateSpecByID[specID] or false
+end
 
 local function ShouldSwapBars()
     local cfg = QUICore and QUICore.db and QUICore.db.profile and QUICore.db.profile.secondaryPowerBar
@@ -207,7 +215,8 @@ local function ShouldSwapBars()
     local spec = GetSpecialization()
     if not spec then return false end
     local specID = GetSpecializationInfo(spec)
-    return specID and cfg.swapSpecs and cfg.swapSpecs[specID] or false
+    if not IsSwapCandidateSpec(specID) then return false end
+    return cfg.swapSpecs and cfg.swapSpecs[specID] or false
 end
 
 local function ShouldHidePrimaryOnSwap()
@@ -217,6 +226,7 @@ local function ShouldHidePrimaryOnSwap()
     if not spec then return false end
     local specID = GetSpecializationInfo(spec)
     if not specID then return false end
+    if not IsSwapCandidateSpec(specID) then return false end
     local swapEnabled = cfg.swapSpecs and cfg.swapSpecs[specID]
     local hideEnabled = cfg.hideSpecs and cfg.hideSpecs[specID]
     return (swapEnabled and hideEnabled) or false
