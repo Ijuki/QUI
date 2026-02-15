@@ -21,6 +21,16 @@ local function IsCDMVisibilityHidden()
     return false
 end
 
+-- Returns configured hidden alpha when CDM visibility is currently hidden.
+-- nil means CDM visibility is not currently hiding the bars.
+local function GetCDMHiddenAlpha()
+    if _G.QUI_ShouldCDMBeVisible and not _G.QUI_ShouldCDMBeVisible() then
+        local vis = QUICore and QUICore.db and QUICore.db.profile and QUICore.db.profile.cdmVisibility
+        return (vis and vis.fadeOutAlpha) or 0
+    end
+    return nil
+end
+
 -- Visibility check for resource bars ("always", "combat", "hostile")
 local function ShouldShowBar(cfg)
     -- CDM visibility overrides (e.g. hide when mounted) take priority
@@ -200,6 +210,14 @@ local SwapCandidateSpecs = {
     { specID = 263,  name = "Enhancement",  classColor = "0070DD" },  -- Shaman
 }
 ns.SwapCandidateSpecs = SwapCandidateSpecs
+local SwapCandidateSpecByID = {}
+for _, info in ipairs(SwapCandidateSpecs) do
+    SwapCandidateSpecByID[info.specID] = true
+end
+
+local function IsSwapCandidateSpec(specID)
+    return specID and SwapCandidateSpecByID[specID] or false
+end
 
 local function ShouldSwapBars()
     local cfg = QUICore and QUICore.db and QUICore.db.profile and QUICore.db.profile.secondaryPowerBar
@@ -207,7 +225,8 @@ local function ShouldSwapBars()
     local spec = GetSpecialization()
     if not spec then return false end
     local specID = GetSpecializationInfo(spec)
-    return specID and cfg.swapSpecs and cfg.swapSpecs[specID] or false
+    if not IsSwapCandidateSpec(specID) then return false end
+    return cfg.swapSpecs and cfg.swapSpecs[specID] or false
 end
 
 local function ShouldHidePrimaryOnSwap()
@@ -217,6 +236,7 @@ local function ShouldHidePrimaryOnSwap()
     if not spec then return false end
     local specID = GetSpecializationInfo(spec)
     if not specID then return false end
+    if not IsSwapCandidateSpec(specID) then return false end
     local swapEnabled = cfg.swapSpecs and cfg.swapSpecs[specID]
     local hideEnabled = cfg.hideSpecs and cfg.hideSpecs[specID]
     return (swapEnabled and hideEnabled) or false
@@ -976,6 +996,17 @@ function QUICore:UpdatePowerBar()
     if not resource then
         bar:Hide()
         return
+    end
+
+    -- CDM visibility can hide bars independently of bar visibility mode.
+    -- Honor configured CDM fadeOutAlpha instead of forcing fully transparent.
+    if not PowerBarEditMode.active then
+        local cdmHiddenAlpha = GetCDMHiddenAlpha()
+        if cdmHiddenAlpha ~= nil then
+            bar:SetAlpha(cdmHiddenAlpha)
+            bar:Show()
+            return
+        end
     end
 
     -- Visibility mode check (always/combat/hostile)
@@ -2073,6 +2104,17 @@ function QUICore:UpdateSecondaryPowerBar()
     if not resource then
         bar:Hide()
         return
+    end
+
+    -- CDM visibility can hide bars independently of bar visibility mode.
+    -- Honor configured CDM fadeOutAlpha instead of forcing fully transparent.
+    if not PowerBarEditMode.active then
+        local cdmHiddenAlpha = GetCDMHiddenAlpha()
+        if cdmHiddenAlpha ~= nil then
+            bar:SetAlpha(cdmHiddenAlpha)
+            bar:Show()
+            return
+        end
     end
 
     -- Visibility mode check (always/combat/hostile)

@@ -27,6 +27,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.34.1 - 2026-02-15
+
+### Fixed
+- fixed container anchoring so that we can properly anchor and move DandersFrames preview frames
+- fixed resourcebar swap applying to unsupported specs
+- no longer alpha-force resource bars by cdm fade controller, which caused fallback center screen positioning
 ## v2.34.0 - 2026-02-14
 
 ### Added
