@@ -411,6 +411,7 @@ function GUI:InitializeOptions()
 
     -- Sidebar tabs (short names for vertical layout)
     GUI:AddTab(frame, "General & QoL", ns.QUI_GeneralOptions.CreateGeneralQoLPage)
+    GUI:AddTab(frame, "Anchoring & Layout", ns.QUI_FrameAnchoringOptions.CreateFrameAnchoringPage)
     GUI:AddTab(frame, "Cooldown Manager", ns.QUI_NCDMOptions.CreateCDMSetupPage)
     GUI:AddTab(frame, "Unit Frames", ns.QUI_UnitFramesOptions.CreateUnitFramesPage)
     GUI:AddTab(frame, "Action Bars", ns.QUI_ActionBarsOptions.CreateActionBarsPage)
