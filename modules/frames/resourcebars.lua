@@ -1100,8 +1100,9 @@ function QUICore:UpdatePowerBar()
     end
 
     -- Only reposition when offset actually changed (prevents flicker)
+    -- Skip if frame has an active anchoring override
     local swapMode = isSwapped and "swappedToSecondary" or nil
-    if bar._cachedX ~= offsetX or bar._cachedY ~= offsetY or bar._cachedAutoMode ~= swapMode then
+    if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedX ~= offsetX or bar._cachedY ~= offsetY or bar._cachedAutoMode ~= swapMode) then
         bar:ClearAllPoints()
         bar:SetPoint("CENTER", UIParent, "CENTER", offsetX, offsetY)
         bar._cachedX = offsetX
@@ -2191,7 +2192,7 @@ function QUICore:UpdateSecondaryPowerBar()
                 offsetY = offsetY + deltaY
             end
 
-            if bar._cachedX ~= offsetX or bar._cachedY ~= offsetY or bar._cachedAutoMode ~= "swappedToPrimary" then
+            if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedX ~= offsetX or bar._cachedY ~= offsetY or bar._cachedAutoMode ~= "swappedToPrimary") then
                 bar:ClearAllPoints()
                 bar:SetPoint("CENTER", UIParent, "CENTER", offsetX, offsetY)
                 bar._cachedX = offsetX
@@ -2268,7 +2269,7 @@ function QUICore:UpdateSecondaryPowerBar()
                 -- Position the bar (add user adjustment on top of calculated base position)
                 local finalX = offsetX + (cfg.offsetX or 0)
                 local finalY = offsetY + (cfg.offsetY or 0)
-                if bar._cachedX ~= finalX or bar._cachedY ~= finalY or bar._cachedAutoMode ~= "lockedToPrimary" then
+                if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedX ~= finalX or bar._cachedY ~= finalY or bar._cachedAutoMode ~= "lockedToPrimary") then
                     bar:ClearAllPoints()
                     bar:SetPoint("CENTER", UIParent, "CENTER", finalX, finalY)
                     bar._cachedX = finalX
@@ -2332,7 +2333,7 @@ function QUICore:UpdateSecondaryPowerBar()
                 -- Add user adjustment on top of calculated base position
                 local finalX = offsetX + (cfg.offsetX or 0)
                 local finalY = offsetY + (cfg.offsetY or 0)
-                if bar._cachedX ~= finalX or bar._cachedY ~= finalY or bar._cachedAutoMode ~= "lockedToPrimaryCached" then
+                if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedX ~= finalX or bar._cachedY ~= finalY or bar._cachedAutoMode ~= "lockedToPrimaryCached") then
                     bar:ClearAllPoints()
                     bar:SetPoint("CENTER", UIParent, "CENTER", finalX, finalY)
                     bar._cachedX = finalX
@@ -2415,7 +2416,7 @@ function QUICore:UpdateSecondaryPowerBar()
             if not wantedAnchor then
                 -- Fall through to manual positioning below
             else
-                if bar._cachedAnchor ~= wantedAnchor or bar._cachedX ~= wantedOffsetX or bar._cachedAutoMode ~= true then
+                if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedAnchor ~= wantedAnchor or bar._cachedX ~= wantedOffsetX or bar._cachedAutoMode ~= true) then
                     bar:ClearAllPoints()
                     bar:SetPoint("BOTTOM", wantedAnchor, "TOP", wantedOffsetX, 0)
                     bar._cachedAnchor = wantedAnchor
@@ -2456,7 +2457,7 @@ function QUICore:UpdateSecondaryPowerBar()
             local wantedX, wantedY
             wantedX = QUICore:PixelRound(baseX + (cfg.offsetX or 0), bar)
             wantedY = QUICore:PixelRound(baseY + (cfg.offsetY or 0), bar)
-            if bar._cachedX ~= wantedX or bar._cachedY ~= wantedY or bar._cachedAutoMode ~= false then
+            if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(bar)) and (bar._cachedX ~= wantedX or bar._cachedY ~= wantedY or bar._cachedAutoMode ~= false) then
                 bar:ClearAllPoints()
                 bar:SetPoint("CENTER", UIParent, "CENTER", wantedX, wantedY)
                 bar._cachedX = wantedX

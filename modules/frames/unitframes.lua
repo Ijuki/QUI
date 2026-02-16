@@ -29,6 +29,12 @@ QUI_UF.auraPreviewMode = {}  -- Tracks buff/debuff preview state (keyed by "unit
 -- Reference to castbar module
 local QUI_Castbar = ns.QUI_Castbar
 
+-- Check if a frame has an active anchoring override (blocks module positioning)
+local function IsFrameOverridden(frame)
+    local anchoring = ns.QUI_Anchoring
+    return anchoring and anchoring.overriddenFrames and anchoring.overriddenFrames[frame]
+end
+
 ---------------------------------------------------------------------------
 -- CONSTANTS
 ---------------------------------------------------------------------------
@@ -2540,17 +2546,20 @@ function QUI_UF:RefreshFrame(unitKey)
     frame:SetSize(width, height)
 
                 -- Position: first boss at configured position, rest stacked below
-                frame:ClearAllPoints()
-                if i == 1 then
-                    if QUICore.SetSnappedPoint then
-                        QUICore:SetSnappedPoint(frame, "CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+                -- (skip if frame has an active anchoring override)
+                if not IsFrameOverridden(frame) then
+                    frame:ClearAllPoints()
+                    if i == 1 then
+                        if QUICore.SetSnappedPoint then
+                            QUICore:SetSnappedPoint(frame, "CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+                        else
+                            frame:SetPoint("CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+                        end
                     else
-                        frame:SetPoint("CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
-                    end
-                else
-                    local prevFrame = self.frames["boss" .. (i - 1)]
-                    if prevFrame then
-                        frame:SetPoint("TOP", prevFrame, "BOTTOM", 0, -spacing)
+                        local prevFrame = self.frames["boss" .. (i - 1)]
+                        if prevFrame then
+                            frame:SetPoint("TOP", prevFrame, "BOTTOM", 0, -spacing)
+                        end
                     end
                 end
 
@@ -2765,18 +2774,20 @@ function QUI_UF:RefreshFrame(unitKey)
     local height = (QUICore.PixelRound and QUICore:PixelRound(settings.height or 35, frame)) or (settings.height or 35)
     frame:SetSize(width, height)
 
-    -- Update position
-    frame:ClearAllPoints()
-    local isAnchored = settings.anchorTo and settings.anchorTo ~= "disabled"
-    if isAnchored and (unitKey == "player" or unitKey == "target") then
-        -- Anchored to another frame: defer to the global callback
-        _G.QUI_UpdateAnchoredUnitFrames()
-    else
-        -- Standard positioning (config offsets are virtual coords)
-        if QUICore.SetSnappedPoint then
-            QUICore:SetSnappedPoint(frame, "CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+    -- Update position (skip if frame has an active anchoring override)
+    if not IsFrameOverridden(frame) then
+        frame:ClearAllPoints()
+        local isAnchored = settings.anchorTo and settings.anchorTo ~= "disabled"
+        if isAnchored and (unitKey == "player" or unitKey == "target") then
+            -- Anchored to another frame: defer to the global callback
+            _G.QUI_UpdateAnchoredUnitFrames()
         else
-            frame:SetPoint("CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+            -- Standard positioning (config offsets are virtual coords)
+            if QUICore.SetSnappedPoint then
+                QUICore:SetSnappedPoint(frame, "CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+            else
+                frame:SetPoint("CENTER", UIParent, "CENTER", settings.offsetX or 0, settings.offsetY or 0)
+            end
         end
     end
     
@@ -3226,8 +3237,8 @@ function QUI_UF:Initialize()
             -- Pass bossKey (boss1, boss2, etc.) for unique frame names, but settings come from "boss"
             self.frames[bossKey] = CreateBossFrame(bossUnit, bossKey, i)
             
-            -- Position boss frames vertically stacked
-            if self.frames[bossKey] and i > 1 then
+            -- Position boss frames vertically stacked (skip if anchoring override active)
+            if self.frames[bossKey] and i > 1 and not IsFrameOverridden(self.frames[bossKey]) then
                 local prevFrame = self.frames["boss" .. (i - 1)]
                 if prevFrame then
                     self.frames[bossKey]:ClearAllPoints()
@@ -3448,9 +3459,10 @@ _G.QUI_UpdateAnchoredUnitFrames = function()
     if not screenCenterX or not screenCenterY then return end
 
     -- Update Player (anchors to LEFT edge of anchor frame)
+    -- Skip if player frame has an active anchoring override
     local playerSettings = db.player
     local playerAnchorType = playerSettings and playerSettings.anchorTo
-    if playerAnchorType and playerAnchorType ~= "disabled" and QUI_UF.frames.player then
+    if playerAnchorType and playerAnchorType ~= "disabled" and QUI_UF.frames.player and not IsFrameOverridden(QUI_UF.frames.player) then
         local anchorFrame = GetAnchorFrame(playerAnchorType)
         if anchorFrame and anchorFrame:IsShown() then
             local anchor = GetAnchorDimensions(anchorFrame, playerAnchorType)
@@ -3480,9 +3492,10 @@ _G.QUI_UpdateAnchoredUnitFrames = function()
     end
 
     -- Update Target (anchors to RIGHT edge of anchor frame)
+    -- Skip if target frame has an active anchoring override
     local targetSettings = db.target
     local targetAnchorType = targetSettings and targetSettings.anchorTo
-    if targetAnchorType and targetAnchorType ~= "disabled" and QUI_UF.frames.target then
+    if targetAnchorType and targetAnchorType ~= "disabled" and QUI_UF.frames.target and not IsFrameOverridden(QUI_UF.frames.target) then
         local anchorFrame = GetAnchorFrame(targetAnchorType)
         if anchorFrame and anchorFrame:IsShown() then
             local anchor = GetAnchorDimensions(anchorFrame, targetAnchorType)
