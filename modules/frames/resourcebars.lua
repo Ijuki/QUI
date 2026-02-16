@@ -2363,9 +2363,12 @@ function QUICore:UpdateSecondaryPowerBar()
         local anchor = _G[anchorName]
 
         -- In standalone mode, don't hide when anchor is hidden (bar is independent)
-        -- Otherwise, hide if anchor doesn't exist or isn't shown
+        -- Otherwise, hide if anchor doesn't exist or isn't shown.
+        -- If CDM visibility says it should be visible, don't hide based on anchor
+        -- visibility because the viewer may still be fading in after mount changes.
         if not cfg.standaloneMode and not cfg.lockedToEssential and not cfg.lockedToUtility then
-            if not anchor or not anchor:IsShown() then
+            local cdmShouldBeVisible = _G.QUI_ShouldCDMBeVisible and _G.QUI_ShouldCDMBeVisible()
+            if not anchor or (not anchor:IsShown() and not cdmShouldBeVisible) then
                 bar:Hide()
                 return
             end
