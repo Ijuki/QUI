@@ -29,6 +29,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.36.0 - 2026-02-16
+
+### Added
+- added new anchoring and layout options
+- added new tracked buff bar options
+
+### Changed
+- changed CVar check after leaving combat that would disable CDM entirely when only using CDM buffs
+
+### Fixed
+- addressed some potential taint code paths
 ## v2.35.0 - 2026-02-15
 
 ### Added
