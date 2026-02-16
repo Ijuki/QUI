@@ -1019,8 +1019,13 @@ local FRAME_RESOLVERS = {
     bar8 = function() return _G["MultiBar7"] end,
     petBar = function() return _G["PetActionBar"] end,
     stanceBar = function() return _G["StanceBar"] end,
+    microMenu = function() return _G["MicroMenuContainer"] end,
+    bagBar = function() return _G["BagsBar"] end,
     -- Display
     minimap = function() return _G["Minimap"] end,
+    objectiveTracker = function() return _G["ObjectiveTrackerFrame"] end,
+    buffFrame = function() return _G["BuffFrame"] end,
+    debuffFrame = function() return _G["DebuffFrame"] end,
     -- External (DandersFrames)
     dandersParty = function()
         if ns.QUI_DandersFrames and ns.QUI_DandersFrames:IsAvailable() then
@@ -1063,7 +1068,12 @@ local FRAME_ANCHOR_INFO = {
     bar8            = { displayName = "Action Bar 8",          category = "Action Bars",       order = 8 },
     petBar          = { displayName = "Pet Action Bar",        category = "Action Bars",       order = 9 },
     stanceBar       = { displayName = "Stance Bar",            category = "Action Bars",       order = 10 },
+    microMenu       = { displayName = "Micro Menu",            category = "Action Bars",       order = 11 },
+    bagBar          = { displayName = "Bag Bar",               category = "Action Bars",       order = 12 },
     minimap         = { displayName = "Minimap",               category = "Display",           order = 1 },
+    objectiveTracker = { displayName = "Objective Tracker",    category = "Display",           order = 2 },
+    buffFrame       = { displayName = "Buff Frame",            category = "Display",           order = 3 },
+    debuffFrame     = { displayName = "Debuff Frame",          category = "Display",           order = 4 },
     dandersParty    = { displayName = "DandersFrames Party",   category = "External",          order = 1 },
     dandersRaid     = { displayName = "DandersFrames Raid",    category = "External",          order = 2 },
 }

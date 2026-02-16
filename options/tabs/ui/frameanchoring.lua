@@ -260,6 +260,8 @@ local function BuildActionBarsTab(tabContent)
         { key = "bar8",      name = "Action Bar 8" },
         { key = "petBar",    name = "Pet Action Bar" },
         { key = "stanceBar", name = "Stance Bar" },
+        { key = "microMenu", name = "Micro Menu" },
+        { key = "bagBar",    name = "Bag Bar" },
     }
     for _, frameDef in ipairs(frames) do
         y = BuildFrameEntry(tabContent, frameDef, y)
@@ -269,7 +271,10 @@ end
 local function BuildDisplayTab(tabContent)
     local y = -10
     local frames = {
-        { key = "minimap", name = "Minimap" },
+        { key = "minimap",          name = "Minimap" },
+        { key = "objectiveTracker", name = "Objective Tracker" },
+        { key = "buffFrame",        name = "Buff Frame" },
+        { key = "debuffFrame",      name = "Debuff Frame" },
     }
 
     -- DandersFrames entries (conditional)
