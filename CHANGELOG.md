@@ -30,6 +30,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.36.1 - 2026-02-17
+
+### Added
+- added option to reverse target health bar fill direction
+
+### Changed
+- added reasonable tracked buff bars defaults
+
+### Fixed
+- partial revert of the taint hardening of last release
 ## v2.36.0 - 2026-02-16
 
 ### Added

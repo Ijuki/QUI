@@ -704,10 +704,10 @@ local defaults = {
                 spacing = 2,
                 growUp = true,  -- true = grow upward, false = grow downward
                 -- Inactive tracked-buff display behavior
-                inactiveMode = "fade",  -- always, fade, hide
+                inactiveMode = "hide",  -- always, fade, hide
                 inactiveAlpha = 0.3,
-                desaturateInactive = true,
-                reserveSlotWhenInactive = true,
+                desaturateInactive = false,
+                reserveSlotWhenInactive = false,
                 autoWidth = false,
                 autoWidthOffset = 0,
                 anchorTo = "disabled",
@@ -1641,6 +1641,7 @@ local defaults = {
                 anchorGap = 10,
                 anchorYOffset = 0,
                 texture = "Quazii v5 Inverse",
+                invertHealthDirection = false,   -- false = default right-to-left depletion, true = left-to-right
                 useClassColor = true,
                 useHostilityColor = true,  -- Use red/yellow/green based on unit hostility
                 customHealthColor = { 0.2, 0.6, 0.2, 1 },
