@@ -8,6 +8,9 @@ local Shared = ns.QUI_Options
 local PADDING = Shared.PADDING
 local CreateScrollableContent = Shared.CreateScrollableContent
 local FORM_ROW = 32
+local HUD_MIN_WIDTH_DEFAULT = 200
+local HUD_MIN_WIDTH_MIN = 100
+local HUD_MIN_WIDTH_MAX = 500
 
 local GetCore = ns.Helpers.GetCore
 
@@ -52,6 +55,29 @@ local function GetAnchoringDB()
     if not db.frameAnchoring then
         db.frameAnchoring = {}
     end
+    -- Migrate legacy scalar keys to element-style object:
+    -- frameAnchoring.hudMinWidth = { enabled = bool, width = number }
+    local legacyEnabled = db.frameAnchoring.hudMinWidthEnabled
+    local legacyWidth = db.frameAnchoring.hudMinWidth
+    if type(db.frameAnchoring.hudMinWidth) ~= "table" then
+        db.frameAnchoring.hudMinWidth = {
+            enabled = legacyEnabled == true,
+            width = tonumber(legacyWidth) or HUD_MIN_WIDTH_DEFAULT,
+        }
+    end
+    local hudMinWidth = db.frameAnchoring.hudMinWidth
+    if hudMinWidth.enabled == nil then
+        hudMinWidth.enabled = false
+    end
+    if type(hudMinWidth.width) ~= "number" then
+        hudMinWidth.width = HUD_MIN_WIDTH_DEFAULT
+    end
+    hudMinWidth.width = math.max(
+        HUD_MIN_WIDTH_MIN,
+        math.min(HUD_MIN_WIDTH_MAX, hudMinWidth.width)
+    )
+    -- Cleanup migrated legacy keys
+    db.frameAnchoring.hudMinWidthEnabled = nil
     return db.frameAnchoring
 end
 
@@ -174,6 +200,60 @@ end
 local function BuildCDMTab(tabContent)
     GUI:SetSearchContext({tabIndex = 2, tabName = "Anchoring & Layout", subTabIndex = 1, subTabName = "CDM"})
     local y = -10
+    local anchoringDB = GetAnchoringDB()
+    local hudMinWidth = anchoringDB and anchoringDB.hudMinWidth
+
+    local function RefreshHUDWidth()
+        if _G.QUI_RefreshNCDM then
+            _G.QUI_RefreshNCDM()
+        elseif _G.QUI_UpdateAnchoredFrames then
+            _G.QUI_UpdateAnchoredFrames()
+        end
+    end
+
+    if hudMinWidth then
+        GUI:SetSearchSection("HUD Minimum Width")
+        local sectionLabel = GUI:CreateLabel(tabContent, "HUD Minimum Width (When Anchored)", 12, C.textLight or C.text)
+        sectionLabel:SetPoint("TOPLEFT", PADDING, y)
+        y = y - 22
+
+        local minWidthToggle = GUI:CreateFormToggle(
+            tabContent,
+            "Enable Minimum Width for CDM-Anchored HUD",
+            "enabled",
+            hudMinWidth,
+            RefreshHUDWidth
+        )
+        minWidthToggle:SetPoint("TOPLEFT", PADDING + 10, y)
+        minWidthToggle:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        y = y - FORM_ROW
+
+        local minWidthSlider = GUI:CreateFormSlider(
+            tabContent,
+            "Minimum Width",
+            HUD_MIN_WIDTH_MIN,
+            HUD_MIN_WIDTH_MAX,
+            1,
+            "width",
+            hudMinWidth,
+            RefreshHUDWidth
+        )
+        minWidthSlider:SetPoint("TOPLEFT", PADDING + 10, y)
+        minWidthSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        y = y - FORM_ROW
+
+        local minWidthHint = GUI:CreateLabel(
+            tabContent,
+            "Only affects player/target when anchored to CDM. Keeps HUD spacing from collapsing. Default: 200.",
+            11,
+            C.textMuted or C.text
+        )
+        minWidthHint:SetPoint("TOPLEFT", PADDING + 10, y)
+        minWidthHint:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        minWidthHint:SetJustifyH("LEFT")
+        y = y - 24
+    end
+
     local frames = {
         { key = "cdmEssential", name = "CDM Essential Viewer" },
         { key = "cdmUtility",   name = "CDM Utility Viewer" },
