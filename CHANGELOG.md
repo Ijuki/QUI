@@ -31,6 +31,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+
+## v2.37.2 - 2026-02-18
+
+### Fixed
+- fixed castbar related lua errors introduced with the castbar ticks feature
+## v2.37.1 - 2026-02-18
+
+### Changed
+- added visual distinction for headers on dropdowns
+
+### Fixed
+- fixed quick keybinding not working anymore
+- fixed not being able to anchor to actionbar 1
+- fixed anchoring to secondary resourcebar
+## v2.37.0 - 2026-02-17
+
+### Added
+- added option for minimum HUD width in anchoring options
+- added castbar channel ticks feature
+- added more options to suppress Blizzard popup modals and notifications
+- added option to lock brez timer and counter in place
+
+### Fixed
+- fixed some in-combat frame drifting issues when spells morphed
+- fixed missing raid buff preview not working
 ## v2.36.1 - 2026-02-17
 
 ### Added
