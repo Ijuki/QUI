@@ -34,6 +34,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.37.3 - 2026-02-18
+
+### Added
+- added Welcome page with FAQs and Edit Mode base layout
+- added Quazii Details! string (this is old, but it was requested)
 ## v2.37.2 - 2026-02-18
 
 ### Fixed
