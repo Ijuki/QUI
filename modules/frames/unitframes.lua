@@ -35,6 +35,42 @@ local function IsFrameOverridden(frame)
     return anchoring and anchoring.overriddenFrames and anchoring.overriddenFrames[frame]
 end
 
+-- When frame anchoring overrides are active, keep auto-sized dimensions stable
+-- during unit frame refreshes so module defaults don't temporarily overwrite them.
+local function GetActiveFrameOverrideSettings(frame)
+    local overrideKey = IsFrameOverridden(frame)
+    if not overrideKey then return nil end
+
+    local profile = QUICore and QUICore.db and QUICore.db.profile
+    local anchoringDB = profile and profile.frameAnchoring
+    local settings = anchoringDB and anchoringDB[overrideKey]
+    if type(settings) ~= "table" or not settings.enabled then
+        return nil
+    end
+    return settings
+end
+
+local function ResolveRefreshSize(frame, baseWidth, baseHeight)
+    local width = baseWidth
+    local height = baseHeight
+    local overrideSettings = GetActiveFrameOverrideSettings(frame)
+    if overrideSettings then
+        if overrideSettings.autoWidth then
+            local currentWidth = frame:GetWidth()
+            if currentWidth and currentWidth > 0 then
+                width = currentWidth
+            end
+        end
+        if overrideSettings.autoHeight then
+            local currentHeight = frame:GetHeight()
+            if currentHeight and currentHeight > 0 then
+                height = currentHeight
+            end
+        end
+    end
+    return width, height
+end
+
 ---------------------------------------------------------------------------
 -- CONSTANTS
 ---------------------------------------------------------------------------
@@ -2572,9 +2608,10 @@ function QUI_UF:RefreshFrame(unitKey)
                 local separatorHeight = (settings.showPowerBar and settings.powerBarBorder ~= false) and QUICore:GetPixelSize(frame) or 0
 
                 -- Update size (config values are virtual coords, snap to pixel grid)
-                local width = (QUICore.PixelRound and QUICore:PixelRound(settings.width or 220, frame)) or (settings.width or 220)
-    local height = (QUICore.PixelRound and QUICore:PixelRound(settings.height or 35, frame)) or (settings.height or 35)
-    frame:SetSize(width, height)
+                local baseWidth = (QUICore.PixelRound and QUICore:PixelRound(settings.width or 220, frame)) or (settings.width or 220)
+                local baseHeight = (QUICore.PixelRound and QUICore:PixelRound(settings.height or 35, frame)) or (settings.height or 35)
+                local width, height = ResolveRefreshSize(frame, baseWidth, baseHeight)
+                frame:SetSize(width, height)
 
                 -- Position: first boss at configured position, rest stacked below
                 -- (skip if frame has an active anchoring override)
@@ -2801,8 +2838,9 @@ function QUI_UF:RefreshFrame(unitKey)
     end
 
     -- Update size (config values are virtual coords, snap to pixel grid)
-    local width = (QUICore.PixelRound and QUICore:PixelRound(settings.width or 220, frame)) or (settings.width or 220)
-    local height = (QUICore.PixelRound and QUICore:PixelRound(settings.height or 35, frame)) or (settings.height or 35)
+    local baseWidth = (QUICore.PixelRound and QUICore:PixelRound(settings.width or 220, frame)) or (settings.width or 220)
+    local baseHeight = (QUICore.PixelRound and QUICore:PixelRound(settings.height or 35, frame)) or (settings.height or 35)
+    local width, height = ResolveRefreshSize(frame, baseWidth, baseHeight)
     frame:SetSize(width, height)
 
     -- Update position (skip if frame has an active anchoring override)
