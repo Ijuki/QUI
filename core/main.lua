@@ -399,11 +399,17 @@ local defaults = {
             consumableOilOH = true,               -- Track off hand weapon enchant
             consumableRune = true,                -- Track augment rune
             consumableHealthstone = true,         -- Track healthstones (warlock in group)
+            consumablePreferredFood = nil,        -- Preferred food item ID
+            consumablePreferredFlask = nil,       -- Preferred flask item ID
+            consumablePreferredRune = nil,        -- Preferred rune item ID
+            consumablePreferredOilMH = nil,       -- Preferred main hand oil item ID
+            consumablePreferredOilOH = nil,       -- Preferred off hand oil item ID
             consumableExpirationWarning = false,  -- Warn when buffs expiring
             consumableExpirationThreshold = 300,  -- Seconds before expiration warning
             consumableAnchorMode = true,          -- Anchor to ready check frame
             consumableIconOffset = 5,             -- Icon offset from anchor
             consumableIconSize = 40,              -- Icon size in pixels
+            consumableScale = 1,                  -- Frame scale multiplier
             -- Quick Salvage settings
             quickSalvage = {
                 enabled = false,  -- Opt-in, OFF by default
@@ -753,6 +759,9 @@ local defaults = {
             fadeDuration = 0.2,
             fadeOutAlpha = 0,
             hideWhenMounted = false,
+            hideWhenFlying = false,
+            hideWhenSkyriding = false,
+            dontHideInDungeonsRaids = false,
         },
 
         -- Unitframes Visibility (player, target, focus, pet, tot, boss)
@@ -767,6 +776,9 @@ local defaults = {
             fadeOutAlpha = 0,
             alwaysShowCastbars = false,  -- When true, castbars ignore UF visibility
             hideWhenMounted = false,
+            hideWhenFlying = false,
+            hideWhenSkyriding = false,
+            dontHideInDungeonsRaids = false,
         },
 
         -- Custom Trackers Visibility (all custom item/spell bars)
@@ -780,6 +792,9 @@ local defaults = {
             fadeDuration = 0.2,
             fadeOutAlpha = 0,
             hideWhenMounted = false,
+            hideWhenFlying = false,
+            hideWhenSkyriding = false,
+            dontHideInDungeonsRaids = false,
         },
 
         viewers = {
