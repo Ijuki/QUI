@@ -1,0 +1,94 @@
+diff --git a/core/main.lua b/core/main.lua
+index d6f584e..952dfd4 100755
+--- a/core/main.lua
++++ b/core/main.lua
+@@ -1662,6 +1662,7 @@ local defaults = {
+                 nameOffsetX = -9,
+                 nameOffsetY = 0,
+                 maxNameLength = 10,              -- 0 = no limit, otherwise truncate to N characters
++                showClassificationMarker = true, -- Show +/* marker for elite/rare units
+                 -- Inline Target of Target (shows ">> ToT Name" after target name)
+                 showInlineToT = false,
+                 totSeparator = " >> ",
+@@ -1822,6 +1823,7 @@ local defaults = {
+                 nameOffsetX = 4,
+                 nameOffsetY = 0,
+                 maxNameLength = 0,
++                showClassificationMarker = true, -- Show +/* marker for elite/rare units
+                 -- Health text
+                 showHealth = true,
+                 showHealthPercent = true,
+@@ -1918,6 +1920,7 @@ local defaults = {
+                 nameOffsetX = 4,
+                 nameOffsetY = 0,
+                 maxNameLength = 0,
++                showClassificationMarker = true, -- Show +/* marker for elite/rare units
+                 -- Health text
+                 showHealth = true,
+                 showHealthPercent = true,
+diff --git a/modules/frames/unitframes.lua b/modules/frames/unitframes.lua
+index dc4a4f1..09df7a3 100755
+--- a/modules/frames/unitframes.lua
++++ b/modules/frames/unitframes.lua
+@@ -1365,6 +1365,23 @@ end
+ ---------------------------------------------------------------------------
+ -- UPDATE: Name text (with truncation and inline ToT support)
+ ---------------------------------------------------------------------------
++local function GetClassificationMarker(unit, unitKey, settings)
++    if not unit or not unitKey or not settings then return "" end
++    if unitKey ~= "target" and unitKey ~= "targettarget" and unitKey ~= "focus" then return "" end
++    if settings.showClassificationMarker == false then return "" end
++
++    local classification = UnitClassification(unit)
++    if classification == "elite" or classification == "worldboss" then
++        return " +"
++    elseif classification == "rare" then
++        return " *"
++    elseif classification == "rareelite" then
++        return " +*"
++    end
++
++    return ""
++end
++
+ local function UpdateName(frame)
+     if not frame or not frame.unit or not frame.nameText then return end
+     local unit = frame.unit
+@@ -1383,6 +1400,8 @@ local function UpdateName(frame)
+         name = TruncateName(name, maxLen)
+     end
+ 
++    name = name .. GetClassificationMarker(unit, frame.unitKey, settings)
++
+     -- Inline Target of Target for target frame only
+     if frame.unitKey == "target" and settings.showInlineToT then
+         local totUnit = "targettarget"
+diff --git a/options/tabs/frames/unitframes.lua b/options/tabs/frames/unitframes.lua
+index 854470f..e7be84c 100755
+--- a/options/tabs/frames/unitframes.lua
++++ b/options/tabs/frames/unitframes.lua
+@@ -388,6 +388,10 @@ local function CreateUnitFramesPage(parent)
+         if unitKey == "target" and unitDB.invertHealthDirection == nil then
+             unitDB.invertHealthDirection = false
+         end
++        if (unitKey == "target" or unitKey == "targettarget" or unitKey == "focus")
++           and unitDB.showClassificationMarker == nil then
++            unitDB.showClassificationMarker = true
++        end
+ 
+         -- Refresh function for this specific unit
+         local function RefreshUnit()
+@@ -770,6 +774,13 @@ local function CreateUnitFramesPage(parent)
+         showNameCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+         y = y - FORM_ROW
+ 
++        if unitKey == "target" or unitKey == "targettarget" or unitKey == "focus" then
++            local classMarkerCheck = GUI:CreateFormCheckbox(tabContent, "Show Elite/Rare Marker", "showClassificationMarker", unitDB, RefreshUnit)
++            classMarkerCheck:SetPoint("TOPLEFT", PAD, y)
++            classMarkerCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++        end
++
+         -- Anchor options for text positioning
+         local anchorOptions = {
+             {value = "TOPLEFT", text = "Top Left"},

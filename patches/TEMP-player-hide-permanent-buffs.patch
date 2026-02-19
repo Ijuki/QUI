@@ -1,0 +1,210 @@
+diff --git a/modules/frames/unitframe_auras.lua b/modules/frames/unitframe_auras.lua
+index 8313a0b..6c3416d 100644
+--- a/modules/frames/unitframe_auras.lua
++++ b/modules/frames/unitframe_auras.lua
+@@ -289,6 +289,7 @@ local function UpdateAuras(frame)
+     local buffOffsetX = auraSettings.buffOffsetX or 0
+     local buffOffsetY = auraSettings.buffOffsetY or -2
+     local buffSpacing = auraSettings.buffSpacing or auraSettings.iconSpacing or 2
++    local hidePermanentBuffs = (unit == "player" and auraSettings.hidePermanentBuffs == true)
+ 
+     -- Initialize containers
+     frame.buffIcons = frame.buffIcons or {}
+@@ -463,74 +464,117 @@ local function UpdateAuras(frame)
+     -- Populate buffs (skip if preview is active)
+     local buffCount = 0
+     local buffIndex = 1
++    local function IsSecretValue(value)
++        return type(issecretvalue) == "function" and issecretvalue(value)
++    end
++    local function IsSafeNumber(value)
++        return type(value) == "number" and not IsSecretValue(value)
++    end
++    local function IsPermanentAura(auraData)
++        if not auraData then return false end
++
++        -- Prefer direct numeric duration when safely readable.
++        local duration = auraData.duration
++        if IsSafeNumber(duration) then
++            return duration <= 0
++        end
++
++        -- Fallback to duration object API (combat-safe) when available.
++        if auraData.auraInstanceID and C_UnitAuras and C_UnitAuras.GetAuraDuration then
++            local okObj, durationObj = pcall(C_UnitAuras.GetAuraDuration, unit, auraData.auraInstanceID)
++            if okObj and durationObj and durationObj.GetRemainingDuration then
++                local okRemain, remaining = pcall(durationObj.GetRemainingDuration, durationObj)
++                if okRemain and IsSafeNumber(remaining) then
++                    return remaining <= 0
++                end
++            end
++        end
++
++        -- Last fallback: expiration time if safely numeric.
++        local expirationTime = auraData.expirationTime
++        if IsSafeNumber(expirationTime) then
++            return expirationTime <= 0
++        end
++
++        -- If no timing fields are available, treat as permanent.
++        if duration == nil and expirationTime == nil then
++            return true
++        end
++
++        -- Unknown/secret values: fail open and keep the aura visible.
++        return false
++    end
+     if showBuffs and not buffPreviewActive then
+         while buffCount < buffMaxIcons do
+             local auraData = C_UnitAuras.GetAuraDataByIndex(unit, buffIndex, "HELPFUL")
+             if not auraData then break end
+ 
+-            buffCount = buffCount + 1
++            local skipAura = hidePermanentBuffs and IsPermanentAura(auraData)
++            if not skipAura then
++                buffCount = buffCount + 1
+ 
+-            local icon = GetAuraIcon(frame.buffIcons, buffCount, frame, buffIconSize, auraSettings, false)
++                local icon = GetAuraIcon(frame.buffIcons, buffCount, frame, buffIconSize, auraSettings, false)
+ 
+-            -- Store aura data for tooltip
+-            icon.unit = unit
+-            icon.auraInstanceID = auraData.auraInstanceID
+-            icon.filter = "HELPFUL"
++                -- Store aura data for tooltip
++                icon.unit = unit
++                icon.auraInstanceID = auraData.auraInstanceID
++                icon.filter = "HELPFUL"
+ 
+-            -- Safely set texture
+-            if auraData.icon then
+-                icon.icon:SetTexture(auraData.icon)
+-            end
++                -- Safely set texture
++                if auraData.icon then
++                    icon.icon:SetTexture(auraData.icon)
++                end
+ 
+-            -- Default black border for buffs
+-            if icon.border then
+-                icon.border:SetColorTexture(0, 0, 0, 1)
+-            end
++                -- Default black border for buffs
++                if icon.border then
++                    icon.border:SetColorTexture(0, 0, 0, 1)
++                end
+ 
+-            -- Cooldown (safely handles secret values via duration object API)
+-            if SafeSetCooldown(icon.cooldown, auraData, unit) then
+-                icon.cooldown:Show()
+-            else
+-                icon.cooldown:Hide()
+-            end
++                -- Cooldown (safely handles secret values via duration object API)
++                if SafeSetCooldown(icon.cooldown, auraData, unit) then
++                    icon.cooldown:Show()
++                else
++                    icon.cooldown:Hide()
++                end
+ 
+-            -- Stack count (using combat-safe API, no comparisons on result)
+-            if icon._showStack then
+-                DisplayStackCount(icon.count, unit, auraData.auraInstanceID)
+-                icon.count:Show()
+-            else
+-                icon.count:Hide()
+-            end
++                -- Stack count (using combat-safe API, no comparisons on result)
++                if icon._showStack then
++                    DisplayStackCount(icon.count, unit, auraData.auraInstanceID)
++                    icon.count:Show()
++                else
++                    icon.count:Hide()
++                end
+ 
+-            -- Calculate position based on anchor and single grow direction
+-            local idx = buffCount - 1
+-            local xPos, yPos = buffOffsetX, buffOffsetY
+-            if buffGrow == "RIGHT" then
+-                xPos = xPos + idx * (buffIconSize + buffSpacing)
+-            elseif buffGrow == "LEFT" then
+-                xPos = xPos - idx * (buffIconSize + buffSpacing)
+-            elseif buffGrow == "UP" then
+-                yPos = yPos + idx * (buffIconSize + buffSpacing)
+-            elseif buffGrow == "DOWN" then
+-                yPos = yPos - idx * (buffIconSize + buffSpacing)
+-            end
++                -- Calculate position based on anchor and single grow direction
++                local idx = buffCount - 1
++                local xPos, yPos = buffOffsetX, buffOffsetY
++                if buffGrow == "RIGHT" then
++                    xPos = xPos + idx * (buffIconSize + buffSpacing)
++                elseif buffGrow == "LEFT" then
++                    xPos = xPos - idx * (buffIconSize + buffSpacing)
++                elseif buffGrow == "UP" then
++                    yPos = yPos + idx * (buffIconSize + buffSpacing)
++                elseif buffGrow == "DOWN" then
++                    yPos = yPos - idx * (buffIconSize + buffSpacing)
++                end
+ 
+-            -- Map user anchor to frame anchor points (flip vertical only for outside positioning)
+-            -- Border compensation: icons have 1px border extending beyond frame
+-            local iconPoint, framePoint, borderOffsetX
+-            if buffAnchor == "TOPLEFT" then
+-                iconPoint, framePoint, borderOffsetX = "BOTTOMLEFT", "TOPLEFT", 1
+-            elseif buffAnchor == "TOPRIGHT" then
+-                iconPoint, framePoint, borderOffsetX = "BOTTOMRIGHT", "TOPRIGHT", -1
+-            elseif buffAnchor == "BOTTOMLEFT" then
+-                iconPoint, framePoint, borderOffsetX = "TOPLEFT", "BOTTOMLEFT", 1
+-            elseif buffAnchor == "BOTTOMRIGHT" then
+-                iconPoint, framePoint, borderOffsetX = "TOPRIGHT", "BOTTOMRIGHT", -1
+-            end
++                -- Map user anchor to frame anchor points (flip vertical only for outside positioning)
++                -- Border compensation: icons have 1px border extending beyond frame
++                local iconPoint, framePoint, borderOffsetX
++                if buffAnchor == "TOPLEFT" then
++                    iconPoint, framePoint, borderOffsetX = "BOTTOMLEFT", "TOPLEFT", 1
++                elseif buffAnchor == "TOPRIGHT" then
++                    iconPoint, framePoint, borderOffsetX = "BOTTOMRIGHT", "TOPRIGHT", -1
++                elseif buffAnchor == "BOTTOMLEFT" then
++                    iconPoint, framePoint, borderOffsetX = "TOPLEFT", "BOTTOMLEFT", 1
++                elseif buffAnchor == "BOTTOMRIGHT" then
++                    iconPoint, framePoint, borderOffsetX = "TOPRIGHT", "BOTTOMRIGHT", -1
++                end
+ 
+-            icon:ClearAllPoints()
+-            icon:SetPoint(iconPoint, frame, framePoint, xPos + (borderOffsetX or 0), yPos)
+-            icon:Show()
++                icon:ClearAllPoints()
++                icon:SetPoint(iconPoint, frame, framePoint, xPos + (borderOffsetX or 0), yPos)
++                icon:Show()
++            end
+ 
+             buffIndex = buffIndex + 1
+         end
+diff --git a/options/tabs/frames/unitframes.lua b/options/tabs/frames/unitframes.lua
+index 7975557..249dbf7 100755
+--- a/options/tabs/frames/unitframes.lua
++++ b/options/tabs/frames/unitframes.lua
+@@ -1046,6 +1046,7 @@ local function CreateUnitFramesPage(parent)
+             local auraDB = unitDB.auras
+             if auraDB.showBuffs == nil then auraDB.showBuffs = false end
+             if auraDB.showDebuffs == nil then auraDB.showDebuffs = false end
++            if unitKey == "player" and auraDB.hidePermanentBuffs == nil then auraDB.hidePermanentBuffs = false end
+             if unitKey ~= "player" then
+                 if auraDB.onlyMyDebuffs == nil then auraDB.onlyMyDebuffs = true end
+             end
+@@ -1294,6 +1295,13 @@ local function CreateUnitFramesPage(parent)
+             buffHideSwipe:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+             y = y - FORM_ROW
+ 
++            if unitKey == "player" then
++                local hidePermanentBuffs = GUI:CreateFormCheckbox(tabContent, "Hide Permanent Buffs", "hidePermanentBuffs", auraDB, RefreshAuras)
++                hidePermanentBuffs:SetPoint("TOPLEFT", PAD, y)
++                hidePermanentBuffs:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++                y = y - FORM_ROW
++            end
++
+             -- Buff Preview toggle (pill-shaped, matches Castbar Preview style)
+             local buffPreviewContainer = CreateFrame("Frame", nil, tabContent)
+             buffPreviewContainer:SetHeight(FORM_ROW)

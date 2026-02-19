@@ -1691,6 +1691,7 @@ local defaults = {
                 nameOffsetX = -9,
                 nameOffsetY = 0,
                 maxNameLength = 10,              -- 0 = no limit, otherwise truncate to N characters
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Inline Target of Target (shows ">> ToT Name" after target name)
                 showInlineToT = false,
                 totSeparator = " >> ",
@@ -1851,6 +1852,7 @@ local defaults = {
                 nameOffsetX = 4,
                 nameOffsetY = 0,
                 maxNameLength = 0,
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Health text
                 showHealth = true,
                 showHealthPercent = true,
@@ -1947,6 +1949,7 @@ local defaults = {
                 nameOffsetX = 4,
                 nameOffsetY = 0,
                 maxNameLength = 0,
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Health text
                 showHealth = true,
                 showHealthPercent = true,

@@ -1401,6 +1401,23 @@ end
 ---------------------------------------------------------------------------
 -- UPDATE: Name text (with truncation and inline ToT support)
 ---------------------------------------------------------------------------
+local function GetClassificationMarker(unit, unitKey, settings)
+    if not unit or not unitKey or not settings then return "" end
+    if unitKey ~= "target" and unitKey ~= "targettarget" and unitKey ~= "focus" then return "" end
+    if settings.showClassificationMarker == false then return "" end
+
+    local classification = UnitClassification(unit)
+    if classification == "elite" or classification == "worldboss" then
+        return " +"
+    elseif classification == "rare" then
+        return " *"
+    elseif classification == "rareelite" then
+        return " +*"
+    end
+
+    return ""
+end
+
 local function UpdateName(frame)
     if not frame or not frame.unit or not frame.nameText then return end
     local unit = frame.unit
@@ -1418,6 +1435,8 @@ local function UpdateName(frame)
     if maxLen and maxLen > 0 then
         name = TruncateName(name, maxLen)
     end
+
+    name = name .. GetClassificationMarker(unit, frame.unitKey, settings)
 
     -- Inline Target of Target for target frame only
     if frame.unitKey == "target" and settings.showInlineToT then

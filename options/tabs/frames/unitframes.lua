@@ -388,6 +388,10 @@ local function CreateUnitFramesPage(parent)
         if unitKey == "target" and unitDB.invertHealthDirection == nil then
             unitDB.invertHealthDirection = false
         end
+        if (unitKey == "target" or unitKey == "targettarget" or unitKey == "focus")
+           and unitDB.showClassificationMarker == nil then
+            unitDB.showClassificationMarker = true
+        end
 
         -- Refresh function for this specific unit
         local function RefreshUnit()
@@ -769,6 +773,13 @@ local function CreateUnitFramesPage(parent)
         showNameCheck:SetPoint("TOPLEFT", PAD, y)
         showNameCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
+
+        if unitKey == "target" or unitKey == "targettarget" or unitKey == "focus" then
+            local classMarkerCheck = GUI:CreateFormCheckbox(tabContent, "Show Elite/Rare Marker", "showClassificationMarker", unitDB, RefreshUnit)
+            classMarkerCheck:SetPoint("TOPLEFT", PAD, y)
+            classMarkerCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+        end
 
         -- Anchor options for text positioning
         local anchorOptions = {

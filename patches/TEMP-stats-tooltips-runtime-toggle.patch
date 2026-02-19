@@ -1,0 +1,48 @@
+diff --git a/modules/character/character.lua b/modules/character/character.lua
+index e5ed703..3ab456f 100755
+--- a/modules/character/character.lua
++++ b/modules/character/character.lua
+@@ -1716,16 +1716,11 @@ local function CreateStatRow(parent, yOffset)
+     row:SetSize(parent:GetWidth() - 10, rowHeight)
+     row:SetPoint("TOPLEFT", 5, yOffset)
+ 
+-    -- Enable mouse for tooltips (only if setting is enabled)
+-    if settings.showTooltips then
+-        row:EnableMouse(true)
+-        row:SetScript("OnEnter", ShowStatTooltip)
+-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+-    else
+-        row:EnableMouse(false)
+-        row:SetScript("OnEnter", nil)
+-        row:SetScript("OnLeave", nil)
+-    end
++    -- Always bind hover handlers; ShowStatTooltip checks settings.showTooltips at runtime.
++    -- This prevents stale rows from losing tooltip behavior when toggled in settings.
++    row:EnableMouse(true)
++    row:SetScript("OnEnter", ShowStatTooltip)
++    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+ 
+     row.label = row:CreateFontString(nil, "OVERLAY")
+     row.label:SetFont(font, fontSize, "")
+@@ -1805,16 +1800,11 @@ local function CreateStatBar(parent, yOffset, color)
+     row:SetSize(parent:GetWidth() - 10, rowHeight)
+     row:SetPoint("TOPLEFT", 5, yOffset)
+ 
+-    -- Enable mouse for tooltips (only if setting is enabled)
+-    if settings.showTooltips then
+-        row:EnableMouse(true)
+-        row:SetScript("OnEnter", ShowStatTooltip)
+-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+-    else
+-        row:EnableMouse(false)
+-        row:SetScript("OnEnter", nil)
+-        row:SetScript("OnLeave", nil)
+-    end
++    -- Always bind hover handlers; ShowStatTooltip checks settings.showTooltips at runtime.
++    -- This prevents stale rows from losing tooltip behavior when toggled in settings.
++    row:EnableMouse(true)
++    row:SetScript("OnEnter", ShowStatTooltip)
++    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+ 
+     row.label = row:CreateFontString(nil, "OVERLAY")
+     row.label:SetFont(font, barTextSize, "")
