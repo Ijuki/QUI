@@ -38,6 +38,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.38.2 - 2026-02-20
+
+### Changed
+- hardened in-combat re-anchoring for cmd frames
 ## v2.38.1 - 2026-02-20
 
 ### Fixed
