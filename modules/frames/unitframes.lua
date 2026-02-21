@@ -1312,6 +1312,128 @@ local function UpdateLeaderIcon(frame)
     end
 end
 
+---------------------------------------------------------------------------
+-- UPDATE: PvP Indicator (bottom-center text, safe against secret values)
+---------------------------------------------------------------------------
+local UpdatePVPIndicator
+
+local function GetUnitPVPState(unit)
+    if type(unit) ~= "string" or unit == "" then
+        return false, false
+    end
+
+    local exists = false
+    do
+        local ok, value = pcall(UnitExists, unit)
+        if ok and type(value) == "boolean" then
+            exists = value
+        end
+    end
+    if not exists then
+        return false, false
+    end
+
+    local isPVP = false
+    do
+        local ok, value = pcall(UnitIsPVP, unit)
+        if ok and type(value) == "boolean" then
+            isPVP = value
+        end
+    end
+    if not isPVP then
+        return false, false
+    end
+
+    local isFFA = false
+    do
+        local ok, value = pcall(UnitIsPVPFreeForAll, unit)
+        if ok and type(value) == "boolean" then
+            isFFA = value
+        end
+    end
+
+    return true, isFFA
+end
+
+local function GetPlayerPVPTimerSeconds()
+    local ok, timerMS = pcall(GetPVPTimer)
+    if ok and type(timerMS) == "number" and timerMS > 0 then
+        return math.ceil(timerMS / 1000)
+    end
+    return 0
+end
+
+local function FormatPVPTimer(seconds)
+    local mins = math.floor(seconds / 60)
+    local secs = seconds % 60
+    return string.format("%d:%02d", mins, secs)
+end
+
+local function StopPVPCountdownTicker(frame)
+    if frame and frame._quiPVPTicker then
+        frame._quiPVPTicker:Cancel()
+        frame._quiPVPTicker = nil
+    end
+end
+
+local function EnsurePVPCountdownTicker(frame)
+    if not frame or frame.unitKey ~= "player" then return end
+    if frame._quiPVPTicker then return end
+
+    frame._quiPVPTicker = C_Timer.NewTicker(1, function()
+        if frame and frame.pvpText then
+            UpdatePVPIndicator(frame)
+        end
+    end)
+end
+
+function UpdatePVPIndicator(frame)
+    if not frame or not frame.pvpText then return end
+
+    local ufdb = GetDB()
+    local general = ufdb and ufdb.general
+    if general and general.showPVPIndicator == false then
+        frame.pvpText:Hide()
+        if frame.unitKey == "player" then
+            StopPVPCountdownTicker(frame)
+        end
+        return
+    end
+
+    local isPVP, isFFA = GetUnitPVPState(frame.unit)
+
+    -- Player only: when PvP is toggled OFF, WoW keeps a 5m PvP timer active.
+    -- Show a live "OFF in" countdown only while the player is still flagged.
+    if frame.unitKey == "player" then
+        local remaining = GetPlayerPVPTimerSeconds()
+        if isPVP and remaining > 0 then
+            frame.pvpText:SetText("PvP OFF in " .. FormatPVPTimer(remaining))
+            frame.pvpText:SetTextColor(1, 0.72, 0.2, 1)
+            frame.pvpText:Show()
+            EnsurePVPCountdownTicker(frame)
+            return
+        end
+
+        StopPVPCountdownTicker(frame)
+    end
+
+    if not isPVP then
+        frame.pvpText:Hide()
+        return
+    end
+
+    if isFFA then
+        frame.pvpText:SetText("FFA PvP")
+        frame.pvpText:SetTextColor(1, 0.25, 0.25, 1)
+    else
+        frame.pvpText:SetText("PvP")
+        frame.pvpText:SetTextColor(1, 0.82, 0.2, 1)
+    end
+
+    frame.pvpText:Show()
+end
+
+---------------------------------------------------------------------------
 -- UPDATE: Health text color (independent of name visibility)
 ---------------------------------------------------------------------------
 local function UpdateHealthTextColor(frame)
@@ -1342,6 +1464,23 @@ end
 ---------------------------------------------------------------------------
 -- UPDATE: Name text (with truncation and inline ToT support)
 ---------------------------------------------------------------------------
+local function GetClassificationMarker(unit, unitKey, settings)
+    if not unit or not unitKey or not settings then return "" end
+    if unitKey ~= "target" and unitKey ~= "targettarget" and unitKey ~= "focus" then return "" end
+    if settings.showClassificationMarker == false then return "" end
+
+    local classification = UnitClassification(unit)
+    if classification == "elite" or classification == "worldboss" then
+        return " +"
+    elseif classification == "rare" then
+        return " *"
+    elseif classification == "rareelite" then
+        return " +*"
+    end
+
+    return ""
+end
+
 local function UpdateName(frame)
     if not frame or not frame.unit or not frame.nameText then return end
     local unit = frame.unit
@@ -1359,6 +1498,8 @@ local function UpdateName(frame)
     if maxLen and maxLen > 0 then
         name = TruncateName(name, maxLen)
     end
+
+    name = name .. GetClassificationMarker(unit, frame.unitKey, settings)
 
     -- Inline Target of Target for target frame only
     if frame.unitKey == "target" and settings.showInlineToT then
@@ -1468,6 +1609,7 @@ local function UpdateFrame(frame)
     UpdateStance(frame)
     UpdateTargetMarker(frame)
     UpdateLeaderIcon(frame)
+    UpdatePVPIndicator(frame)
 
     -- Update portrait texture (third param disables circular mask for square portrait)
     if frame.portraitTexture and frame.portrait and frame.portrait:IsShown() then
@@ -1679,6 +1821,15 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
     powerText:Hide()  -- Hidden by default, UpdatePowerText will show if enabled
     frame.powerText = powerText
 
+    -- PvP indicator (bottom-center)
+    local pvpText = healthBar:CreateFontString(nil, "OVERLAY")
+    pvpText:SetFont(GetFontPath(), 10, GetFontOutline())
+    pvpText:SetShadowOffset(0, 0)
+    pvpText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 2)
+    pvpText:SetJustifyH("CENTER")
+    pvpText:Hide()
+    frame.pvpText = pvpText
+
     -- Target Marker (raid icons - boss frames)
     if settings.targetMarker then
         -- Create indicator container frame
@@ -1721,6 +1872,11 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
             if eventUnit == self.unit then
                 UpdateName(self)
             end
+        elseif event == "UNIT_FACTION" or event == "PLAYER_FLAGS_CHANGED" then
+            local eventUnit = ...
+            if eventUnit == self.unit then
+                UpdatePVPIndicator(self)
+            end
         elseif event == "RAID_TARGET_UPDATE" then
             UpdateTargetMarker(self)
         end
@@ -1734,6 +1890,8 @@ local function CreateBossFrame(unit, frameKey, bossIndex)
     frame:RegisterUnitEvent("UNIT_POWER_FREQUENT", unit)  -- Frequent updates for smoother power text sync
     frame:RegisterUnitEvent("UNIT_MAXPOWER", unit)
     frame:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
+    frame:RegisterUnitEvent("UNIT_FACTION", unit)
+    frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
     frame:RegisterEvent("RAID_TARGET_UPDATE")  -- Target marker (skull, cross, etc.)
 
     -- Register with Clique if available
@@ -1755,6 +1913,7 @@ local function ForceUpdateToT()
     UpdatePower(totFrame)
     UpdatePowerText(totFrame)
     UpdateName(totFrame)
+    UpdatePVPIndicator(totFrame)
 end
 
 -- ToT polling for health updates (unit events don't fire reliably for targettarget)
@@ -2072,6 +2231,15 @@ local function CreateUnitFrame(unit, unitKey)
     powerText:Hide()  -- Hidden by default, UpdatePowerText will show if enabled
     frame.powerText = powerText
 
+    -- PvP indicator (bottom-center)
+    local pvpText = textFrame:CreateFontString(nil, "OVERLAY")
+    pvpText:SetFont(fontPath, 10, fontOutline)
+    pvpText:SetShadowOffset(0, 0)
+    pvpText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 2)
+    pvpText:SetJustifyH("CENTER")
+    pvpText:Hide()
+    frame.pvpText = pvpText
+
     -- Status indicators (player frame only)
     if unitKey == "player" then
         local indSettings = settings.indicators
@@ -2179,6 +2347,8 @@ local function CreateUnitFrame(unit, unitKey)
     frame:RegisterEvent("UNIT_POWER_FREQUENT")  -- Frequent updates for smoother power text sync
     frame:RegisterEvent("UNIT_MAXPOWER")
     frame:RegisterEvent("UNIT_NAME_UPDATE")
+    frame:RegisterEvent("UNIT_FACTION")
+    frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
     frame:RegisterEvent("PLAYER_TARGET_CHANGED")
     frame:RegisterEvent("PLAYER_FOCUS_CHANGED")
     frame:RegisterEvent("UNIT_PET")
@@ -2269,6 +2439,10 @@ local function CreateUnitFrame(unit, unitKey)
         elseif event == "RAID_TARGET_UPDATE" then
             -- Target marker changed on any unit
             UpdateTargetMarker(self)
+        elseif event == "UNIT_FACTION" or event == "PLAYER_FLAGS_CHANGED" then
+            if arg1 == self.unit or (event == "PLAYER_FLAGS_CHANGED" and self.unitKey == "player") then
+                UpdatePVPIndicator(self)
+            end
         elseif event == "PARTY_LEADER_CHANGED" or event == "GROUP_ROSTER_UPDATE" then
             -- Leader/Assistant status changed (player, target, focus only)
             UpdateLeaderIcon(self)
@@ -2829,6 +3003,19 @@ function QUI_UF:RefreshFrame(unitKey)
                     frame.powerText:Hide()
                 end
 
+                -- Update PvP indicator (boss frames)
+                if frame.pvpText then
+                    frame.pvpText:SetFont(GetFontPath(), 10, GetFontOutline())
+                    frame.pvpText:ClearAllPoints()
+                    frame.pvpText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 2)
+                    frame.pvpText:SetJustifyH("CENTER")
+                    if self.previewMode[bossKey] then
+                        frame.pvpText:Hide()
+                    else
+                        UpdatePVPIndicator(frame)
+                    end
+                end
+
                 -- Update target marker (boss frames)
                 if frame.targetMarker and settings.targetMarker then
                     local marker = settings.targetMarker
@@ -3147,6 +3334,14 @@ function QUI_UF:RefreshFrame(unitKey)
         frame.powerText:SetPoint(powerAnchorInfo.point, frame, powerAnchorInfo.point, QUICore:PixelRound(settings.powerTextOffsetX or -4, frame), QUICore:PixelRound(settings.powerTextOffsetY or 2, frame))
         frame.powerText:SetJustifyH(powerAnchorInfo.justify)
         -- Show/hide handled by UpdatePowerText based on settings.showPowerText
+    end
+
+    -- Update PvP indicator position and font
+    if frame.pvpText then
+        frame.pvpText:SetFont(fontPath, 10, fontOutline)
+        frame.pvpText:ClearAllPoints()
+        frame.pvpText:SetPoint("BOTTOM", frame, "BOTTOM", 0, 2)
+        frame.pvpText:SetJustifyH("CENTER")
     end
 
     -- Update status indicators (player only)

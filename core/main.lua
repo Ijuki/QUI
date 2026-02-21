@@ -1477,6 +1477,7 @@ local defaults = {
                 fontSize = 12,
                 fontOutline = "OUTLINE",                  -- NONE, OUTLINE, THICKOUTLINE
                 showTooltips = true,                      -- Show tooltips on unit frame mouseover
+                showPVPIndicator = true,                  -- Show PvP text indicator on unit frames
                 smootherAnimation = false,                -- Uncap 60 FPS throttle for smoother castbar animation
                 -- Hostility colors (for NPC unit frames)
                 hostilityColorHostile = { 0.8, 0.2, 0.2, 1 },   -- Red (enemies)
@@ -1710,6 +1711,7 @@ local defaults = {
                 nameOffsetX = -9,
                 nameOffsetY = 0,
                 maxNameLength = 10,              -- 0 = no limit, otherwise truncate to N characters
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Inline Target of Target (shows ">> ToT Name" after target name)
                 showInlineToT = false,
                 totSeparator = " >> ",
@@ -1870,6 +1872,7 @@ local defaults = {
                 nameOffsetX = 4,
                 nameOffsetY = 0,
                 maxNameLength = 0,
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Health text
                 showHealth = true,
                 showHealthPercent = true,
@@ -1966,6 +1969,7 @@ local defaults = {
                 nameOffsetX = 4,
                 nameOffsetY = 0,
                 maxNameLength = 0,
+                showClassificationMarker = true, -- Show +/* marker for elite/rare units
                 -- Health text
                 showHealth = true,
                 showHealthPercent = true,
