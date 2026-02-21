@@ -152,30 +152,6 @@ local function BuildChatTab(tabContent)
             y = y - 20
         end
 
-        -- SECTION: Channel Labels
-        local channelLabelHeader = GUI:CreateSectionHeader(tabContent, "Channel Labels")
-        channelLabelHeader:SetPoint("TOPLEFT", PADDING, y)
-        y = y - channelLabelHeader.gap
-
-        if not chat.channelLabelMode then
-            chat.channelLabelMode = "full"
-        end
-
-        local channelLabelOptions = {
-            {value = "full", text = "Full Name (4. Newcomer Chat)"},
-            {value = "number", text = "Number Only (4.)"},
-        }
-        local channelLabelDropdown = GUI:CreateFormDropdown(tabContent, "Channel Tag Style", channelLabelOptions, "channelLabelMode", chat, RefreshChat)
-        channelLabelDropdown:SetPoint("TOPLEFT", PADDING, y)
-        channelLabelDropdown:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
-        y = y - FORM_ROW
-
-        local channelLabelInfo = GUI:CreateLabel(tabContent, "Choose how channel tags appear in chat links.", 10, C.textMuted)
-        channelLabelInfo:SetPoint("TOPLEFT", PADDING, y)
-        channelLabelInfo:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
-        channelLabelInfo:SetJustifyH("LEFT")
-        y = y - 20
-
         -- SECTION: Timestamps
         local timestampHeader = GUI:CreateSectionHeader(tabContent, "Timestamps")
         timestampHeader:SetPoint("TOPLEFT", PADDING, y)
