@@ -1835,6 +1835,14 @@ local defaults = {
                     xOffset = -8,
                     yOffset = 8,
                 },
+                -- Target mount icon (shows mounted player's mount with tooltip)
+                mountIndicator = {
+                    enabled = false,
+                    size = 16,
+                    anchor = "TOPRIGHT",
+                    xOffset = -8,
+                    yOffset = 8,
+                },
             },
             -- Target of Target
             targettarget = {

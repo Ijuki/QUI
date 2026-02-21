@@ -1,0 +1,360 @@
+diff --git a/core/main.lua b/core/main.lua
+index dd53f85..e685322 100755
+--- a/core/main.lua
++++ b/core/main.lua
+@@ -1835,6 +1835,14 @@ local defaults = {
+                     xOffset = -8,
+                     yOffset = 8,
+                 },
++                -- Target mount icon (shows mounted player's mount with tooltip)
++                mountIndicator = {
++                    enabled = false,
++                    size = 16,
++                    anchor = "TOPRIGHT",
++                    xOffset = -8,
++                    yOffset = 8,
++                },
+             },
+             -- Target of Target
+             targettarget = {
+diff --git a/modules/frames/unitframes.lua b/modules/frames/unitframes.lua
+index e46778b..e1c092b 100755
+--- a/modules/frames/unitframes.lua
++++ b/modules/frames/unitframes.lua
+@@ -1312,6 +1312,149 @@ local function UpdateLeaderIcon(frame)
+     end
+ end
+ 
++---------------------------------------------------------------------------
++-- UPDATE: Target Mount Icon (target frame only)
++---------------------------------------------------------------------------
++local function GetMountInfoFromSpellID(spellID)
++    spellID = SafeValue(spellID, nil)
++    if type(spellID) ~= "number" or spellID <= 0 then
++        return nil
++    end
++    if not (C_MountJournal and C_MountJournal.GetMountFromSpell) then
++        return nil
++    end
++
++    local okMount, mountID = pcall(C_MountJournal.GetMountFromSpell, spellID)
++    mountID = SafeValue(mountID, nil)
++    if not okMount or type(mountID) ~= "number" or mountID <= 0 then
++        return nil
++    end
++
++    local mountName, mountIcon = nil, nil
++    if C_MountJournal.GetMountInfoByID then
++        local okInfo, name, mountSpellID, icon = pcall(C_MountJournal.GetMountInfoByID, mountID)
++        if okInfo then
++            if type(name) == "string" and name ~= "" then
++                mountName = name
++            end
++            if type(icon) == "number" or type(icon) == "string" then
++                mountIcon = icon
++            end
++            mountSpellID = SafeValue(mountSpellID, nil)
++            if type(mountSpellID) == "number" and mountSpellID > 0 then
++                spellID = mountSpellID
++            end
++        end
++    end
++
++    return mountID, mountName, mountIcon, spellID
++end
++
++local function FindMountedAuraData(unit)
++    if type(unit) ~= "string" or unit == "" then
++        return nil
++    end
++    if not UnitExists(unit) then
++        return nil
++    end
++
++    local found
++    local function TryAura(auraName, auraIcon, auraSpellID)
++        auraSpellID = SafeValue(auraSpellID, nil)
++        if type(auraSpellID) ~= "number" then
++            return false
++        end
++        local mountID, mountName, mountIcon, mountSpellID = GetMountInfoFromSpellID(auraSpellID)
++        if not mountID then
++            return false
++        end
++        found = {
++            spellID = mountSpellID or auraSpellID,
++            mountID = mountID,
++            name = mountName or auraName,
++            icon = mountIcon or auraIcon,
++        }
++        return true
++    end
++
++    if AuraUtil and AuraUtil.ForEachAura then
++        local ok = pcall(AuraUtil.ForEachAura, unit, "HELPFUL", nil, function(aura)
++            if not aura then
++                return false
++            end
++            return TryAura(aura.name, aura.icon, aura.spellId)
++        end, true)
++        if ok and found then
++            return found
++        end
++    end
++
++    if UnitAura then
++        for i = 1, 40 do
++            local ok, name, icon, _, _, _, _, _, _, _, spellID = pcall(UnitAura, unit, i, "HELPFUL")
++            if not ok or not name then
++                break
++            end
++            if TryAura(name, icon, spellID) then
++                break
++            end
++        end
++    end
++
++    return found
++end
++
++local function UpdateTargetMountIcon(frame)
++    if not frame or frame.unitKey ~= "target" or not frame.mountIconFrame or not frame.mountIconTexture then
++        return
++    end
++
++    local settings = GetUnitSettings(frame.unitKey)
++    local mountSettings = settings and settings.mountIndicator
++    if not mountSettings or mountSettings.enabled ~= true then
++        frame.mountIconFrame._quiMountSpellID = nil
++        frame.mountIconFrame._quiMountName = nil
++        frame.mountIconFrame:Hide()
++        return
++    end
++
++    local unitExists = false
++    do
++        local ok, value = pcall(UnitExists, frame.unit)
++        if ok and type(value) == "boolean" then
++            unitExists = value
++        end
++    end
++
++    local isPlayerUnit = false
++    if unitExists then
++        local ok, value = pcall(UnitIsPlayer, frame.unit)
++        if ok and type(value) == "boolean" then
++            isPlayerUnit = value
++        end
++    end
++
++    if not unitExists or not isPlayerUnit then
++        frame.mountIconFrame._quiMountSpellID = nil
++        frame.mountIconFrame._quiMountName = nil
++        frame.mountIconFrame:Hide()
++        return
++    end
++
++    local mountData = FindMountedAuraData(frame.unit)
++    if not mountData then
++        frame.mountIconFrame._quiMountSpellID = nil
++        frame.mountIconFrame._quiMountName = nil
++        frame.mountIconFrame:Hide()
++        return
++    end
++
++    frame.mountIconFrame._quiMountSpellID = mountData.spellID
++    frame.mountIconFrame._quiMountName = mountData.name
++    frame.mountIconTexture:SetTexture(mountData.icon or 134400)
++    frame.mountIconFrame:Show()
++end
++
+ ---------------------------------------------------------------------------
+ -- UPDATE: PvP Indicator (bottom-center text, safe against secret values)
+ ---------------------------------------------------------------------------
+@@ -1609,6 +1752,7 @@ local function UpdateFrame(frame)
+     UpdateStance(frame)
+     UpdateTargetMarker(frame)
+     UpdateLeaderIcon(frame)
++    UpdateTargetMountIcon(frame)
+     UpdatePVPIndicator(frame)
+ 
+     -- Update portrait texture (third param disables circular mask for square portrait)
+@@ -2316,6 +2460,59 @@ local function CreateUnitFrame(unit, unitKey)
+         frame.targetMarker = targetMarker
+     end
+ 
++    -- Target mount icon (target frame only)
++    if unitKey == "target" then
++        if not frame.indicatorFrame then
++            local indicatorFrame = CreateFrame("Frame", nil, frame)
++            indicatorFrame:SetAllPoints()
++            indicatorFrame:SetFrameLevel(textFrame:GetFrameLevel() + 5)
++            frame.indicatorFrame = indicatorFrame
++        end
++
++        local mountSettings = settings.mountIndicator or {}
++        local mountIconFrame = CreateFrame("Frame", nil, frame.indicatorFrame)
++        local mountIconTexture = mountIconFrame:CreateTexture(nil, "OVERLAY")
++        mountIconTexture:SetAllPoints()
++        mountIconFrame.texture = mountIconTexture
++        mountIconFrame:EnableMouse(true)
++        mountIconFrame:Hide()
++
++        mountIconFrame:SetScript("OnEnter", function(self)
++            if not self._quiMountSpellID then return end
++            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
++
++            local shownFromSpell = false
++            if GameTooltip.SetSpellByID then
++                local ok = pcall(GameTooltip.SetSpellByID, GameTooltip, self._quiMountSpellID)
++                shownFromSpell = ok
++            end
++
++            if not shownFromSpell then
++                GameTooltip:ClearLines()
++                GameTooltip:AddLine(self._quiMountName or "Mount", 1, 1, 1)
++                GameTooltip:AddLine("Spell ID: " .. tostring(self._quiMountSpellID), 0.7, 0.7, 0.7)
++            end
++
++            GameTooltip:Show()
++        end)
++        mountIconFrame:SetScript("OnLeave", function()
++            GameTooltip:Hide()
++        end)
++
++        mountIconFrame:SetSize(mountSettings.size or 16, mountSettings.size or 16)
++        local mountAnchorInfo = GetTextAnchorInfo(mountSettings.anchor or "TOPRIGHT")
++        mountIconFrame:SetPoint(
++            mountAnchorInfo.point,
++            frame,
++            mountAnchorInfo.point,
++            mountSettings.xOffset or -8,
++            mountSettings.yOffset or 8
++        )
++
++        frame.mountIconFrame = mountIconFrame
++        frame.mountIconTexture = mountIconTexture
++    end
++
+     -- Leader/Assistant Icon (crown for leader, flag for assistant)
+     -- Only create if enabled to avoid CPU usage when disabled
+     if settings.leaderIcon and settings.leaderIcon.enabled and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
+@@ -2354,6 +2551,9 @@ local function CreateUnitFrame(unit, unitKey)
+     frame:RegisterEvent("UNIT_PET")
+     frame:RegisterEvent("UNIT_TARGET")  -- For inline Target of Target updates
+     frame:RegisterEvent("RAID_TARGET_UPDATE")  -- Target marker (skull, cross, etc.)
++    if unitKey == "target" then
++        frame:RegisterEvent("UNIT_AURA")
++    end
+ 
+     -- Leader/Assistant icon events (player, target, focus only) - only register if feature enabled
+     if settings.leaderIcon and settings.leaderIcon.enabled and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
+@@ -2439,6 +2639,10 @@ local function CreateUnitFrame(unit, unitKey)
+         elseif event == "RAID_TARGET_UPDATE" then
+             -- Target marker changed on any unit
+             UpdateTargetMarker(self)
++        elseif event == "UNIT_AURA" then
++            if self.unitKey == "target" and arg1 == self.unit then
++                UpdateTargetMountIcon(self)
++            end
+         elseif event == "UNIT_FACTION" or event == "PLAYER_FLAGS_CHANGED" then
+             if arg1 == self.unit or (event == "PLAYER_FLAGS_CHANGED" and self.unitKey == "player") then
+                 UpdatePVPIndicator(self)
+@@ -3391,6 +3595,22 @@ function QUI_UF:RefreshFrame(unitKey)
+         UpdateTargetMarker(frame)
+     end
+ 
++    -- Update target mount icon (target frame only)
++    if unitKey == "target" and frame.mountIconFrame and frame.mountIconTexture then
++        local mount = settings.mountIndicator or {}
++        frame.mountIconFrame:SetSize(mount.size or 16, mount.size or 16)
++        frame.mountIconFrame:ClearAllPoints()
++        local mountAnchorInfo = GetTextAnchorInfo(mount.anchor or "TOPRIGHT")
++        frame.mountIconFrame:SetPoint(
++            mountAnchorInfo.point,
++            frame,
++            mountAnchorInfo.point,
++            mount.xOffset or -8,
++            mount.yOffset or 8
++        )
++        UpdateTargetMountIcon(frame)
++    end
++
+     -- Update leader/assistant icon (player, target, focus only)
+     if settings.leaderIcon and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
+         local leader = settings.leaderIcon
+diff --git a/options/tabs/frames/unitframes.lua b/options/tabs/frames/unitframes.lua
+index a6e7f2f..9110163 100755
+--- a/options/tabs/frames/unitframes.lua
++++ b/options/tabs/frames/unitframes.lua
+@@ -401,6 +401,15 @@ local function CreateUnitFramesPage(parent)
+            and unitDB.showClassificationMarker == nil then
+             unitDB.showClassificationMarker = true
+         end
++        if unitKey == "target" and not unitDB.mountIndicator then
++            unitDB.mountIndicator = {
++                enabled = false,
++                size = 16,
++                anchor = "TOPRIGHT",
++                xOffset = -8,
++                yOffset = 8,
++            }
++        end
+ 
+         -- Refresh function for this specific unit
+         local function RefreshUnit()
+@@ -1769,6 +1778,54 @@ local function CreateUnitFramesPage(parent)
+             y = y - FORM_ROW
+         end
+ 
++        -- MOUNT ICON section (target only)
++        if unitKey == "target" then
++            local mountHeader = GUI:CreateSectionHeader(tabContent, "Mounted Target Icon")
++            mountHeader:SetPoint("TOPLEFT", PAD, y)
++            y = y - mountHeader.gap
++
++            if not unitDB.mountIndicator then
++                unitDB.mountIndicator = {
++                    enabled = false,
++                    size = 16,
++                    anchor = "TOPRIGHT",
++                    xOffset = -8,
++                    yOffset = 8,
++                }
++            end
++
++            local mountDesc = GUI:CreateLabel(tabContent, "Shows an icon for the target player's active mount aura. Hover for tooltip.", 11, C.textMuted)
++            mountDesc:SetPoint("TOPLEFT", PAD, y)
++            mountDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            mountDesc:SetJustifyH("LEFT")
++            y = y - 20
++
++            local mountCheck = GUI:CreateFormCheckbox(tabContent, "Show Mounted Target Icon", "enabled", unitDB.mountIndicator, RefreshUnit)
++            mountCheck:SetPoint("TOPLEFT", PAD, y)
++            mountCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++
++            local mountSizeSlider = GUI:CreateFormSlider(tabContent, "Icon Size", 8, 48, 1, "size", unitDB.mountIndicator, RefreshUnit)
++            mountSizeSlider:SetPoint("TOPLEFT", PAD, y)
++            mountSizeSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++
++            local mountAnchorDrop = GUI:CreateFormDropdown(tabContent, "Anchor To", anchorOptions, "anchor", unitDB.mountIndicator, RefreshUnit)
++            mountAnchorDrop:SetPoint("TOPLEFT", PAD, y)
++            mountAnchorDrop:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++
++            local mountXSlider = GUI:CreateFormSlider(tabContent, "X Offset", -100, 100, 1, "xOffset", unitDB.mountIndicator, RefreshUnit)
++            mountXSlider:SetPoint("TOPLEFT", PAD, y)
++            mountXSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++
++            local mountYSlider = GUI:CreateFormSlider(tabContent, "Y Offset", -100, 100, 1, "yOffset", unitDB.mountIndicator, RefreshUnit)
++            mountYSlider:SetPoint("TOPLEFT", PAD, y)
++            mountYSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
++            y = y - FORM_ROW
++        end
++
+         -- Portrait section (player, target, focus only)
+         if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
+             local portraitHeader = GUI:CreateSectionHeader(tabContent, "Portrait")

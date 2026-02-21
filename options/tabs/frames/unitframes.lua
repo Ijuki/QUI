@@ -401,6 +401,15 @@ local function CreateUnitFramesPage(parent)
            and unitDB.showClassificationMarker == nil then
             unitDB.showClassificationMarker = true
         end
+        if unitKey == "target" and not unitDB.mountIndicator then
+            unitDB.mountIndicator = {
+                enabled = false,
+                size = 16,
+                anchor = "TOPRIGHT",
+                xOffset = -8,
+                yOffset = 8,
+            }
+        end
 
         -- Refresh function for this specific unit
         local function RefreshUnit()
@@ -1766,6 +1775,54 @@ local function CreateUnitFramesPage(parent)
             local leaderYSlider = GUI:CreateFormSlider(tabContent, "Y Offset", -100, 100, 1, "yOffset", unitDB.leaderIcon, RefreshUnit)
             leaderYSlider:SetPoint("TOPLEFT", PAD, y)
             leaderYSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+        end
+
+        -- MOUNT ICON section (target only)
+        if unitKey == "target" then
+            local mountHeader = GUI:CreateSectionHeader(tabContent, "Mounted Target Icon")
+            mountHeader:SetPoint("TOPLEFT", PAD, y)
+            y = y - mountHeader.gap
+
+            if not unitDB.mountIndicator then
+                unitDB.mountIndicator = {
+                    enabled = false,
+                    size = 16,
+                    anchor = "TOPRIGHT",
+                    xOffset = -8,
+                    yOffset = 8,
+                }
+            end
+
+            local mountDesc = GUI:CreateLabel(tabContent, "Shows an icon for the target player's active mount aura. Hover for tooltip.", 11, C.textMuted)
+            mountDesc:SetPoint("TOPLEFT", PAD, y)
+            mountDesc:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            mountDesc:SetJustifyH("LEFT")
+            y = y - 20
+
+            local mountCheck = GUI:CreateFormCheckbox(tabContent, "Show Mounted Target Icon", "enabled", unitDB.mountIndicator, RefreshUnit)
+            mountCheck:SetPoint("TOPLEFT", PAD, y)
+            mountCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local mountSizeSlider = GUI:CreateFormSlider(tabContent, "Icon Size", 8, 48, 1, "size", unitDB.mountIndicator, RefreshUnit)
+            mountSizeSlider:SetPoint("TOPLEFT", PAD, y)
+            mountSizeSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local mountAnchorDrop = GUI:CreateFormDropdown(tabContent, "Anchor To", anchorOptions, "anchor", unitDB.mountIndicator, RefreshUnit)
+            mountAnchorDrop:SetPoint("TOPLEFT", PAD, y)
+            mountAnchorDrop:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local mountXSlider = GUI:CreateFormSlider(tabContent, "X Offset", -100, 100, 1, "xOffset", unitDB.mountIndicator, RefreshUnit)
+            mountXSlider:SetPoint("TOPLEFT", PAD, y)
+            mountXSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local mountYSlider = GUI:CreateFormSlider(tabContent, "Y Offset", -100, 100, 1, "yOffset", unitDB.mountIndicator, RefreshUnit)
+            mountYSlider:SetPoint("TOPLEFT", PAD, y)
+            mountYSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
             y = y - FORM_ROW
         end
 
