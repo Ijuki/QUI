@@ -42,6 +42,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.40.1 - 2026-02-21
+
+### Fixed
+- fixed action tracker taint
+## v2.40.0 - 2026-02-21
+
+### Added
+- added action tracker feature
+- added target distance range bracket display
+- added profile import validation
+
+### Changed
+- improved callback throttling
+
+### Fixed
+- enforce globally set font in all options menus
 ## v2.39.1 - 2026-02-21
 
 ### Changed
