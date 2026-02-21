@@ -409,37 +409,6 @@ local function GetGemInfo(unit, slotId)
     return gems, totalSockets
 end
 
-local function ShowInspectGemTooltip(gemFrame)
-    if not gemFrame or not gemFrame.gemData then return end
-
-    local gemData = gemFrame.gemData
-    GameTooltip:SetOwner(gemFrame, "ANCHOR_RIGHT")
-
-    if gemData.filled and gemData.link then
-        local ok = pcall(GameTooltip.SetHyperlink, GameTooltip, gemData.link)
-        if not ok then
-            GameTooltip:ClearLines()
-            GameTooltip:SetText("Gem", 1, 1, 1)
-            if gemData.type and gemData.type ~= "" then
-                GameTooltip:AddLine(gemData.type, 0.75, 0.75, 0.75)
-            end
-            GameTooltip:Show()
-        end
-        return
-    end
-
-    GameTooltip:ClearLines()
-    GameTooltip:SetText("Empty Socket", 0.8, 0.8, 0.8)
-    if gemData.type and gemData.type ~= "" and gemData.type ~= "Empty" then
-        GameTooltip:AddLine(gemData.type, 0.75, 0.75, 0.75)
-    end
-    GameTooltip:Show()
-end
-
-local function HideInspectGemTooltip()
-    GameTooltip:Hide()
-end
-
 ---------------------------------------------------------------------------
 -- Get durability for a slot
 ---------------------------------------------------------------------------
@@ -580,24 +549,10 @@ local function CreateSlotOverlay(slotFrame, slotInfo, unit)
 
     -- Gem icons on OUTER side of column (reversed from before)
     overlay.gems = {}
-    local useInspectGemButtons = unit ~= "player"
     for i = 1, 4 do
-        local gem
-        if useInspectGemButtons then
-            gem = CreateFrame("Button", nil, overlay)
-            gem:EnableMouse(true)
-            gem:RegisterForClicks("AnyUp")
-            gem.gemData = nil
-            gem.icon = gem:CreateTexture(nil, "OVERLAY")
-            gem.icon:SetAllPoints()
-            gem.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            gem:SetScript("OnEnter", ShowInspectGemTooltip)
-            gem:SetScript("OnLeave", HideInspectGemTooltip)
-        else
-            gem = overlay:CreateTexture(nil, "OVERLAY")
-            gem:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        end
+        local gem = overlay:CreateTexture(nil, "OVERLAY")
         gem:SetSize(GEM_SIZE, GEM_SIZE)
+        gem:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
         -- Position gems on OUTER side
         if slotInfo.side == "left" then
@@ -668,11 +623,11 @@ local function UpdateSlotOverlay(overlay, unit)
     local isInspect = unit ~= "player"
     local showItemName, showItemLevel, showEnchants, showGems
     if isInspect then
-        -- Inspect frame is intentionally minimal: ilvl + enchant text + gem sockets.
+        -- Inspect frame is intentionally minimal: only ilvl + enchant text.
         showItemName = false
         showItemLevel = settings.showInspectItemLevel ~= false
         showEnchants = settings.showInspectEnchants ~= false
-        showGems = true
+        showGems = false
 
         -- With item names hidden on inspect, pull ilvl/enchant up one line.
         local useLeftSide = overlay.slotInfo.side == "right" or overlay.slotInfo.id == INVSLOT_MAINHAND
@@ -810,16 +765,9 @@ local function UpdateSlotOverlay(overlay, unit)
 
     -- Update gem icons (actual textures, including empty sockets)
     if showGems then
-        local gems = GetGemInfo(unit, slotId)
-        for i, gemObj in ipairs(overlay.gems) do
-            local gemTex = gemObj.icon or gemObj
-            if gemObj.gemData ~= nil then
-                gemObj.gemData = nil
-            end
+        local gems, totalSockets = GetGemInfo(unit, slotId)
+        for i, gemTex in ipairs(overlay.gems) do
             if gems[i] then
-                if gemObj.gemData ~= nil then
-                    gemObj.gemData = gems[i]
-                end
                 if gems[i].filled then
                     -- Filled socket: show gem icon
                     local gemIcon = gems[i].icon
@@ -828,32 +776,29 @@ local function UpdateSlotOverlay(overlay, unit)
                         gemTex:SetTexture(gemIcon)
                         gemTex:SetDesaturated(false)
                         gemTex:SetVertexColor(1, 1, 1, 1)
-                        gemObj:Show()
+                        gemTex:Show()
                     else
                         -- Fallback to colored square if icon not available
                         local gemType = gems[i].type or "Prismatic"
                         local color = GEM_COLORS[gemType] or GEM_COLORS.Prismatic
                         gemTex:SetColorTexture(color[1], color[2], color[3], color[4])
                         gemTex:SetDesaturated(false)
-                        gemObj:Show()
+                        gemTex:Show()
                     end
                 else
                     -- Empty socket: show grey socket icon
                     gemTex:SetTexture("Interface\\ItemSocketingFrame\\UI-EmptySocket-Prismatic")
                     gemTex:SetDesaturated(true)
                     gemTex:SetVertexColor(0.6, 0.6, 0.6, 0.9)
-                    gemObj:Show()
+                    gemTex:Show()
                 end
             else
-                gemObj:Hide()
+                gemTex:Hide()
             end
         end
     else
-        for _, gemObj in ipairs(overlay.gems) do
-            if gemObj.gemData ~= nil then
-                gemObj.gemData = nil
-            end
-            gemObj:Hide()
+        for _, gemTex in ipairs(overlay.gems) do
+            gemTex:Hide()
         end
     end
 
@@ -1026,32 +971,12 @@ local function HideBlizzardDecorations()
             slot.BottomRightSlotTexture:Hide()
         end
 
-        -- Hide decorative slot textures but preserve dynamic state overlays
-        -- (e.g. equipment set ignore/lock markers)
+        -- Hide ALL non-icon regions (decorative textures)
         for i = 1, select("#", slot:GetRegions()) do
             local region = select(i, slot:GetRegions())
             if region and region.GetObjectType and region:GetObjectType() == "Texture" then
                 local isIcon = region == slot.icon or region == slot.Icon
-                local drawLayer = region.GetDrawLayer and select(1, region:GetDrawLayer()) or nil
-                local regionName = region.GetName and region:GetName() or ""
-                local keepStateOverlay =
-                    (type(regionName) == "string" and (
-                        regionName:find("Ignore", 1, true) or
-                        regionName:find("Locked", 1, true) or
-                        regionName:find("Check", 1, true)
-                    ))
-
-                if not keepStateOverlay and region.GetAtlas then
-                    local okAtlas, atlas = pcall(region.GetAtlas, region)
-                    if okAtlas and type(atlas) == "string" then
-                        local atlasLower = atlas:lower()
-                        if atlasLower:find("ignore", 1, true) or atlasLower:find("forbidden", 1, true) or atlasLower:find("lock", 1, true) then
-                            keepStateOverlay = true
-                        end
-                    end
-                end
-
-                if not isIcon and not keepStateOverlay and (drawLayer == "BACKGROUND" or drawLayer == "BORDER" or drawLayer == "ARTWORK") then
+                if not isIcon then
                     region:SetAlpha(0)
                 end
             end
