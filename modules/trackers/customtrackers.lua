@@ -1213,6 +1213,13 @@ end
 local function LayoutBarIcons(bar)
     if not bar or not bar.icons then return end
 
+    -- Secure buttons cannot be re-anchored in combat.
+    if InCombatLockdown() then
+        bar._pendingLayoutSync = true
+        bar._pendingLayoutMode = "all"
+        return
+    end
+
     local config = bar.config
     local growDir = config.growDirection or "RIGHT"
     local spacing = config.spacing or 4
@@ -1272,6 +1279,9 @@ local function LayoutBarIcons(bar)
         local totalHeight = (numIcons * iconHeight) + ((numIcons - 1) * spacing)
         bar:SetSize(iconWidth, totalHeight)
     end
+
+    bar._pendingLayoutSync = nil
+    bar._pendingLayoutMode = nil
 end
 
 ---------------------------------------------------------------------------
@@ -1279,6 +1289,13 @@ end
 ---------------------------------------------------------------------------
 local function LayoutVisibleIcons(bar)
     if not bar or not bar.icons then return end
+
+    -- Secure buttons cannot be re-anchored in combat.
+    if InCombatLockdown() then
+        bar._pendingLayoutSync = true
+        bar._pendingLayoutMode = "visible"
+        return
+    end
 
     local config = bar.config
     local growDir = config.growDirection or "RIGHT"
@@ -1335,6 +1352,8 @@ local function LayoutVisibleIcons(bar)
     -- Resize bar to fit only visible icons
     if numIcons == 0 then
         bar:SetSize(1, 1)
+        bar._pendingLayoutSync = nil
+        bar._pendingLayoutMode = nil
         return
     end
 
@@ -1345,6 +1364,9 @@ local function LayoutVisibleIcons(bar)
         local totalHeight = (numIcons * iconHeight) + ((numIcons - 1) * spacing)
         bar:SetSize(iconWidth, totalHeight)
     end
+
+    bar._pendingLayoutSync = nil
+    bar._pendingLayoutMode = nil
 end
 
 ---------------------------------------------------------------------------
@@ -1458,6 +1480,27 @@ local function RebuildActiveSet(bar)
 
     local config = bar.config
     local hideNonUsable = config.hideNonUsable
+    local inCombatLockdown = InCombatLockdown()
+
+    local function SetIconVisibility(icon, visible)
+        if visible then
+            if inCombatLockdown then
+                if icon:IsShown() then
+                    icon:SetAlpha(1)
+                end
+            else
+                icon:Show()
+            end
+        else
+            if inCombatLockdown then
+                if icon:IsShown() then
+                    icon:SetAlpha(0)
+                end
+            else
+                icon:Hide()
+            end
+        end
+    end
 
     -- Iterate the FULL configured list (bar.icons), not activeIcons
     -- This ensures we pick up newly-talented spells when switching talent loadouts
@@ -1504,6 +1547,7 @@ local function RebuildActiveSet(bar)
                         icon:Show()
                     end
                     icon.isVisible = true  -- Still visible (just desaturated)
+                    SetIconVisibility(icon, true)
                     icon.tex:SetDesaturated(true)  -- Grey out unknown spells
                     icon.cooldown:Clear()  -- No cooldown tracking for unknown spells
                 end
@@ -2563,8 +2607,17 @@ initFrame:SetScript("OnEvent", function(self, event, ...)
             if bar and bar:IsShown() and bar.DoUpdate then
                 bar.DoUpdate()
                 -- After combat ends, sync layout that was deferred during combat
-                if event == "PLAYER_REGEN_ENABLED" and bar.config and bar.config.dynamicLayout then
-                    LayoutVisibleIcons(bar)
+                if event == "PLAYER_REGEN_ENABLED" then
+                    if bar._pendingLayoutSync then
+                        if bar._pendingLayoutMode == "all" then
+                            LayoutBarIcons(bar)
+                            PositionBar(bar)
+                        else
+                            LayoutVisibleIcons(bar)
+                        end
+                    elseif bar.config and bar.config.dynamicLayout then
+                        LayoutVisibleIcons(bar)
+                    end
                 end
             end
         end
