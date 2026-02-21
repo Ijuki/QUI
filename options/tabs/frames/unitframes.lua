@@ -64,9 +64,6 @@ local function CreateUnitFramesPage(parent)
             ufdb.general = {}
         end
         local ufGeneral = ufdb.general
-        if ufGeneral.showPVPIndicator == nil then
-            ufGeneral.showPVPIndicator = true
-        end
 
         -- Use the main profile general settings (not ufdb.general)
         local general = db.general
@@ -312,16 +309,6 @@ local function CreateUnitFramesPage(parent)
         tooltipCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
 
-        -- Unit frame indicators section
-        local pvpHeader = GUI:CreateSectionHeader(tabContent, "Unit Frame Indicators")
-        pvpHeader:SetPoint("TOPLEFT", PAD, y)
-        y = y - pvpHeader.gap
-
-        local pvpIndicatorCheck = GUI:CreateFormCheckbox(tabContent, "Show PvP Indicator", "showPVPIndicator", ufGeneral, RefreshNewUF)
-        pvpIndicatorCheck:SetPoint("TOPLEFT", PAD, y)
-        pvpIndicatorCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
-        y = y - FORM_ROW
-
         -- Smoother Updates section
         local smoothHeader = GUI:CreateSectionHeader(tabContent, "Smoother Updates")
         smoothHeader:SetPoint("TOPLEFT", PAD, y)
@@ -396,10 +383,6 @@ local function CreateUnitFramesPage(parent)
         local unitDB = ufdb[unitKey]
         if unitKey == "target" and unitDB.invertHealthDirection == nil then
             unitDB.invertHealthDirection = false
-        end
-        if (unitKey == "target" or unitKey == "targettarget" or unitKey == "focus")
-           and unitDB.showClassificationMarker == nil then
-            unitDB.showClassificationMarker = true
         end
 
         -- Refresh function for this specific unit
@@ -813,13 +796,6 @@ local function CreateUnitFramesPage(parent)
         showNameCheck:SetPoint("TOPLEFT", PAD, y)
         showNameCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
-
-        if unitKey == "target" or unitKey == "targettarget" or unitKey == "focus" then
-            local classMarkerCheck = GUI:CreateFormCheckbox(tabContent, "Show Elite/Rare Marker", "showClassificationMarker", unitDB, RefreshUnit)
-            classMarkerCheck:SetPoint("TOPLEFT", PAD, y)
-            classMarkerCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
-            y = y - FORM_ROW
-        end
 
         -- Anchor options for text positioning
         local anchorOptions = {
