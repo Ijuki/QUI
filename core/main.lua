@@ -186,17 +186,22 @@ function QUICore.SafeSetBackdrop(frame, backdropInfo, borderColor)
                     QUICore.__pendingBackdrops[pf] = nil
                 end
 
-                -- Stop OnUpdate if no more pending
+                -- Stop OnUpdate if no more pending (SetScript nil to avoid per-frame CPU cost)
                 local hasAny = false
                 for _ in pairs(QUICore.__pendingBackdrops or {}) do
                     hasAny = true
                     break
                 end
                 if not hasAny then
+                    self:SetScript("OnUpdate", nil)
                     self:Hide()
                 end
             end)
+            QUICore.__backdropUpdateHandler = updateFrame:GetScript("OnUpdate")
             QUICore.__backdropUpdateFrame = updateFrame
+        end
+        if QUICore.__backdropUpdateHandler then
+            QUICore.__backdropUpdateFrame:SetScript("OnUpdate", QUICore.__backdropUpdateHandler)
         end
         QUICore.__backdropUpdateFrame:Show()
         return false
@@ -3103,6 +3108,27 @@ local defaults = {
                 offsetY = -5,
             },
             pinned2 = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+        },
+
+        -- BigWigs Integration: Anchor BigWigs normal/emphasized bars to QUI elements
+        bigWigs = {
+            backupPositions = {},
+            normal = {
+                enabled = false,
+                anchorTo = "disabled",
+                sourcePoint = "TOP",
+                targetPoint = "BOTTOM",
+                offsetX = 0,
+                offsetY = -5,
+            },
+            emphasized = {
                 enabled = false,
                 anchorTo = "disabled",
                 sourcePoint = "TOP",
