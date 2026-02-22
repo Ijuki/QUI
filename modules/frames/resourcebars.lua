@@ -31,6 +31,19 @@ local function GetCDMHiddenAlpha()
     return nil
 end
 
+-- Avoid protected-frame errors in combat when bars become secure.
+local function SafeSetFrameLevel(frame, frameLevel)
+    if not frame or frameLevel == nil then return false end
+    if frame.GetFrameLevel and frame:GetFrameLevel() == frameLevel then
+        return true
+    end
+    if InCombatLockdown() and frame.IsProtected and frame:IsProtected() then
+        return false
+    end
+    local ok = pcall(frame.SetFrameLevel, frame, frameLevel)
+    return ok
+end
+
 -- Visibility check for resource bars ("always", "combat", "hostile")
 local function ShouldShowBar(cfg)
     -- CDM visibility overrides (e.g. hide when mounted) take priority
@@ -845,14 +858,24 @@ function QUICore:EnablePowerBarEditMode()
             -- Enable keyboard for arrow key nudging
             bar:EnableKeyboard(true)
             bar:SetScript("OnKeyDown", function(self, key)
-                if not PowerBarEditMode.active then return end
+                if not PowerBarEditMode.active then
+                    self:SetPropagateKeyboardInput(true)
+                    return
+                end
 
                 local deltaX, deltaY = 0, 0
                 if key == "LEFT" then deltaX = -1
                 elseif key == "RIGHT" then deltaX = 1
                 elseif key == "UP" then deltaY = 1
                 elseif key == "DOWN" then deltaY = -1
-                else return end  -- Ignore other keys
+                else
+                    -- Non-arrow keys: propagate to game (WASD, hotkeys, Escape, etc.)
+                    self:SetPropagateKeyboardInput(true)
+                    return
+                end
+
+                -- Consume arrow keys so they nudge instead of moving the camera
+                self:SetPropagateKeyboardInput(false)
 
                 -- Use global selection system - nudge the SELECTED element, not this bar
                 if QUICore and QUICore.EditModeSelection and QUICore.EditModeSelection.selectedType then
@@ -1021,9 +1044,9 @@ function QUICore:UpdatePowerBar()
     -- Update HUD layer priority dynamically
     local layerPriority = self.db.profile.hudLayering and self.db.profile.hudLayering.primaryPowerBar or 7
     local frameLevel = self:GetHUDFrameLevel(layerPriority)
-    bar:SetFrameLevel(frameLevel)
+    SafeSetFrameLevel(bar, frameLevel)
     if bar.TextFrame then
-        bar.TextFrame:SetFrameLevel(frameLevel + 2)
+        SafeSetFrameLevel(bar.TextFrame, frameLevel + 2)
     end
 
     -- Determine effective orientation (AUTO/HORIZONTAL/VERTICAL)
@@ -2142,9 +2165,9 @@ function QUICore:UpdateSecondaryPowerBar()
     -- Update HUD layer priority dynamically
     local layerPriority = self.db.profile.hudLayering and self.db.profile.hudLayering.secondaryPowerBar or 6
     local frameLevel = self:GetHUDFrameLevel(layerPriority)
-    bar:SetFrameLevel(frameLevel)
+    SafeSetFrameLevel(bar, frameLevel)
     if bar.TextFrame then
-        bar.TextFrame:SetFrameLevel(frameLevel + 2)
+        SafeSetFrameLevel(bar.TextFrame, frameLevel + 2)
     end
 
     -- Determine effective orientation (AUTO/HORIZONTAL/VERTICAL)

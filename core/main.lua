@@ -3819,6 +3819,7 @@ end
 
 EditModeKeyHandler:SetScript("OnKeyDown", function(self, key)
     if not QUICore.EditModeSelection or not QUICore.EditModeSelection.selectedType then
+        self:SetPropagateKeyboardInput(true)
         return
     end
 
