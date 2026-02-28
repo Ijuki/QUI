@@ -8,7 +8,8 @@ local QUI = ns.QUI or {}
 ns.QUI = QUI
 local QUICore = ns.Addon
 
-local GetCore = ns.Helpers.GetCore
+local Helpers = ns.Helpers
+local GetCore = Helpers.GetCore
 
 ---------------------------------------------------------------------------
 -- Module State
@@ -23,6 +24,11 @@ local currentInspectGUID = nil  -- Tracks inspected unit's GUID for validation
 -- Lite mode state
 local liteOverlays = {}           -- FontStrings for per-slot ilvl
 local liteOverallDisplay = nil    -- Overall ilvl frame
+
+-- TAINT SAFETY: Store per-frame state in weak-keyed table instead of writing properties
+-- to Blizzard frames, which taints them in Midnight (12.0)
+local frameState, GetState = Helpers.CreateStateTable()
+local EMPTY = {}
 
 ---------------------------------------------------------------------------
 -- Import shared functions from qui_character.lua
@@ -442,22 +448,17 @@ end
 
 -- Block Blizzard's IconBorder from showing
 local function BlockInspectIconBorder(iconBorder)
-    if not iconBorder or iconBorder._quiBlocked then return end
-    iconBorder._quiBlocked = true
+    if not iconBorder or (frameState[iconBorder] or EMPTY).blocked then return end
+    GetState(iconBorder).blocked = true
     iconBorder:SetAlpha(0)
     if iconBorder.SetTexture then iconBorder:SetTexture(nil) end
-    if iconBorder.SetAtlas then
-        hooksecurefunc(iconBorder, "SetAtlas", function(self)
-            if self.SetTexture then self:SetTexture(nil) end
-            if self.SetAlpha then self:SetAlpha(0) end
-        end)
-    end
+    Helpers.DeferredSetAtlasBlock(iconBorder, false)
 end
 
 -- Skin a single inspect equipment slot
 local function SkinInspectEquipmentSlot(slot)
-    if not slot or slot._quiSkinned then return end
-    slot._quiSkinned = true
+    if not slot or (frameState[slot] or EMPTY).skinned then return end
+    GetState(slot).skinned = true
 
     -- Hide NormalTexture (decorative frame)
     local normalTex = slot:GetNormalTexture()
@@ -491,13 +492,14 @@ local function SkinInspectEquipmentSlot(slot)
     end
 
     -- Create custom border frame
-    if not slot._quiBorderFrame then
-        slot._quiBorderFrame = CreateFrame("Frame", nil, slot, "BackdropTemplate")
-        slot._quiBorderFrame:SetFrameLevel(slot:GetFrameLevel() + 10)
-        slot._quiBorderFrame:SetAllPoints(slot)
+    local slotState = GetState(slot)
+    if not slotState.borderFrame then
+        slotState.borderFrame = CreateFrame("Frame", nil, slot, "BackdropTemplate")
+        slotState.borderFrame:SetFrameLevel(slot:GetFrameLevel() + 10)
+        slotState.borderFrame:SetAllPoints(slot)
         local core = GetCore()
-        local px = (core and core.GetPixelSize and core:GetPixelSize(slot._quiBorderFrame)) or 1
-        slot._quiBorderFrame:SetBackdrop({
+        local px = (core and core.GetPixelSize and core:GetPixelSize(slotState.borderFrame)) or 1
+        slotState.borderFrame:SetBackdrop({
             edgeFile = "Interface\\Buttons\\WHITE8X8",
             edgeSize = px,
         })
@@ -506,7 +508,8 @@ end
 
 -- Update border color based on inspected item quality
 local function UpdateInspectSlotBorder(slot, unit)
-    if not slot or not slot._quiBorderFrame then return end
+    local borderFrame = slot and (frameState[slot] or EMPTY).borderFrame
+    if not borderFrame then return end
 
     local slotID = slot:GetID()
     unit = unit or GetInspectUnit()
@@ -521,10 +524,10 @@ local function UpdateInspectSlotBorder(slot, unit)
 
     if quality and quality >= 1 then
         local r, g, b = C_Item.GetItemQualityColor(quality)
-        slot._quiBorderFrame:SetBackdropBorderColor(r, g, b, 1)
-        slot._quiBorderFrame:Show()
+        borderFrame:SetBackdropBorderColor(r, g, b, 1)
+        borderFrame:Show()
     else
-        slot._quiBorderFrame:Hide()
+        borderFrame:Hide()
     end
 end
 
@@ -872,7 +875,8 @@ local function SetupInspectTitleArea()
     end
 
     -- Create top-left display: Name (class-colored)
-    if not InspectFrame._quiILvlDisplay then
+    local inspState = GetState(InspectFrame)
+    if not inspState.ilvlDisplay then
         local displayFrame = CreateFrame("Frame", nil, InspectFrame)
         displayFrame:SetSize(400, 30)
         displayFrame:SetPoint("TOPLEFT", InspectFrame, "TOPLEFT", 19, -10)
@@ -892,11 +896,11 @@ local function SetupInspectTitleArea()
 
         displayFrame.text = nameText
         displayFrame.specText = specText
-        InspectFrame._quiILvlDisplay = displayFrame
+        inspState.ilvlDisplay = displayFrame
     end
 
     -- Create center ilvl display (title bar)
-    if not InspectFrame._quiCenterILvl then
+    if not inspState.centerILvl then
         local centerFrame = CreateFrame("Frame", nil, InspectFrame)
         centerFrame:SetSize(200, 20)
         centerFrame:SetPoint("TOP", InspectFrame, "TOP", 0, -10)
@@ -908,7 +912,7 @@ local function SetupInspectTitleArea()
         centerText:SetJustifyH("CENTER")
 
         centerFrame.text = centerText
-        InspectFrame._quiCenterILvl = centerFrame
+        inspState.centerILvl = centerFrame
     end
 end
 
@@ -916,12 +920,13 @@ end
 -- Update inspect iLvl display with target's info
 ---------------------------------------------------------------------------
 local function UpdateInspectILvlDisplay()
-    if not InspectFrame or not InspectFrame._quiILvlDisplay then return end
+    local inspS = InspectFrame and frameState[InspectFrame] or EMPTY
+    if not InspectFrame or not inspS.ilvlDisplay then return end
 
     local settings = GetSettings()
     if settings.inspectEnabled == false then return end
 
-    local displayFrame = InspectFrame._quiILvlDisplay
+    local displayFrame = inspS.ilvlDisplay
     if not displayFrame.text then return end
 
     local shared = GetShared()
@@ -972,7 +977,7 @@ local function UpdateInspectILvlDisplay()
     end
 
     -- Update center ilvl display
-    local centerFrame = InspectFrame._quiCenterILvl
+    local centerFrame = inspS.centerILvl
     if centerFrame and centerFrame.text then
         local equipped = CalculateInspectAverageILvl(unit)
 
@@ -1013,8 +1018,9 @@ local function SetInspectExtendedMode(tabNum)
         _G.QUI_InspectFrameSkinning.SetExtended(true)
     end
     -- Show iLvl display on Character/PvP tabs
-    if InspectFrame._quiCenterILvl then
-        InspectFrame._quiCenterILvl:Show()
+    local centerILvl = (frameState[InspectFrame] or EMPTY).centerILvl
+    if centerILvl then
+        centerILvl:Show()
     end
 end
 
@@ -1031,8 +1037,9 @@ local function SetInspectNormalMode()
         _G.QUI_InspectFrameSkinning.SetExtended(false)
     end
     -- Hide iLvl display on Guild tab (not relevant)
-    if InspectFrame._quiCenterILvl then
-        InspectFrame._quiCenterILvl:Hide()
+    local centerILvl = (frameState[InspectFrame] or EMPTY).centerILvl
+    if centerILvl then
+        centerILvl:Hide()
     end
 end
 
@@ -1042,7 +1049,7 @@ end
 ---------------------------------------------------------------------------
 local function CreateInspectSettingsButton()
     if not InspectFrame then return end
-    if InspectFrame._quiGearBtn then return end
+    if (frameState[InspectFrame] or EMPTY).gearBtn then return end
 
     local GUI = _G.QUI and _G.QUI.GUI
     if not GUI then return end
@@ -1134,7 +1141,7 @@ local function CreateInspectSettingsButton()
         self:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
     end)
 
-    InspectFrame._quiGearBtn = gearBtn
+    GetState(InspectFrame).gearBtn = gearBtn
 
     -- Settings panel (matches character panel size: 450x600)
     inspectSettingsPanel = CreateFrame("Frame", "QUI_InspectSettingsPanel", InspectFrame, "BackdropTemplate")
@@ -1152,7 +1159,7 @@ local function CreateInspectSettingsButton()
     inspectSettingsPanel:SetFrameLevel(200)
     inspectSettingsPanel:EnableMouse(true)
     inspectSettingsPanel:Hide()
-    InspectFrame._quiSettingsPanel = inspectSettingsPanel
+    GetState(InspectFrame).settingsPanel = inspectSettingsPanel
 
     -- Title
     local title = inspectSettingsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
