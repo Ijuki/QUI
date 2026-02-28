@@ -225,34 +225,6 @@ local function MakeURLsClickable(text)
     end
 end
 
----------------------------------------------------------------------------
--- Hook chat frame AddMessage to process message transforms
----------------------------------------------------------------------------
-local function HookChatMessages(chatFrame)
-    if chatFrame.__quiChatMessageHooked then return end
-    chatFrame.__quiChatMessageHooked = true
-
-    local origAddMessage = chatFrame.AddMessage
-    chatFrame.AddMessage = function(self, text, ...)
-        if text and type(text) == "string" then
-            -- Process in a protected block for secret/protected chat values.
-            local success, processed = pcall(function()
-                local out = text
-                out = AddTimestamp(out)
-                out = FormatChannelLabels(out)
-                out = MakeURLsClickable(out)
-                return out
-            end)
-
-            if success and type(processed) == "string" then
-                text = processed
-            end
-        end
-        return origAddMessage(self, text, ...)
-    end
-end
-
----------------------------------------------------------------------------
 -- Create URL copy popup (on demand) - QUI styled
 ---------------------------------------------------------------------------
 local function CreateCopyPopup()
@@ -345,7 +317,7 @@ local function InstallMessageFilters()
     if messageFiltersInstalled then return end
     messageFiltersInstalled = true
 
-    -- Build a filter function that processes timestamps and URLs
+    -- Build a filter function that processes channel labels, timestamps, and URLs
     local function MessageFilter(self, event, msg, ...)
         if not msg or type(msg) ~= "string" then return false end
 
@@ -354,7 +326,9 @@ local function InstallMessageFilters()
 
         local modified = msg
 
-        -- Apply timestamps
+        -- Keep channel label normalization before timestamp prepend.
+        modified = FormatChannelLabels(modified)
+
         if settings.timestamps and settings.timestamps.enabled then
             modified = AddTimestamp(modified)
         end
@@ -1274,11 +1248,6 @@ local function SkinChatFrame(chatFrame)
 
     -- Apply font styling (always enabled)
     StyleFontStrings(chatFrame)
-
-    -- Hook URL detection
-    if settings.urls and settings.urls.enabled then
-        HookChatMessages(chatFrame)
-    end
 
     -- Setup message fade (handles both enabling and disabling)
     SetupMessageFade(chatFrame)
