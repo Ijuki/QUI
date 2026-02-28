@@ -254,6 +254,97 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
         -- Track previous anchor to swap offsets when mode changes
         local prevAnchor = castDB.anchor or "none"
 
+        local function GetActiveUnitCastbarFrame()
+            local uf = ns.QUI_UnitFrames
+            if uf and uf.castbars and uf.castbars[unitKey] then
+                return uf.castbars[unitKey]
+            end
+            return nil
+        end
+
+        local function SnapOnceThenUnlock(targetAnchor, opts)
+            opts = opts or {}
+            local targetWidth = opts.width
+            local previousState = {
+                anchor = castDB.anchor,
+                offsetX = castDB.offsetX,
+                offsetY = castDB.offsetY,
+                width = castDB.width,
+                freeOffsetX = castDB.freeOffsetX,
+                freeOffsetY = castDB.freeOffsetY,
+                lockedOffsetX = castDB.lockedOffsetX,
+                lockedOffsetY = castDB.lockedOffsetY,
+                lockedToFrame = castDB.lockedToFrame,
+                lockedToEssential = castDB.lockedToEssential,
+                lockedToUtility = castDB.lockedToUtility,
+            }
+
+            -- Temporarily snap using the normal anchor pipeline so placement matches lock behavior.
+            castDB.anchor = targetAnchor
+            castDB.offsetX = 0
+            castDB.offsetY = 0
+            if targetAnchor == "essential" or targetAnchor == "utility" then
+                castDB.width = 0
+            elseif type(targetWidth) == "number" and targetWidth > 0 then
+                castDB.width = targetWidth
+            end
+
+            UpdateCastbarSliders()
+            RefreshUnit()
+
+            local castbarFrame = GetActiveUnitCastbarFrame()
+            if not castbarFrame or not castbarFrame.GetCenter then
+                for k, v in pairs(previousState) do castDB[k] = v end
+                prevAnchor = castDB.anchor or "none"
+                UpdateCastbarSliders()
+                RefreshUnit()
+                print("|cFF56D1FFQUI:|r Castbar not available to finalize snap.")
+                return
+            end
+
+            local cx, cy = castbarFrame:GetCenter()
+            local px, py = UIParent:GetCenter()
+            if not (cx and cy and px and py) then
+                for k, v in pairs(previousState) do castDB[k] = v end
+                prevAnchor = castDB.anchor or "none"
+                UpdateCastbarSliders()
+                RefreshUnit()
+                print("|cFF56D1FFQUI:|r Could not read castbar position for one-time snap.")
+                return
+            end
+
+            local snappedX = cx - px
+            local snappedY = cy - py
+            local snappedWidth = castbarFrame:GetWidth() or castDB.width or 250
+
+            if QUICore and QUICore.PixelRound then
+                snappedX = QUICore:PixelRound(snappedX, castbarFrame)
+                snappedY = QUICore:PixelRound(snappedY, castbarFrame)
+                snappedWidth = QUICore:PixelRound(snappedWidth, castbarFrame)
+            else
+                snappedX = math.floor((snappedX or 0) + 0.5)
+                snappedY = math.floor((snappedY or 0) + 0.5)
+                snappedWidth = math.floor((snappedWidth or 250) + 0.5)
+            end
+
+            -- Convert to free placement: keep snapped location, nudge down by 1px, and clear lock.
+            castDB.anchor = "none"
+            castDB.offsetX = snappedX
+            local nudgeY = SafeGetPixelSize(castbarFrame) or 1
+            castDB.offsetY = (snappedY or 0) - nudgeY
+            castDB.freeOffsetX = castDB.offsetX
+            castDB.freeOffsetY = castDB.offsetY
+            castDB.width = snappedWidth
+
+            castDB.lockedToFrame = false
+            castDB.lockedToEssential = false
+            castDB.lockedToUtility = false
+            prevAnchor = castDB.anchor
+
+            UpdateCastbarSliders()
+            RefreshUnit()
+        end
+
         anchorDropdown = GUI:CreateFormDropdown(tabContent, "Autoresize + Lock To", anchorOptions, "anchor", castDB, function()
             -- Clear all lock flags when anchor changes
             castDB.lockedToFrame = false
@@ -515,26 +606,16 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
 
         -- Quick Snap button click handlers (one-time snap, no lock)
         snapFrameBtn:SetScript("OnClick", function()
-            castDB.anchor = "unitframe"
-            castDB.offsetX = 0
-            castDB.offsetY = 0
-            castDB.width = unitDB.width or 250
-
-            UpdateCastbarSliders()
-            RefreshUnit()
+            SnapOnceThenUnlock("unitframe", {
+                width = unitDB.width or 250
+            })
         end)
 
         if snapEssentialBtn then
             snapEssentialBtn:SetScript("OnClick", function()
                 local viewer = _G["EssentialCooldownViewer"]
                 if viewer and viewer:IsShown() then
-                    castDB.anchor = "essential"
-                    castDB.offsetX = 0
-                    castDB.offsetY = 0
-                    castDB.width = 0  -- Clear width to allow dual anchors to control sizing
-
-                    UpdateCastbarSliders()
-                    RefreshUnit()
+                    SnapOnceThenUnlock("essential")
                 else
                     print("|cFF56D1FFQUI:|r Essential Cooldowns viewer not visible.")
                 end
@@ -545,13 +626,7 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
             snapUtilityBtn:SetScript("OnClick", function()
                 local viewer = _G["UtilityCooldownViewer"]
                 if viewer and viewer:IsShown() then
-                    castDB.anchor = "utility"
-                    castDB.offsetX = 0
-                    castDB.offsetY = 0
-                    castDB.width = 0  -- Clear width to allow dual anchors to control sizing
-
-                    UpdateCastbarSliders()
-                    RefreshUnit()
+                    SnapOnceThenUnlock("utility")
                 else
                     print("|cFF56D1FFQUI:|r Utility Cooldowns viewer not visible.")
                 end
