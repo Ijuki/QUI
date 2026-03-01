@@ -613,7 +613,7 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
 
         if snapEssentialBtn then
             snapEssentialBtn:SetScript("OnClick", function()
-                local viewer = _G["EssentialCooldownViewer"]
+                local viewer = _G.QUI_GetCDMViewerFrame and _G.QUI_GetCDMViewerFrame("essential")
                 if viewer and viewer:IsShown() then
                     SnapOnceThenUnlock("essential")
                 else
@@ -624,7 +624,7 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
 
         if snapUtilityBtn then
             snapUtilityBtn:SetScript("OnClick", function()
-                local viewer = _G["UtilityCooldownViewer"]
+                local viewer = _G.QUI_GetCDMViewerFrame and _G.QUI_GetCDMViewerFrame("utility")
                 if viewer and viewer:IsShown() then
                     SnapOnceThenUnlock("utility")
                 else

@@ -330,11 +330,29 @@ end
 -- NOTE: All cooldown viewers are now handled by dedicated modules:
 -- EssentialCooldownViewer/UtilityCooldownViewer → qui_ncdm.lua
 -- BuffIconCooldownViewer/BuffBarCooldownViewer → qui_buffbar.lua
+-- Viewer keys use the CDM resolver (_G.QUI_GetCDMViewerFrame) instead of raw _G lookups.
 QUICore.viewers = {
-    -- "EssentialCooldownViewer",  -- Handled by NCDM
-    -- "UtilityCooldownViewer",    -- Handled by NCDM
-    -- "BuffIconCooldownViewer",   -- Handled by qui_buffbar.lua
+    -- "essential",  -- Handled by NCDM
+    -- "utility",    -- Handled by NCDM
+    -- "buffIcon",   -- Handled by qui_buffbar.lua
 }
+
+-- Reverse mapping: Blizzard frame name → resolver key (for edit-mode / nudge callers
+-- that still pass the old frame name as an element key).
+local CDM_NAME_TO_RESOLVER_KEY = {
+    EssentialCooldownViewer = "essential",
+    UtilityCooldownViewer   = "utility",
+    BuffIconCooldownViewer  = "buffIcon",
+    BuffBarCooldownViewer   = "buffBar",
+}
+
+-- Resolve a CDM viewer frame by Blizzard name or resolver key.
+local function ResolveCDMViewerByName(name)
+    local GetFrame = _G.QUI_GetCDMViewerFrame
+    if not GetFrame then return nil end
+    local key = CDM_NAME_TO_RESOLVER_KEY[name] or name
+    return GetFrame(key)
+end
 
 local defaults = {
     profile = {
@@ -631,6 +649,7 @@ local defaults = {
         -- QUI New Cooldown Display Manager (NCDM)
         -- Per-row configuration for Essential and Utility viewers
         ncdm = {
+            engine = "owned",  -- CDM engine: "classic" (Blizzard hooks) or "owned" (addon-owned frames)
             essential = {
                 enabled = true,
                 layoutDirection = "HORIZONTAL",
@@ -697,6 +716,7 @@ local defaults = {
                     stackTextColor = {1, 1, 1, 1},
                     stackAnchor = "BOTTOMRIGHT",
                 },
+                rangeColor = {0.8, 0.1, 0.1}, -- Range indicator tint color
             },
             utility = {
                 enabled = true,
@@ -766,6 +786,7 @@ local defaults = {
                 },
                 anchorBelowEssential = false,
                 anchorGap = 0,
+                rangeColor = {0.8, 0.1, 0.1},
             },
             buff = {
                 enabled = true,
@@ -1313,6 +1334,9 @@ local defaults = {
         tooltip = {
             enabled = true,                    -- Master toggle for tooltip module
             anchorToCursor = true,             -- Follow cursor vs default anchor
+            cursorAnchor = "TOPLEFT",          -- Tooltip point anchored to cursor
+            cursorOffsetX = 16,                -- Cursor anchor X offset (pixels)
+            cursorOffsetY = -16,               -- Cursor anchor Y offset (pixels)
             hideInCombat = true,               -- Suppress tooltips during combat
             classColorName = false,            -- Color player names by class
             fontSize = 12,                     -- Tooltip text font size
@@ -2950,6 +2974,9 @@ local defaults = {
             -- Features
             autoZoom = false,  -- Auto zoom out after 10 seconds
             hideAddonButtons = true,  -- Show addon buttons on hover only
+            middleClickMenuEnabled = true,  -- Middle click minimap opens quick menu
+            hideMicroMenu = false,  -- Hide Blizzard micro menu (Character/Spellbook/etc.)
+            hideBagBar = false,  -- Hide Blizzard bag bar
             
             -- Button Visibility
             showZoomButtons = false,
@@ -3405,6 +3432,9 @@ function QUICore:OnInitialize()
     -- Track current profile to detect same-profile "switches" during M+ entry
     self._lastKnownProfile = self.db:GetCurrentProfile()
 
+    -- Track CDM engine so profile switches to a different engine trigger reload
+    self._lastKnownEngine = self.db.profile.ncdm and self.db.profile.ncdm.engine or "owned"
+
     self.db.RegisterCallback(self, "OnProfileChanged", "OnProfileChanged")
     self.db.RegisterCallback(self, "OnProfileCopied",  "OnProfileChanged")
     self.db.RegisterCallback(self, "OnProfileReset",   "OnProfileChanged")
@@ -3460,6 +3490,14 @@ function QUICore:OnProfileChanged(event, db, profileKey)
 
     -- Update spec tracking (kept for reference)
     self._lastKnownSpec = GetSpecialization() or 0
+
+    -- Check if CDM engine changed — requires reload since engines can't hot-swap
+    local newEngine = self.db.profile.ncdm and self.db.profile.ncdm.engine or "owned"
+    if newEngine ~= self._lastKnownEngine then
+        self._lastKnownEngine = newEngine
+        self:SafeReload()
+        return
+    end
 
     -- Wipe the font registry so stale FontStrings from the old profile's frames
     -- are released. Modules will re-register via ApplyFont when they rebuild.
@@ -3757,7 +3795,7 @@ function QUICore:ShowSelectionArrows(elementType, elementKey)
     elseif elementType == "powerbar" then
         resolvedFrame = (elementKey == "primary") and self.powerBar or self.secondaryPowerBar
     elseif elementType == "cdm" then
-        resolvedFrame = _G[elementKey]
+        resolvedFrame = ResolveCDMViewerByName(elementKey)
     elseif elementType == "blizzard" then
         resolvedFrame = _G[elementKey]
     elseif elementType == "minimap" then
@@ -4229,8 +4267,9 @@ end
 local hookedViewers = ns.Helpers.CreateStateTable()
 
 function QUICore:HookViewers()
+    local GetFrame = _G.QUI_GetCDMViewerFrame
     for _, name in ipairs(self.viewers) do
-        local viewer = _G[name]
+        local viewer = GetFrame and GetFrame(name)
         if viewer and not hookedViewers[viewer] then
             hookedViewers[viewer] = true
 
@@ -4394,8 +4433,9 @@ function QUICore:HookEditMode()
                 local GetSkinIconState = _G.QUI_GetSkinIconState
                 -- Check if any icons need re-skinning
                 local needsReskin = false
+                local GetFrame_reskin = _G.QUI_GetCDMViewerFrame
                 for _, viewerName in ipairs(self.viewers) do
-                    local viewer = _G[viewerName]
+                    local viewer = GetFrame_reskin and GetFrame_reskin(viewerName)
                     if viewer then
                         local container = viewer.viewerFrame or viewer
                         -- Capture all children in one GetChildren() call, reusing scratch table
@@ -4600,8 +4640,9 @@ end
 -- SafeSetFont, ApplyGlobalFont, and font system are in core/font_system.lua
 
 function QUICore:RefreshAll()
+    local GetFrame = _G.QUI_GetCDMViewerFrame
     for _, name in ipairs(self.viewers) do
-        local viewer = _G[name]
+        local viewer = GetFrame and GetFrame(name)
         if viewer and viewer:IsShown() then
             self:ApplyViewerSkin(viewer)
         end
