@@ -23,6 +23,15 @@ local function IsPlayerInGroup()
     return IsInGroup() or IsInRaid()
 end
 
+-- Pet battle state helper.
+local function IsInPetBattle()
+    if C_PetBattles and C_PetBattles.IsInBattle then
+        local ok, inBattle = pcall(C_PetBattles.IsInBattle)
+        return ok and inBattle == true
+    end
+    return false
+end
+
 -- Housing instance types - excluded from "Show in Instance" detection
 local HOUSING_INSTANCE_TYPES = {
     ["neighborhood"] = true,  -- Founder's Point, Razorwind Shores
@@ -124,6 +133,7 @@ local CDMVisibility = {
 local function ShouldCDMBeVisible()
     local vis = GetCDMVisibilitySettings()
     if not vis then return true end
+    if IsInPetBattle() then return false end
 
     local ignoreHideRules = vis.dontHideInDungeonsRaids and Helpers.IsPlayerInDungeonOrRaid and Helpers.IsPlayerInDungeonOrRaid()
     if not ignoreHideRules then
@@ -405,6 +415,7 @@ end
 local function ShouldUnitframesBeVisible()
     local vis = GetUnitframesVisibilitySettings()
     if not vis then return true end
+    if IsInPetBattle() then return false end
 
     local ignoreHideRules = vis.dontHideInDungeonsRaids and Helpers.IsPlayerInDungeonOrRaid and Helpers.IsPlayerInDungeonOrRaid()
     if not ignoreHideRules then
@@ -592,6 +603,8 @@ visibilityEventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 visibilityEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 visibilityEventFrame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 visibilityEventFrame:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
+visibilityEventFrame:RegisterEvent("PET_BATTLE_OPENING_START")
+visibilityEventFrame:RegisterEvent("PET_BATTLE_CLOSE")
 
 visibilityEventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_FLAGS_CHANGED" then
