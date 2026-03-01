@@ -502,10 +502,11 @@ local function HookBlizzVisibility(icon, blizzChild)
     state.icon = icon
 
     -- Sync initial state (safe — BuildIcons runs out of combat only)
-    if blizzChild:IsShown() then
-        icon:SetAlpha(icon:GetAlpha())  -- keep current alpha
-    else
+    local shown = SafeValue(blizzChild:IsShown(), nil)
+    if shown == false then
         icon:SetAlpha(0)
+    elseif shown == true then
+        icon:SetAlpha(icon._rowOpacity or 1)
     end
 
     if not state.hooked then
@@ -518,7 +519,7 @@ local function HookBlizzVisibility(icon, blizzChild)
         hooksecurefunc(blizzChild, "Show", function(self)
             local s = blizzVisState[self]
             if not s or not s.icon then return end
-            s.icon:SetAlpha(1)
+            s.icon:SetAlpha(s.icon._rowOpacity or 1)
         end)
     end
 end
@@ -764,6 +765,7 @@ local function ConfigureIcon(icon, rowConfig)
 
     -- Apply row opacity
     local opacity = rowConfig.opacity or 1.0
+    icon._rowOpacity = opacity
     icon:SetAlpha(opacity)
 end
 
@@ -781,6 +783,17 @@ local function UpdateIconCooldown(icon)
     if not icon or not icon._spellEntry then return end
     local entry = icon._spellEntry
     if entry._blizzChild then
+        if entry.viewerType == "buff" then
+            -- Combat-safe self-heal: when Blizzard skips explicit Show/Hide
+            -- transitions, hook-only visibility can miss alpha restoration.
+            local shown = SafeValue(entry._blizzChild:IsShown(), nil)
+            if shown == true and icon:GetAlpha() <= 0 then
+                icon:SetAlpha(icon._rowOpacity or 1)
+            elseif shown == false and icon:GetAlpha() > 0 then
+                icon:SetAlpha(0)
+            end
+        end
+
         -- Adopted Blizzard CooldownFrame: Blizzard drives the display
         -- natively (aura duration, charge recharge, transitions).
         -- We only track state for swipe color classification.
@@ -1200,11 +1213,11 @@ function CDMIcons:UpdateAllCooldowns()
             -- Buff icons use hook-based approach (HookBlizzVisibility).
             local entry = icon._spellEntry
             if entry and entry._blizzChild and entry.viewerType ~= "buff" then
-                local blizzShown = entry._blizzChild:IsShown()
+                local blizzShown = SafeValue(entry._blizzChild:IsShown(), nil)
                 local iconShown = icon:IsShown()
-                if blizzShown and not iconShown then
+                if blizzShown == true and not iconShown then
                     icon:Show()
-                elseif not blizzShown and iconShown then
+                elseif blizzShown == false and iconShown then
                     icon:Hide()
                 end
             end

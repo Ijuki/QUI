@@ -1,0 +1,226 @@
+diff --git a/modules/cooldowns/owned/cdm_icons.lua b/modules/cooldowns/owned/cdm_icons.lua
+index 20f305b..f6c546d 100644
+--- a/modules/cooldowns/owned/cdm_icons.lua
++++ b/modules/cooldowns/owned/cdm_icons.lua
+@@ -502,10 +502,11 @@ local function HookBlizzVisibility(icon, blizzChild)
+     state.icon = icon
+ 
+     -- Sync initial state (safe — BuildIcons runs out of combat only)
+-    if blizzChild:IsShown() then
+-        icon:SetAlpha(icon:GetAlpha())  -- keep current alpha
+-    else
++    local shown = SafeValue(blizzChild:IsShown(), nil)
++    if shown == false then
+         icon:SetAlpha(0)
++    elseif shown == true then
++        icon:SetAlpha(icon._rowOpacity or 1)
+     end
+ 
+     if not state.hooked then
+@@ -518,7 +519,7 @@ local function HookBlizzVisibility(icon, blizzChild)
+         hooksecurefunc(blizzChild, "Show", function(self)
+             local s = blizzVisState[self]
+             if not s or not s.icon then return end
+-            s.icon:SetAlpha(1)
++            s.icon:SetAlpha(s.icon._rowOpacity or 1)
+         end)
+     end
+ end
+@@ -764,6 +765,7 @@ local function ConfigureIcon(icon, rowConfig)
+ 
+     -- Apply row opacity
+     local opacity = rowConfig.opacity or 1.0
++    icon._rowOpacity = opacity
+     icon:SetAlpha(opacity)
+ end
+ 
+@@ -781,6 +783,17 @@ local function UpdateIconCooldown(icon)
+     if not icon or not icon._spellEntry then return end
+     local entry = icon._spellEntry
+     if entry._blizzChild then
++        if entry.viewerType == "buff" then
++            -- Combat-safe self-heal: when Blizzard skips explicit Show/Hide
++            -- transitions, hook-only visibility can miss alpha restoration.
++            local shown = SafeValue(entry._blizzChild:IsShown(), nil)
++            if shown == true and icon:GetAlpha() <= 0 then
++                icon:SetAlpha(icon._rowOpacity or 1)
++            elseif shown == false and icon:GetAlpha() > 0 then
++                icon:SetAlpha(0)
++            end
++        end
++
+         -- Adopted Blizzard CooldownFrame: Blizzard drives the display
+         -- natively (aura duration, charge recharge, transitions).
+         -- We only track state for swipe color classification.
+@@ -1200,11 +1213,11 @@ function CDMIcons:UpdateAllCooldowns()
+             -- Buff icons use hook-based approach (HookBlizzVisibility).
+             local entry = icon._spellEntry
+             if entry and entry._blizzChild and entry.viewerType ~= "buff" then
+-                local blizzShown = entry._blizzChild:IsShown()
++                local blizzShown = SafeValue(entry._blizzChild:IsShown(), nil)
+                 local iconShown = icon:IsShown()
+-                if blizzShown and not iconShown then
++                if blizzShown == true and not iconShown then
+                     icon:Show()
+-                elseif not blizzShown and iconShown then
++                elseif blizzShown == false and iconShown then
+                     icon:Hide()
+                 end
+             end
+diff --git a/modules/cooldowns/owned/cdm_spelldata.lua b/modules/cooldowns/owned/cdm_spelldata.lua
+index 4ae07ba..8c7a77f 100644
+--- a/modules/cooldowns/owned/cdm_spelldata.lua
++++ b/modules/cooldowns/owned/cdm_spelldata.lua
+@@ -180,6 +180,8 @@ local function ScanCooldownViewer(viewerType)
+     local container = viewer.viewerFrame or viewer
+ 
+     local list = {}
++    local seenChildren = {}
++    local seenEntries = {}
+     local sel = viewer.Selection
+ 
+     -- For buff: scan both the Blizzard viewer AND QUI_BuffContainer.
+@@ -196,12 +198,15 @@ local function ScanCooldownViewer(viewerType)
+         local numChildren = scanContainer:GetNumChildren()
+         for i = 1, numChildren do
+             local child = select(i, scanContainer:GetChildren())
+-            if child and child ~= sel and not child._isCustomCDMIcon and IsIconFrame(child) then
+-                local shown = child:IsShown()
++            if child and child ~= sel and not child._isCustomCDMIcon and IsIconFrame(child) and not seenChildren[child] then
++                seenChildren[child] = true
++
++                local shown = Helpers.SafeValue(child:IsShown(), nil)
+                 local hasTex = HasValidTexture(child)
+                 local hasCDInfo = (child.cooldownInfo ~= nil)
++                local shouldInclude = (shown == true) or (shown == nil and hasTex)
+ 
+-                if shown and hasTex and (hasTex or hasCDInfo) then
++                if shouldInclude and (hasTex or hasCDInfo) then
+                     local spellID, overrideSpellID, name, isAura
+                     local layoutIndex = child.layoutIndex or 9999
+ 
+@@ -220,29 +225,34 @@ local function ScanCooldownViewer(viewerType)
+                     end
+ 
+                     if spellID then
+-                        -- Check for multi-charge spells
+-                        -- maxCharges can be a secret value in combat; use SafeToNumber
+-                        local hasCharges = false
+-                        if C_Spell.GetSpellCharges then
+-                            local ci = C_Spell.GetSpellCharges(overrideSpellID or spellID)
+-                            if ci then
+-                                local maxC = Helpers.SafeToNumber(ci.maxCharges, 0)
+-                                if maxC and maxC > 1 then
+-                                    hasCharges = true
++                        local dedupeKey = tostring(spellID) .. ":" .. tostring(layoutIndex)
++                        if not seenEntries[dedupeKey] then
++                            seenEntries[dedupeKey] = true
++
++                            -- Check for multi-charge spells
++                            -- maxCharges can be a secret value in combat; use SafeToNumber
++                            local hasCharges = false
++                            if C_Spell.GetSpellCharges then
++                                local ci = C_Spell.GetSpellCharges(overrideSpellID or spellID)
++                                if ci then
++                                    local maxC = Helpers.SafeToNumber(ci.maxCharges, 0)
++                                    if maxC and maxC > 1 then
++                                        hasCharges = true
++                                    end
+                                 end
+                             end
+-                        end
+ 
+-                        list[#list + 1] = {
+-                            spellID = spellID,
+-                            overrideSpellID = overrideSpellID or spellID,
+-                            name = name or "",
+-                            isAura = isAura or false,
+-                            hasCharges = hasCharges,
+-                            layoutIndex = layoutIndex,
+-                            viewerType = viewerType,
+-                            _blizzChild = child,
+-                        }
++                            list[#list + 1] = {
++                                spellID = spellID,
++                                overrideSpellID = overrideSpellID or spellID,
++                                name = name or "",
++                                isAura = isAura or false,
++                                hasCharges = hasCharges,
++                                layoutIndex = layoutIndex,
++                                viewerType = viewerType,
++                                _blizzChild = child,
++                            }
++                        end
+                     end
+                 end
+             end
+@@ -290,6 +300,7 @@ end
+ -- Hook OnActiveStateChanged, OnUnitAuraAddedEvent,
+ -- OnUnitAuraRemovedEvent on each child frame.
+ ---------------------------------------------------------------------------
++local HookBuffViewerChildren
+ local buffEventPending = false
+ local function OnBuffAuraEvent()
+     -- Debounce: batch rapid aura events into a single rescan + reparent
+@@ -297,6 +308,9 @@ local function OnBuffAuraEvent()
+     buffEventPending = true
+     C_Timer.After(0.1, function()
+         buffEventPending = false
++        -- Buff child pools can create new frames in combat; ensure hooks are
++        -- installed before scanning so future aura transitions are observed.
++        HookBuffViewerChildren()
+         -- Rescan buff viewer to update spell list (needed for reparent)
+         ScanCooldownViewer("buff")
+         -- Notify containers to reparent children + buffbar to style/position
+@@ -306,14 +320,13 @@ local function OnBuffAuraEvent()
+     end)
+ end
+ 
+-local function HookBuffViewerChildren()
+-    if buffChildrenHooked then return end
+-
++HookBuffViewerChildren = function()
+     local viewer = _G[VIEWER_NAMES["buff"]]
+     if not viewer then return end
+ 
+     local container = viewer.viewerFrame or viewer
+     local numChildren = container:GetNumChildren()
++    local installedAny = false
+ 
+     for i = 1, numChildren do
+         local child = select(i, container:GetChildren())
+@@ -329,25 +342,31 @@ local function HookBuffViewerChildren()
+             if child.OnActiveStateChanged and not hookState.active then
+                 hooksecurefunc(child, "OnActiveStateChanged", OnBuffAuraEvent)
+                 hookState.active = true
++                installedAny = true
+             end
+             if child.OnUnitAuraAddedEvent and not hookState.added then
+                 hooksecurefunc(child, "OnUnitAuraAddedEvent", OnBuffAuraEvent)
+                 hookState.added = true
++                installedAny = true
+             end
+             if child.OnUnitAuraRemovedEvent and not hookState.removed then
+                 hooksecurefunc(child, "OnUnitAuraRemovedEvent", OnBuffAuraEvent)
+                 hookState.removed = true
++                installedAny = true
+             end
+         end
+     end
+ 
+-    buffChildrenHooked = true
++    if installedAny then
++        buffChildrenHooked = true
++    end
+ end
+ 
+ local function ScanViewer(viewerType)
+     ScanCooldownViewer(viewerType)
+-    -- Hook aura event callbacks on buff children for live updates
+-    if viewerType == "buff" and not buffChildrenHooked then
++    -- Hook aura event callbacks on buff children for live updates.
++    -- Run every scan so newly-created pool children get hooked too.
++    if viewerType == "buff" then
+         HookBuffViewerChildren()
+     end
+ end
