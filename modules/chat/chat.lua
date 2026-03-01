@@ -138,23 +138,39 @@ local function StyleFontStrings(chatFrame)
     end
 end
 
+-- Timestamp - Configure Blizzard-native timestamp prefix
 ---------------------------------------------------------------------------
--- Timestamp - Prepend time to messages
----------------------------------------------------------------------------
-local function AddTimestamp(text)
+local function BuildTimestampFormat()
     local settings = GetSettings()
     if not settings or not settings.timestamps or not settings.timestamps.enabled then
-        return text
+        return nil
     end
 
     local fmt = settings.timestamps.format == "12h" and "%I:%M %p" or "%H:%M"
-    local timestamp = date(fmt)
+    local timestampTemplate = string.format("[%s]", fmt)
     local color = settings.timestamps.color
     if color then
         local hex = string.format("%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
-        return string.format("|cff%s[%s]|r %s", hex, timestamp, text)
+        return string.format("|cff%s%s|r ", hex, timestampTemplate)
     end
-    return string.format("[%s] %s", timestamp, text)
+    return string.format("%s ", timestampTemplate)
+end
+
+local function ApplyTimestampSettings()
+    local settings = GetSettings()
+    local timestamps = settings and settings.timestamps
+    local enabled = settings and settings.enabled and timestamps and timestamps.enabled
+
+    -- Native chat timestamps are rendered before channel/prefix labels.
+    -- This fixes placement like: [time] [Guild][Name]: message
+    if SetCVar then
+        SetCVar("showTimestamps", enabled and "1" or "0")
+    end
+
+    local format = BuildTimestampFormat()
+    if format then
+        _G.CHAT_TIMESTAMP_FORMAT = format
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -317,7 +333,8 @@ local function InstallMessageFilters()
     if messageFiltersInstalled then return end
     messageFiltersInstalled = true
 
-    -- Build a filter function that processes channel labels, timestamps, and URLs
+    -- Build a filter function that processes channel labels and URLs.
+    -- Timestamps are handled via Blizzard-native prefix formatting.
     local function MessageFilter(self, event, msg, ...)
         if not msg or type(msg) ~= "string" then return false end
 
@@ -326,12 +343,8 @@ local function InstallMessageFilters()
 
         local modified = msg
 
-        -- Keep channel label normalization before timestamp prepend.
+        -- Normalize channel labels before URL detection.
         modified = FormatChannelLabels(modified)
-
-        if settings.timestamps and settings.timestamps.enabled then
-            modified = AddTimestamp(modified)
-        end
 
         -- Apply URL detection
         if settings.urls and settings.urls.enabled then
@@ -1349,6 +1362,7 @@ end
 ---------------------------------------------------------------------------
 local function RefreshAll()
     local settings = GetSettings()
+    ApplyTimestampSettings()
 
     -- Handle each skinned frame
     for chatFrame in pairs(skinnedFrames) do
@@ -1402,6 +1416,7 @@ eventFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         C_Timer.After(0.5, function()
             local settings = GetSettings()
+            ApplyTimestampSettings()
             if not settings or not settings.enabled then return end
 
             -- Setup URL click handler (once)
