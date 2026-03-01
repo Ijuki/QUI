@@ -1,0 +1,24 @@
+diff --git a/modules/chat/chat.lua b/modules/chat/chat.lua
+index 2434f95..228572e 100755
+--- a/modules/chat/chat.lua
++++ b/modules/chat/chat.lua
+@@ -161,14 +161,16 @@ local function ApplyTimestampSettings()
+     local timestamps = settings and settings.timestamps
+     local enabled = settings and settings.enabled and timestamps and timestamps.enabled
+ 
++    local format = BuildTimestampFormat()
+     -- Native chat timestamps are rendered before channel/prefix labels.
+     -- This fixes placement like: [time] [Guild][Name]: message
++    -- On this client, showTimestamps is a format-string CVar; writing "1"
++    -- makes chat print a literal "1" prefix.
+     if SetCVar then
+-        SetCVar("showTimestamps", enabled and "1" or "0")
++        SetCVar("showTimestamps", (enabled and format) or "none")
+     end
+ 
+-    local format = BuildTimestampFormat()
+-    if format then
++    if enabled and format then
+         _G.CHAT_TIMESTAMP_FORMAT = format
+     end
+ end
