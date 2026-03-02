@@ -181,13 +181,13 @@ local function GetPowerPct(unit, powerType, usePredicted)
             return pct
         end
     end
-    -- Manual calculation fallback
-    local cur = UnitPower(unit, powerType)
-    local max = UnitPowerMax(unit, powerType)
-    if cur and max and max > 0 then
-        return (cur / max) * 100
-    end
-    return nil
+    -- Manual calculation fallback (UnitPower/UnitPowerMax can return secret values in 12.0.x)
+    local ok, result = pcall(function()
+        local cur = UnitPower(unit, powerType)
+        local max = UnitPowerMax(unit, powerType)
+        if cur and max and max > 0 then return (cur / max) * 100 end
+    end)
+    return ok and result or nil
 end
 
 local tickedPowerTypes = {
