@@ -42,7 +42,6 @@ local microMenuShowHooked = false
 local bagsBarShowHooked = false
 local originalMicroMenuParent = nil
 local originalBagsBarParent = nil
-local minimapOriginalOnMouseUp = nil
 
 ---=================================================================================
 --- BLIZZARD LAYOUT NO-OPS
@@ -1675,16 +1674,13 @@ local function SetupMiddleClickMenu()
     if middleClickMenuHooked then return end
     middleClickMenuHooked = true
 
-    minimapOriginalOnMouseUp = Minimap:GetScript("OnMouseUp")
-    Minimap:SetScript("OnMouseUp", function(self, button)
+    -- Use HookScript instead of replacing OnMouseUp.
+    -- Replacing then manually calling Blizzard's handler taints the execution path
+    -- and can trigger forbidden Minimap:PingLocation() in combat.
+    Minimap:HookScript("OnMouseUp", function(self, button)
         local settings = GetSettings()
         if settings and settings.enabled and settings.middleClickMenuEnabled and button == "MiddleButton" then
             ShowMiddleClickMenu()
-            return
-        end
-
-        if minimapOriginalOnMouseUp then
-            minimapOriginalOnMouseUp(self, button)
         end
     end)
 end

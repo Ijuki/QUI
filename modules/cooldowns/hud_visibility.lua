@@ -131,9 +131,9 @@ local CDMVisibility = {
 
 -- Determine if CDM should be visible (SHOW logic)
 local function ShouldCDMBeVisible()
+    if IsInPetBattle() then return false end
     local vis = GetCDMVisibilitySettings()
     if not vis then return true end
-    if IsInPetBattle() then return false end
 
     local ignoreHideRules = vis.dontHideInDungeonsRaids and Helpers.IsPlayerInDungeonOrRaid and Helpers.IsPlayerInDungeonOrRaid()
     if not ignoreHideRules then
@@ -413,9 +413,9 @@ end
 
 -- Determine if Unitframes should be visible (SHOW logic)
 local function ShouldUnitframesBeVisible()
+    if IsInPetBattle() then return false end
     local vis = GetUnitframesVisibilitySettings()
     if not vis then return true end
-    if IsInPetBattle() then return false end
 
     local ignoreHideRules = vis.dontHideInDungeonsRaids and Helpers.IsPlayerInDungeonOrRaid and Helpers.IsPlayerInDungeonOrRaid()
     if not ignoreHideRules then

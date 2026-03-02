@@ -12,6 +12,35 @@ QUICore.Datapanels = Datapanels
 -- Active panels storage
 Datapanels.activePanels = {}
 
+-- Pet battle state helper.
+local function IsInPetBattle()
+    if C_PetBattles and C_PetBattles.IsInBattle then
+        local ok, inBattle = pcall(C_PetBattles.IsInBattle)
+        return ok and inBattle == true
+    end
+    return false
+end
+
+local function HasAssignedDatatext(config)
+    if not config or not config.slots then
+        return false
+    end
+    for i = 1, (config.numSlots or 3) do
+        local slotID = config.slots[i]
+        if slotID and slotID ~= "" then
+            return true
+        end
+    end
+    return false
+end
+
+local function ShouldPanelBeShown(config)
+    if IsInPetBattle() then
+        return false
+    end
+    return config and config.enabled and HasAssignedDatatext(config)
+end
+
 ---=================================================================================
 --- PANEL CREATION
 ---=================================================================================
@@ -97,17 +126,7 @@ function Datapanels:CreatePanel(panelID, config)
     self.activePanels[panelID] = panel
     
     -- Show/hide based on config AND whether any datatexts are assigned
-    local hasDatatext = false
-    if config.slots then
-        for i = 1, (config.numSlots or 3) do
-            if config.slots[i] and config.slots[i] ~= "" then
-                hasDatatext = true
-                break
-            end
-        end
-    end
-    
-    if config.enabled and hasDatatext then
+    if ShouldPanelBeShown(config) then
         panel:Show()
     else
         panel:Hide()
@@ -318,7 +337,7 @@ function Datapanels:UpdatePanel(panelID)
     self:UpdateSlots(panel)
     
     -- Show/hide
-    if panel.config.enabled then
+    if ShouldPanelBeShown(panel.config) then
         panel:Show()
     else
         panel:Hide()
@@ -392,6 +411,23 @@ initFrame:SetScript("OnEvent", function(self, event)
             -- Panels created silently
         end)
         self:UnregisterAllEvents()
+    end
+end)
+
+-- Keep datapanels hidden during pet battles.
+local petBattleFrame = CreateFrame("Frame")
+petBattleFrame:RegisterEvent("PET_BATTLE_OPENING_START")
+petBattleFrame:RegisterEvent("PET_BATTLE_CLOSE")
+petBattleFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+petBattleFrame:SetScript("OnEvent", function()
+    for _, panel in pairs(Datapanels.activePanels) do
+        if panel then
+            if ShouldPanelBeShown(panel.config) then
+                panel:Show()
+            else
+                panel:Hide()
+            end
+        end
     end
 end)
 
