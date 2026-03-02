@@ -652,6 +652,11 @@ local defaults = {
             engine = "owned",  -- CDM engine: "classic" (Blizzard hooks) or "owned" (addon-owned frames)
             essential = {
                 enabled = true,
+                pos = nil,  -- { ox = number, oy = number } saved container position (nil = first-time, seed from Blizzard)
+                desaturateOnCooldown = true,
+                rangeIndicator = true,
+                rangeColor = {0.8, 0.1, 0.1, 1},
+                usabilityIndicator = true,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 8,      -- How many icons in row 1 (0 = disabled)
@@ -720,6 +725,11 @@ local defaults = {
             },
             utility = {
                 enabled = true,
+                pos = nil,  -- { ox = number, oy = number } saved container position (nil = first-time, seed from Blizzard)
+                desaturateOnCooldown = true,
+                rangeIndicator = true,
+                rangeColor = {0.8, 0.1, 0.1, 1},
+                usabilityIndicator = true,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 6,
@@ -790,6 +800,7 @@ local defaults = {
             },
             buff = {
                 enabled = true,
+                pos = nil,  -- { ox = number, oy = number } saved container position (nil = first-time, seed from Blizzard)
                 iconSize = 32,      -- Icon size in pixels
                 borderSize = 1,     -- Border thickness (0 to 8)
                 shape = "square",   -- DEPRECATED: use aspectRatioCrop instead
@@ -864,6 +875,7 @@ local defaults = {
             fadeDuration = 0.2,
             fadeOutAlpha = 0,
             hideWhenMounted = false,
+            hideWhenInVehicle = false,
             hideWhenFlying = false,
             hideWhenSkyriding = false,
             dontHideInDungeonsRaids = false,
@@ -1417,6 +1429,7 @@ local defaults = {
                 fadeOutAlpha = 0.0,         -- Alpha when faded out (0-1)
                 fadeOutDelay = 0.5,         -- Delay before fading out (seconds)
                 alwaysShowInCombat = false, -- Force full opacity during combat
+                showWhenSpellBookOpen = false, -- Force bars visible while Spellbook is open
                 keepLeaveVehicleVisible = false, -- Keep leave-vehicle button visible when mouseover hide is active
                 disableBelowMaxLevel = false, -- Keep bars visible until character reaches max level
                 linkBars1to8 = false,       -- Link all action bars 1-8 for mouseover
