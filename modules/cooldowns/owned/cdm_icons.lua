@@ -244,6 +244,18 @@ local function ReapplySwipeStyle(cd, icon)
     end
 end
 
+-- Keep CooldownFrame ready-flash ("bling") hidden when icon is effectively invisible.
+-- This prevents GCD-ready glow from leaking through when row/container alpha is 0.
+local function SyncCooldownBling(icon)
+    if not icon or not icon.Cooldown or not icon.Cooldown.SetDrawBling then return end
+    local effectiveAlpha = (icon.GetEffectiveAlpha and icon:GetEffectiveAlpha()) or icon:GetAlpha() or 1
+    local shouldDrawBling = (effectiveAlpha > 0.001) and icon:IsShown()
+    if icon._drawBlingEnabled ~= shouldDrawBling then
+        icon._drawBlingEnabled = shouldDrawBling
+        icon.Cooldown:SetDrawBling(shouldDrawBling)
+    end
+end
+
 ---------------------------------------------------------------------------
 -- BLIZZARD COOLDOWN MIRRORING
 -- Instead of reparenting Blizzard's CooldownFrame onto our icon (which
@@ -639,17 +651,23 @@ local function CreateIcon(parent, spellEntry)
     icon.Cooldown:SetHideCountdownNumbers(false)
     icon.Cooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8X8")
     icon.Cooldown:SetSwipeColor(0, 0, 0, 0.8)
+    icon.Cooldown:SetDrawBling(true)
+
+    -- .TextOverlay (sits above the CooldownFrame so text is never behind the swipe)
+    icon.TextOverlay = CreateFrame("Frame", nil, icon)
+    icon.TextOverlay:SetAllPoints(icon)
+    icon.TextOverlay:SetFrameLevel(icon.Cooldown:GetFrameLevel() + 2)
 
     -- .Border texture (BACKGROUND, sublayer -8, pre-created)
     icon.Border = icon:CreateTexture(nil, "BACKGROUND", nil, -8)
     icon.Border:Hide()
 
-    -- .DurationText (OVERLAY, sublayer 7)
-    icon.DurationText = icon.Cooldown:CreateFontString(nil, "OVERLAY", nil, 7)
+    -- .DurationText (OVERLAY, sublayer 7 — parented to TextOverlay, above swipe)
+    icon.DurationText = icon.TextOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
     icon.DurationText:SetPoint("CENTER")
 
-    -- .StackText (OVERLAY, sublayer 7)
-    icon.StackText = icon:CreateFontString(nil, "OVERLAY", nil, 7)
+    -- .StackText (OVERLAY, sublayer 7 — parented to TextOverlay, above swipe)
+    icon.StackText = icon.TextOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
     icon.StackText:SetPoint("BOTTOMRIGHT")
 
     -- Set a default font so SetText() never fires before ConfigureIcon styles them
@@ -861,6 +879,7 @@ local function ConfigureIcon(icon, rowConfig)
     local opacity = rowConfig.opacity or 1.0
     icon:SetAlpha(opacity)
     icon._rowOpacity = opacity
+    SyncCooldownBling(icon)
 end
 
 ---------------------------------------------------------------------------
@@ -1370,6 +1389,7 @@ function CDMIcons:UpdateAllCooldowns()
                     if editMode then
                         icon:SetAlpha(1)
                         icon:Show()
+                        SyncCooldownBling(icon)
                     else
                         local blizzShown = entry._blizzChild:IsShown()
                         if blizzShown then
@@ -1379,8 +1399,10 @@ function CDMIcons:UpdateAllCooldowns()
                                 icon:SetAlpha(blizzAlpha * rowOpacity)
                             end
                             if not icon:IsShown() then icon:Show() end
+                            SyncCooldownBling(icon)
                         else
                             if icon:IsShown() then icon:Hide() end
+                            SyncCooldownBling(icon)
                         end
                     end
                 else
@@ -1392,8 +1414,10 @@ function CDMIcons:UpdateAllCooldowns()
                     elseif not blizzShown and iconShown then
                         icon:Hide()
                     end
+                    SyncCooldownBling(icon)
                 end
             end
+            SyncCooldownBling(icon)
             UpdateIconCooldown(icon)
         end
     end

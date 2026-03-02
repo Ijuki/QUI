@@ -3465,6 +3465,13 @@ function QUICore:OnInitialize()
     C_Timer.After(0.1, function()
         self:CreateMinimapButton()
     end)
+
+    for _, callback in ipairs(self._postInitializeCallbacks or {}) do
+        local ok, err = pcall(callback, self)
+        if not ok and geterrorhandler then
+            geterrorhandler()(err)
+        end
+    end
 end
 
 function QUICore:OnProfileChanged(event, db, profileKey)
@@ -3647,6 +3654,8 @@ function QUICore:OnProfileChanged(event, db, profileKey)
         local RefreshCooldownSwipe = _G.QUI_RefreshCooldownSwipe
         local RefreshReticle = _G.QUI_RefreshReticle
         local RefreshCustomTrackers = _G.QUI_RefreshCustomTrackers
+        local ApplyAllFrameAnchors = _G.QUI_ApplyAllFrameAnchors
+        if ApplyAllFrameAnchors then ApplyAllFrameAnchors() end
         if RefreshUnitFrames then RefreshUnitFrames() end
         if RefreshNCDM then RefreshNCDM() end
         if RefreshCDMVisibility then RefreshCDMVisibility() end
@@ -4055,7 +4064,7 @@ local function IsAnyEditModeActive()
     return blizzardActive or unitFrameEditActive
 end
 
--- Enable/disable keyboard handling based on selection
+-- Enable/disable keyboard handling based on edit mode state
 function QUICore:UpdateEditModeKeyHandler()
     if InCombatLockdown() then
         EditModeKeyHandler:EnableKeyboard(false)
@@ -4068,8 +4077,10 @@ function QUICore:UpdateEditModeKeyHandler()
         return
     end
 
-
-    if self.EditModeSelection and self.EditModeSelection.selectedType then
+    -- Enable keyboard whenever edit mode is active (not just on selection).
+    -- Individual frames no longer call EnableKeyboard — this is the sole handler.
+    -- Arrow keys only nudge when something is selected (OnKeyDown propagates otherwise).
+    if IsAnyEditModeActive() then
         EditModeKeyHandler:EnableKeyboard(true)
     else
         EditModeKeyHandler:EnableKeyboard(false)
@@ -4104,6 +4115,8 @@ end
 
 QUICore._editModeEnterCallbacks = {}
 QUICore._editModeExitCallbacks = {}
+QUICore._postInitializeCallbacks = QUICore._postInitializeCallbacks or {}
+QUICore._postEnableCallbacks = QUICore._postEnableCallbacks or {}
 
 function QUICore:RegisterEditModeEnter(callback)
     table.insert(self._editModeEnterCallbacks, callback)
@@ -4111,6 +4124,18 @@ end
 
 function QUICore:RegisterEditModeExit(callback)
     table.insert(self._editModeExitCallbacks, callback)
+end
+
+function QUICore:RegisterPostInitialize(callback)
+    if type(callback) == "function" then
+        table.insert(self._postInitializeCallbacks, callback)
+    end
+end
+
+function QUICore:RegisterPostEnable(callback)
+    if type(callback) == "function" then
+        table.insert(self._postEnableCallbacks, callback)
+    end
 end
 
 -- ============================================================================
@@ -4556,7 +4581,16 @@ function QUICore:SetupEncounterWarningsSecretValuePatch()
         return true
     end
 
-    if TryPatch() then
+    local patched = TryPatch()
+
+    for _, callback in ipairs(self._postEnableCallbacks or {}) do
+        local ok, err = pcall(callback, self)
+        if not ok and geterrorhandler then
+            geterrorhandler()(err)
+        end
+    end
+
+    if patched then
         return
     end
 

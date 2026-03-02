@@ -1493,6 +1493,7 @@ function CustomTrackers:UpdateBarIcons(bar)
 
         -- Set up secure button for clickable icons (if enabled)
         UpdateIconSecureAttributes(icon, entry, config)
+        ApplyKeybindToTrackerIcon(icon)
 
         table.insert(bar.icons, icon)
     end
@@ -2101,8 +2102,6 @@ function CustomTrackers:StartCooldownPolling(bar)
                     icon.stackText:Hide()
                 end
 
-                -- Apply keybind display
-                ApplyKeybindToTrackerIcon(icon)
             end
         end
 
