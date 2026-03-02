@@ -110,10 +110,14 @@ local function GetHealthPct(unit, usePredicted)
     if UnitHealth and UnitHealthMax then
         local cur = UnitHealth(unit)
         local max = UnitHealthMax(unit)
-        if cur and max and max > 0 then
-            -- Use pcall to handle Midnight secret values from UnitHealth()
-            local ok, pct = pcall(function() return (cur / max) * 100 end)
-            if ok then return pct end
+        local calcOk, result = pcall(function()
+            if cur and max and max > 0 then
+                return (cur / max) * 100
+            end
+            return nil
+        end)
+        if calcOk and result then
+            return result
         end
     end
     return nil
