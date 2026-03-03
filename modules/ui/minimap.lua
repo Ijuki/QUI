@@ -1161,6 +1161,37 @@ if Minimap.ZoomOut and not zoomOutShowHooked then
     end)
 end
 
+-- Hook ExpansionLandingPageMinimapButton: when Blizzard's event system
+-- initializes the button (sets title via UpdateIconForGarrison), reposition
+-- it on the minimap and re-apply QUI's positioning. Also hook SetParent to
+-- prevent other addons from reparenting it away from Minimap.
+local expansionButtonHooked = false
+local expansionButtonReparenting = false  -- guard against SetParent hook recursion
+if ExpansionLandingPageMinimapButton and not expansionButtonHooked then
+    expansionButtonHooked = true
+    hooksecurefunc(ExpansionLandingPageMinimapButton, "SetParent", function()
+        if expansionButtonReparenting then return end
+        C_Timer.After(0, function()
+            local s = GetSettings()
+            if not s or not s.enabled then return end
+            if s.showMissions and ExpansionLandingPageMinimapButton.title then
+                expansionButtonReparenting = true
+                ExpansionLandingPageMinimapButton:SetParent(Minimap)
+                expansionButtonReparenting = false
+            end
+        end)
+    end)
+    hooksecurefunc(ExpansionLandingPageMinimapButton, "UpdateIconForGarrison", function()
+        C_Timer.After(0, function()
+            local s = GetSettings()
+            if not s or not s.enabled or not s.showMissions then return end
+            if InCombatLockdown() then return end
+            ExpansionLandingPageMinimapButton:ClearAllPoints()
+            ExpansionLandingPageMinimapButton:SetPoint("LEFT", Minimap, "LEFT", -5, 0)
+        end)
+    end)
+end
+
 local function UpdateButtonVisibility()
     if InCombatLockdown() then return end
     local settings = GetSettings()
@@ -1254,9 +1285,14 @@ local function UpdateButtonVisibility()
         end
     end
     
-    -- Expansion landing page button (missions) - position at left side
+    -- Expansion landing page button (garrison/missions) - position at left side
+    -- In WoW 12.0+, Blizzard only shows this button for characters with old
+    -- expansion garrison content (WoD-Shadowlands). For Midnight, the landing
+    -- page uses a different system. Respect Blizzard's visibility — only
+    -- reposition the button if Blizzard has initialized it (self.title ~= nil),
+    -- and allow the user setting to hide it.
     if ExpansionLandingPageMinimapButton then
-        if settings.showMissions then
+        if settings.showMissions and ExpansionLandingPageMinimapButton.title then
             ExpansionLandingPageMinimapButton:SetParent(Minimap)
             ExpansionLandingPageMinimapButton:ClearAllPoints()
             ExpansionLandingPageMinimapButton:SetPoint("LEFT", Minimap, "LEFT", -5, 0)
