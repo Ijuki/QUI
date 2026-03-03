@@ -82,8 +82,16 @@ function GUI:InitializeOptions()
     sepLine:SetPoint("BOTTOMLEFT", frame.sidebar, "BOTTOMLEFT", 8, 4 * 28 + 8)
     sepLine:SetPoint("BOTTOMRIGHT", frame.sidebar, "BOTTOMRIGHT", -8, 4 * 28 + 8)
 
-    GUI:AddTab(frame, "Search", CreateSearchPage, true)  -- isBottomItem = true
+    local searchTab = GUI:AddTab(frame, "Search", CreateSearchPage, true)  -- isBottomItem = true
     GUI._searchTabIndex = #frame.tabs
+
+    -- Make Search more discoverable: magnifying glass icon + subtle accent background
+    local searchIcon = "|TInterface\\Common\\UI-Searchbox-Icon:12:12:0:0|t "
+    searchTab.text:SetText(searchIcon .. "Search")
+    local accentBg = searchTab:CreateTexture(nil, "BACKGROUND", nil, -1)
+    accentBg:SetAllPoints()
+    accentBg:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.08)
+    searchTab._accentBg = accentBg
 
     GUI:AddTab(frame, "Help", ns.QUI_HelpOptions.CreateHelpPage, true)  -- isBottomItem = true
 
