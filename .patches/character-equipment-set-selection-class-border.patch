@@ -1,8 +1,8 @@
 diff --git a/skinning/frames/character.lua b/skinning/frames/character.lua
-index c1a0942..c15be25 100755
+index a709199..7c26952 100644
 --- a/skinning/frames/character.lua
 +++ b/skinning/frames/character.lua
-@@ -440,6 +440,40 @@ end
+@@ -465,6 +465,40 @@ end
  ---------------------------------------------------------------------------
  
  -- Skin individual equipment set entry
@@ -41,12 +41,13 @@ index c1a0942..c15be25 100755
 +end
 +
  local function SkinEquipmentSetEntry(entry)
-     if entry.quiCharSkinned then return end
+     if skinnedEntries[entry] then return end
  
-@@ -475,6 +509,31 @@ local function SkinEquipmentSetEntry(entry)
+@@ -499,11 +533,32 @@ local function SkinEquipmentSetEntry(entry)
+     if entry.HighlightBar then
          entry.HighlightBar:SetColorTexture(sr, sg, sb, 0.15)
      end
- 
++
 +    if not entry.quiSelectedBorder then
 +        local border = CreateFrame("Frame", nil, entry, "BackdropTemplate")
 +        border:SetPoint("TOPLEFT", entry, "TOPLEFT", -1, 1)
@@ -64,18 +65,18 @@ index c1a0942..c15be25 100755
 +    if entry.SelectedBar and not entry.SelectedBar._quiSelectionHooked then
 +        entry.SelectedBar:HookScript("OnShow", function()
 +            UpdateEquipmentSetEntrySelection(entry)
-+        end)
-+        entry.SelectedBar:HookScript("OnHide", function()
+         end)
+         entry.SelectedBar:HookScript("OnHide", function()
 +            UpdateEquipmentSetEntrySelection(entry)
-+        end)
-+        entry.SelectedBar._quiSelectionHooked = true
-+    end
+         end)
+         entry.SelectedBar._quiSelectionHooked = true
+     end
 +
 +    UpdateEquipmentSetEntrySelection(entry)
-     entry.quiCharSkinned = true
+     skinnedEntries[entry] = true
  end
  
-@@ -612,6 +671,7 @@ RefreshEquipmentManagerColors = function()
+@@ -645,6 +700,7 @@ RefreshEquipmentManagerColors = function()
              if entry.HighlightBar then
                  entry.HighlightBar:SetColorTexture(sr, sg, sb, 0.15)
              end

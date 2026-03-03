@@ -60,6 +60,7 @@
         "STAT_CRITICAL_STRIKE",
         "STAT_VERSATILITY",
         "STAT_MASTERY",
-        "UNKNOWN"
+        "UNKNOWN",
+        "Item"
     ]
 }
