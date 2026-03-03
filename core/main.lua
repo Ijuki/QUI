@@ -29,7 +29,7 @@ QUICore.__reloadEventFrame = nil
 
 -- Safe reload function - queues if in combat, reloads immediately if not
 function QUICore:SafeReload()
-    if InCombatLockdown() then
+    if InCombatLockdown() and not (QUI.db and QUI.db.profile and QUI.db.profile.general and QUI.db.profile.general.allowReloadInCombat) then
         if not self.__pendingReload then
             self.__pendingReload = true
             print("|cFF30D1FFQUI:|r Reload queued - will execute when combat ends.")
@@ -75,7 +75,7 @@ function QUI:SafeReload()
         self.QUICore:SafeReload()
     else
         -- Fallback if QUICore not loaded
-        if InCombatLockdown() then
+        if InCombatLockdown() and not (self.db and self.db.profile and self.db.profile.general and self.db.profile.general.allowReloadInCombat) then
             print("|cFF30D1FFQUI:|r Cannot reload during combat.")
         else
             ReloadUI()
@@ -389,6 +389,7 @@ local defaults = {
             autoInsertKey = true,  -- Auto-insert keystone in M+ UI
             skinKeystoneFrame = true,  -- Skin keystone insertion window
             skinGameMenu = false,  -- Skin ESC menu (opt-in)
+            allowReloadInCombat = false,  -- Allow /reload during combat (bypass SafeReload)
             addQUIButton = false,  -- Add QUI button to ESC menu (opt-in)
             gameMenuFontSize = 12,  -- Game menu button font size
             gameMenuDim = true,  -- Dim background when game menu is open
@@ -2988,6 +2989,20 @@ local defaults = {
             -- Features
             autoZoom = false,  -- Auto zoom out after 10 seconds
             hideAddonButtons = true,  -- Show addon buttons on hover only
+            buttonDrawer = {
+                enabled = false,        -- Off by default (opt-in feature)
+                anchor = "RIGHT",       -- Which side of minimap: LEFT, RIGHT, TOPLEFT, TOPRIGHT, BOTTOMLEFT, BOTTOMRIGHT, TOP, BOTTOM
+                offsetX = 0,            -- Horizontal offset from anchor position
+                offsetY = 0,            -- Vertical offset from anchor position
+                toggleOffsetX = 0,      -- Horizontal offset for the toggle button
+                toggleOffsetY = 0,      -- Vertical offset for the toggle button
+                autoHideToggle = false, -- Auto-hide the toggle button (show on minimap hover)
+                hiddenButtons = {},     -- Table of button names hidden from the drawer (e.g., { ["LibDBIcon10_Details"] = true })
+                autoHideDelay = 1.5,    -- Seconds after mouse leave before hiding (0 = no auto-hide)
+                buttonSize = 28,        -- Size of collected buttons in pixels
+                buttonSpacing = 2,      -- Gap between buttons in pixels
+                columns = 1,            -- Number of columns in grid layout (1 = vertical strip)
+            },
             middleClickMenuEnabled = true,  -- Middle click minimap opens quick menu
             hideMicroMenu = false,  -- Hide Blizzard micro menu (Character/Spellbook/etc.)
             hideBagBar = false,  -- Hide Blizzard bag bar
