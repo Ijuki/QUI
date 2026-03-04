@@ -36,6 +36,31 @@ local function CreateSearchPage(tabContent)
     if scrollBar then
         scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 4, -16)
         scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 4, 16)
+
+        -- Match shared QUI scrollbar styling used across other options pages
+        local thumb = scrollBar:GetThumbTexture()
+        if thumb then
+            thumb:SetColorTexture(0.35, 0.45, 0.5, 0.8) -- Subtle grey-blue
+        end
+
+        local scrollUp = scrollBar.ScrollUpButton or scrollBar.Back
+        local scrollDown = scrollBar.ScrollDownButton or scrollBar.Forward
+        if scrollUp then scrollUp:Hide(); scrollUp:SetAlpha(0) end
+        if scrollDown then scrollDown:Hide(); scrollDown:SetAlpha(0) end
+
+        -- Auto-hide when there is nothing to scroll
+        scrollBar:HookScript("OnShow", function(self)
+            C_Timer.After(0.066, function()
+                local maxScroll = (ns.GetSafeVerticalScrollRange and ns.GetSafeVerticalScrollRange(scrollFrame)) or 0
+                if maxScroll <= 1 then
+                    self:Hide()
+                end
+            end)
+        end)
+    end
+
+    if ns.ApplyScrollWheel then
+        ns.ApplyScrollWheel(scrollFrame)
     end
 
     -- Initial empty state
