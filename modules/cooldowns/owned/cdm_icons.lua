@@ -144,7 +144,17 @@ local function GetEntryTexture(entry)
         end
         return fallbackTex
     end
-    if entry.type == "item" or entry.type == "trinket" then
+    if entry.type == "trinket" then
+        -- Trinket entries store the equipment slot number (13/14), not the item ID.
+        -- Resolve to the actual equipped item ID before looking up the icon.
+        local itemID = GetInventoryItemID("player", entry.id)
+        if itemID then
+            local _, _, _, _, icon = C_Item.GetItemInfoInstant(itemID)
+            return icon
+        end
+        return nil
+    end
+    if entry.type == "item" then
         local _, _, _, _, icon = C_Item.GetItemInfoInstant(entry.id)
         return icon
     end
@@ -310,39 +320,6 @@ local function MirrorBlizzCooldown(icon, blizzChild)
                     pcall(cd.SetCooldownFromDurationObject, cd, durationObj, isAura)
                 end
 
-                -- Extract duration for desaturation and fallback classification.
-                -- DurationObject is C-side — access via methods, not fields.
-                if durationObj then
-                    local durGetter = durationObj.GetTotalDuration
-                    if durGetter then
-                        local dOK, rawDur = pcall(durGetter, durationObj)
-                        if dOK and rawDur ~= nil then
-                            local safeDur = SafeToNumber(rawDur, nil)
-                            if safeDur then
-                                targetIcon._lastDuration = safeDur
-                                if safeDur == 0 then
-                                    targetIcon._lastStart = 0
-                                    targetIcon._lastDuration = 0
-                                end
-                            end
-                        end
-                    end
-                end
-
-                -- Track GCD state for swipe classification (matches CMC pattern).
-                -- isOnGCD is a Blizzard boolean — CMC accesses it directly without
-                -- secret guards, but we use pcall for safety.
-                local sid = targetIcon._spellEntry and
-                    (targetIcon._spellEntry.overrideSpellID or targetIcon._spellEntry.spellID or targetIcon._spellEntry.id)
-                if sid and C_Spell.GetSpellCooldown then
-                    local ok, cdInfo = pcall(C_Spell.GetSpellCooldown, sid)
-                    if ok and cdInfo then
-                        if not IsSecretValue(cdInfo.isOnGCD) then
-                            targetIcon._isOnGCD = cdInfo.isOnGCD or false
-                        end
-                    end
-                end
-
                 -- Track aura state for swipe color classification
                 -- (swipe.lua uses _auraActive to pick overlay vs swipe color).
                 -- isAura may be secret in combat; only update when safe
@@ -365,17 +342,10 @@ local function MirrorBlizzCooldown(icon, blizzChild)
                 pcall(cd.SetCooldown, cd, start, duration)
             end
 
-            -- Capture cooldown values from Blizzard's native update so
-            -- the desaturation ticker uses hook-driven data instead of
-            -- API calls that return secret values during combat.
-            local safeStart = SafeToNumber(start, nil)
-            local safeDur = SafeToNumber(duration, nil)
-            if safeStart then targetIcon._lastStart = safeStart end
-            if safeDur then targetIcon._lastDuration = safeDur end
-            if safeDur == 0 then
-                targetIcon._lastStart = 0
-                targetIcon._lastDuration = 0
-            end
+            -- SetCooldown fires when Blizzard transitions from aura to
+            -- cooldown on the same icon — clear the aura flag so the
+            -- swipe classifier picks up the change immediately.
+            targetIcon._auraActive = false
 
             -- Track GCD state for swipe classification (matches CMC pattern).
             -- isOnGCD is a Blizzard boolean — CMC accesses it directly without
@@ -778,7 +748,13 @@ local function CreateIcon(parent, spellEntry)
         end
         local sid = entry.overrideSpellID or entry.spellID or (entry.type and entry.id)
         if sid then
-            if entry.type == "item" or entry.type == "trinket" then
+            if entry.type == "trinket" then
+                -- Trinket entries store slot number; resolve to item ID for tooltip
+                local itemID = GetInventoryItemID("player", sid)
+                if itemID then
+                    pcall(GameTooltip.SetItemByID, GameTooltip, itemID)
+                end
+            elseif entry.type == "item" then
                 pcall(GameTooltip.SetItemByID, GameTooltip, sid)
             else
                 pcall(GameTooltip.SetSpellByID, GameTooltip, sid)
@@ -946,24 +922,8 @@ local function UpdateIconCooldown(icon)
     if entry._blizzChild then
         -- Mirrored Blizzard CooldownFrame: Blizzard drives the hidden
         -- viewer; our hooks forward updates to the addon-owned CD.
-        -- We only track state for swipe color classification.
-
-        -- Track duration + start for swipe classification and desaturation.
-        -- Primary source during combat is the SetCooldown hook in
-        -- MirrorBlizzCooldown; this API query is a fallback that works
-        -- outside combat (secrets → no update).
-        local sid = entry.overrideSpellID or entry.spellID or entry.id
-        if sid and not (entry.type == "item" or entry.type == "trinket") then
-            local cdStart, dur = GetBestSpellCooldown(sid)
-            local safeDurVal = SafeToNumber(dur, nil)
-            local safeStartVal = SafeToNumber(cdStart, nil)
-            if safeDurVal then icon._lastDuration = safeDurVal end
-            if safeStartVal then icon._lastStart = safeStartVal end
-            if safeDurVal == 0 then
-                icon._lastStart = 0
-                icon._lastDuration = 0
-            end
-        end
+        -- Hooks (SetCooldown / SetCooldownFromDurationObject) drive all
+        -- mirrored cooldown updates; no API polling needed here.
 
         -- Re-apply swipe styling (colors) in case state changed
         if icon.Cooldown then
@@ -990,7 +950,13 @@ local function UpdateIconCooldown(icon)
             if newTex and icon.Icon then
                 icon.Icon:SetTexture(newTex)
             end
-        elseif entry.type == "item" or entry.type == "trinket" then
+        elseif entry.type == "trinket" then
+            -- Trinket entries store equipment slot (13/14), resolve to item ID
+            local itemID = GetInventoryItemID("player", entry.id)
+            if itemID then
+                startTime, duration = GetItemCooldown(itemID)
+            end
+        elseif entry.type == "item" then
             startTime, duration = GetItemCooldown(entry.id)
         else
             startTime, duration = GetBestSpellCooldown(entry.overrideSpellID or entry.spellID or entry.id)
@@ -1002,7 +968,10 @@ local function UpdateIconCooldown(icon)
                 local baseID = entry.spellID or entry.id
                 if baseID then
                     local overrideID = C_Spell.GetOverrideSpell(baseID)
-                    icon.Icon:SetTexture(GetSpellTexture(overrideID or baseID))
+                    local newTex = GetSpellTexture(overrideID or baseID)
+                    if newTex then
+                        icon.Icon:SetTexture(newTex)
+                    end
                 end
             end
         end
@@ -1021,12 +990,7 @@ local function UpdateIconCooldown(icon)
 
         if icon.Cooldown then
             if startTime and duration then
-                local safeStart = SafeToNumber(startTime, nil)
-                if safeStart and safeDur and safeDur > 0 then
-                    icon.Cooldown:SetCooldown(safeStart, safeDur)
-                else
-                    pcall(icon.Cooldown.SetCooldown, icon.Cooldown, startTime, duration)
-                end
+                pcall(icon.Cooldown.SetCooldown, icon.Cooldown, startTime, duration)
             else
                 icon.Cooldown:Clear()
             end
@@ -1229,11 +1193,14 @@ function CDMIcons:AcquireIcon(parent, spellEntry)
                 texID = GetSpellTexture(spellEntry.overrideSpellID or spellEntry.spellID)
             end
         end
-        if texID and icon.Icon then
-            icon.Icon:SetTexture(texID)
-        end
-        -- Ensure clean visual state for recycled icon
         if icon.Icon then
+            if texID then
+                icon.Icon:SetTexture(texID)
+            else
+                -- Clear stale texture from previous owner to prevent
+                -- recycled icons showing the wrong spell/item icon.
+                icon.Icon:SetTexture(nil)
+            end
             icon.Icon:SetDesaturated(false)
         end
 
@@ -1347,7 +1314,14 @@ function CDMIcons:BuildIcons(viewerType, container)
                             spellEntry.spellID = resolvedID
                             spellEntry.overrideSpellID = resolvedID
                         end
-                    elseif entry.type == "item" or entry.type == "trinket" then
+                    elseif entry.type == "trinket" then
+                        -- Trinket entries store equipment slot (13/14), resolve to item ID
+                        local itemID = GetInventoryItemID("player", entry.id)
+                        if itemID then
+                            local itemName = C_Item.GetItemNameByID(itemID)
+                            spellEntry.name = itemName or ""
+                        end
+                    elseif entry.type == "item" then
                         local itemName = C_Item.GetItemNameByID(entry.id)
                         spellEntry.name = itemName or ""
                     else
@@ -1515,7 +1489,14 @@ function CustomCDM:GetEntryName(entry)
     if entry.type == "macro" then
         return entry.macroName or "Macro"
     end
-    if entry.type == "item" or entry.type == "trinket" then
+    if entry.type == "trinket" then
+        local itemID = GetInventoryItemID("player", entry.id)
+        if itemID then
+            return C_Item.GetItemNameByID(itemID) or "Trinket (Slot " .. tostring(entry.id) .. ")"
+        end
+        return "Trinket (Slot " .. tostring(entry.id) .. ")"
+    end
+    if entry.type == "item" then
         return C_Item.GetItemNameByID(entry.id) or "Item #" .. tostring(entry.id)
     end
     local info = C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(entry.id)

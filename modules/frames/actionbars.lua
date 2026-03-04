@@ -1257,8 +1257,9 @@ local function UpdateKeybindText(button, settings)
 
     -- Only hide keybinds on empty action slots when hideEmptyKeybinds is enabled
     if shouldShow and settings.hideEmptyKeybinds then
-        if button.action then
-            local hasAction = SafeHasAction(button.action)
+        local action = Helpers.SafeToNumber(button.action)
+        if action then
+            local hasAction = SafeHasAction(action)
             if not hasAction then
                 shouldShow = false
             end
@@ -1400,8 +1401,9 @@ local function UpdateEmptySlotVisibility(button, settings)
     end
 
     -- Only applies to action buttons with action property
-    if button.action then
-        local hasAction = SafeHasAction(button.action)
+    local action = Helpers.SafeToNumber(button.action)
+    if action then
+        local hasAction = SafeHasAction(action)
         if hasAction then
             button:SetAlpha(targetAlpha)
             state.hiddenEmpty = nil
@@ -1488,20 +1490,39 @@ local function SafeIsUsableAction(action)
     end
 end
 
--- Update range and usability indicators for a single button
+-- Get or create a QUI-owned tint overlay for range/usability coloring.
+-- Uses MOD (multiplicative) blend on ARTWORK sublevel 1, so it renders
+-- above the icon (sublevel 0) but below OVERLAY borders/gloss.
+-- Hidden by default — no overlay = no tint.
+local function GetTintOverlay(button)
+    local state = GetFrameState(button)
+    if not state.tintOverlay then
+        local icon = button.icon or button.Icon
+        if not icon then return nil end
+        local overlay = button:CreateTexture(nil, "ARTWORK", nil, 1)
+        overlay:SetAllPoints(icon)
+        overlay:SetBlendMode("MOD")
+        overlay:SetColorTexture(1, 1, 1, 1)  -- White = no tint
+        overlay:Hide()
+        state.tintOverlay = overlay
+    end
+    return state.tintOverlay
+end
+
+-- Update range and usability indicators for a single button.
+-- Uses a QUI-owned overlay texture instead of modifying Blizzard's icon
+-- directly, which avoids tainting secret values during combat.
 local function UpdateButtonUsability(button, settings)
     if not settings then return end
-    if not button.action then return end
+    local action = Helpers.SafeToNumber(button.action)
+    if not action then return end
 
     local state = GetFrameState(button)
-    local icon = button.icon or button.Icon
-    if not icon then return end
 
     -- Reset state if both features disabled
     if not settings.rangeIndicator and not settings.usabilityIndicator then
         if state.tinted then
-            icon:SetVertexColor(1, 1, 1, 1)
-            icon:SetDesaturated(false)
+            if state.tintOverlay then state.tintOverlay:Hide() end
             state.tinted = nil
         end
         return
@@ -1509,15 +1530,14 @@ local function UpdateButtonUsability(button, settings)
 
     -- Priority 1: Out of Range check (if enabled)
     if settings.rangeIndicator then
-        local inRange = SafeIsActionInRange(button.action)
+        local inRange = SafeIsActionInRange(action)
         if inRange == false then  -- false = out of range, nil = no range check needed
-            local c = settings.rangeColor
-            local r = c and c[1] or 0.8
-            local g = c and c[2] or 0.1
-            local b = c and c[3] or 0.1
-            local a = c and c[4] or 1
-            icon:SetVertexColor(r, g, b, a)
-            icon:SetDesaturated(false)
+            local overlay = GetTintOverlay(button)
+            if overlay then
+                local c = settings.rangeColor
+                overlay:SetColorTexture(c and c[1] or 0.8, c and c[2] or 0.1, c and c[3] or 0.1, c and c[4] or 1)
+                overlay:Show()
+            end
             state.tinted = "range"
             return
         end
@@ -1525,42 +1545,39 @@ local function UpdateButtonUsability(button, settings)
 
     -- Priority 2: Usability check (if enabled)
     if settings.usabilityIndicator then
-        local isUsable, notEnoughMana = SafeIsUsableAction(button.action)
+        local isUsable, notEnoughMana = SafeIsUsableAction(action)
 
         if notEnoughMana then
             -- Out of mana/resources - blue tint
-            local c = settings.manaColor
-            local r = c and c[1] or 0.5
-            local g = c and c[2] or 0.5
-            local b = c and c[3] or 1.0
-            local a = c and c[4] or 1
-            icon:SetVertexColor(r, g, b, a)
-            icon:SetDesaturated(false)
+            local overlay = GetTintOverlay(button)
+            if overlay then
+                local c = settings.manaColor
+                overlay:SetColorTexture(c and c[1] or 0.5, c and c[2] or 0.5, c and c[3] or 1.0, c and c[4] or 1)
+                overlay:Show()
+            end
             state.tinted = "mana"
             return
         elseif not isUsable then
-            -- Not usable - desaturate or apply grey tint
-            if settings.usabilityDesaturate then
-                icon:SetDesaturated(true)
-                icon:SetVertexColor(0.6, 0.6, 0.6, 1)  -- Slight brightness reduction with desaturation
-            else
-                local c = settings.usabilityColor
-                local r = c and c[1] or 0.4
-                local g = c and c[2] or 0.4
-                local b = c and c[3] or 0.4
-                local a = c and c[4] or 1
-                icon:SetVertexColor(r, g, b, a)
-                icon:SetDesaturated(false)
+            -- Not usable - dark tint (MOD blend can't desaturate, so we
+            -- approximate the desaturate look with a dim grey overlay)
+            local overlay = GetTintOverlay(button)
+            if overlay then
+                if settings.usabilityDesaturate then
+                    overlay:SetColorTexture(0.4, 0.4, 0.4, 1)
+                else
+                    local c = settings.usabilityColor
+                    overlay:SetColorTexture(c and c[1] or 0.4, c and c[2] or 0.4, c and c[3] or 0.4, c and c[4] or 1)
+                end
+                overlay:Show()
             end
             state.tinted = "unusable"
             return
         end
     end
 
-    -- Normal state - reset to full brightness
+    -- Normal state - hide overlay
     if state.tinted then
-        icon:SetVertexColor(1, 1, 1, 1)
-        icon:SetDesaturated(false)
+        if state.tintOverlay then state.tintOverlay:Hide() end
         state.tinted = nil
     end
 end
@@ -1601,48 +1618,9 @@ local function ResetAllButtonTints()
         local buttons = GetBarButtons(barKey)
         for _, button in ipairs(buttons) do
             local state = GetFrameState(button)
-            local icon = button.icon or button.Icon
-            if icon and state.tinted then
-                icon:SetVertexColor(1, 1, 1, 1)
-                icon:SetDesaturated(false)
+            if state.tinted then
+                if state.tintOverlay then state.tintOverlay:Hide() end
                 state.tinted = nil
-            end
-        end
-    end
-end
-
--- Hook SetVertexColor on each action button icon so that when Blizzard's
--- update cycle resets the vertex color (e.g. on hover / ActionBarActionEventsFrame),
--- we defer our range/usability tint reapplication via C_Timer.After(0) so the
--- callback runs in addon context next frame, not within the secure chain.
--- This prevents taint propagation from writing back to the icon during combat.
-local function HookButtonIconsForUsability()
-    for i = 1, 8 do
-        local barKey = "bar" .. i
-        local buttons = GetBarButtons(barKey)
-        for _, button in ipairs(buttons) do
-            local icon = button.icon or button.Icon
-            if icon then
-                local state = GetFrameState(button)
-                if not state.usabilityIconHooked then
-                    state.usabilityIconHooked = true
-                    hooksecurefunc(icon, "SetVertexColor", function()
-                        if state.suppressReapply then return end
-                        if not state.tinted then return end
-                        if state.deferPending then return end
-                        state.deferPending = true
-                        C_Timer.After(0, function()
-                            state.deferPending = nil
-                            if not state.tinted then return end
-                            state.suppressReapply = true
-                            local gs = GetGlobalSettings()
-                            if gs then
-                                UpdateButtonUsability(button, gs)
-                            end
-                            state.suppressReapply = nil
-                        end)
-                    end)
-                end
             end
         end
     end
@@ -1672,10 +1650,6 @@ local function UpdateUsabilityPolling()
         usabilityCheckFrame:SetScript("OnEvent", function(self, event, ...)
             ScheduleUsabilityUpdate()
         end)
-
-        -- Hook icon SetVertexColor so Blizzard's per-frame updates
-        -- (e.g. on hover) can't reset our range/usability tint.
-        HookButtonIconsForUsability()
 
         -- Initial update
         ScheduleUsabilityUpdate()
@@ -1711,6 +1685,8 @@ end
 
 -- Detect how many columns a bar has by comparing button Y positions.
 -- Buttons in the same row share a similar top edge; a new row drops down.
+-- Detect how many columns a bar has by comparing button Y positions.
+-- Fallback for bars without Edit Mode API (pet, stance).
 local function DetectBarColumns(buttons)
     if #buttons < 2 then return #buttons end
 
@@ -1732,11 +1708,46 @@ local function DetectBarColumns(buttons)
     return numCols
 end
 
+-- Read the bar's grid layout from the Edit Mode API.
+-- Returns numCols, numRows, isVertical.
+-- Falls back to position-based detection for bars without the API (pet, stance).
+local function GetBarGridLayout(barFrame, buttons)
+    local isVertical = false
+    local numCols, numRows
+
+    local EditModeSettings = Enum.EditModeActionBarSetting
+    if barFrame.GetSettingValue and EditModeSettings then
+        local okO, orientation = pcall(barFrame.GetSettingValue, barFrame, EditModeSettings.Orientation)
+        local okR, editNumRows = pcall(barFrame.GetSettingValue, barFrame, EditModeSettings.NumRows)
+
+        if okO and okR and editNumRows and editNumRows > 0 then
+            isVertical = (orientation == 1)
+            if isVertical then
+                -- Vertical: Blizzard's "NumRows" is the number of visual columns
+                numCols = editNumRows
+                numRows = math.ceil(#buttons / numCols)
+            else
+                -- Horizontal: NumRows is actual rows
+                numRows = editNumRows
+                numCols = math.ceil(#buttons / numRows)
+            end
+        end
+    end
+
+    -- Fallback for bars without Edit Mode API
+    if not numCols then
+        numCols = DetectBarColumns(buttons)
+        numRows = math.ceil(#buttons / numCols)
+    end
+
+    return numCols, numRows, isVertical
+end
+
 -- Reposition action bar buttons with custom spacing override.
 -- WoW 12.0 wraps each button in a per-button container managed by an internal
--- LayoutFrame. We anchor button 1 directly to the bar frame (cross-hierarchy
--- SetPoint bypasses the LayoutFrame), chain buttons 2..N off it, then resize
--- the bar frame to exactly fit the button group (eliminates Blizzard's edge padding).
+-- LayoutFrame. We reposition the containers (not the buttons) to override
+-- Blizzard's layout, then resize the bar frame to exactly fit the group.
+-- Supports both horizontal and vertical bar orientations via Edit Mode API.
 local function ApplyButtonSpacing(barKey)
     if InCombatLockdown() then
         ActionBars.pendingSpacing = true
@@ -1747,14 +1758,53 @@ local function ApplyButtonSpacing(barKey)
     if not settings or settings.buttonSpacing == nil then return end
 
     local spacing = settings.buttonSpacing
-    local buttons = GetBarButtons(barKey)
-    if #buttons < 2 then return end
+    -- Only apply spacing to standard action bars (1-8).
+    -- Pet/stance bars have variable visible button counts per class
+    -- and resizing their bar frames breaks the frame anchoring chain
+    -- (size-stable CENTER anchoring shifts visual content on resize).
+    if barKey == "pet" or barKey == "stance" then return end
+
+    local allButtons = GetBarButtons(barKey)
+    if #allButtons < 2 then return end
 
     local barFrame = GetBarFrame(barKey)
     if not barFrame then return end
 
-    -- Detect grid columns BEFORE moving anything (reads Blizzard's original Y positions)
-    local numCols = DetectBarColumns(buttons)
+    -- Read the visible icon count from Edit Mode API.
+    -- Users can configure bars to show fewer than 12 buttons (e.g. 9 of 12).
+    -- We must only layout the visible subset, otherwise the bar frame is sized
+    -- for invisible buttons and the layout breaks.
+    local buttons = allButtons
+    local EditModeSettings = Enum.EditModeActionBarSetting
+    if barFrame.GetSettingValue and EditModeSettings then
+        local okN, numIcons = pcall(barFrame.GetSettingValue, barFrame, EditModeSettings.NumIcons)
+        if okN and numIcons and numIcons > 0 and numIcons < #allButtons then
+            local visible = {}
+            for i = 1, numIcons do
+                visible[i] = allButtons[i]
+            end
+            buttons = visible
+        end
+    end
+
+    -- Fallback: filter to only shown buttons if Edit Mode API didn't reduce the count.
+    -- Stance/pet bars may have 10 slots but only a few actually shown (class-dependent).
+    -- When ALL buttons are hidden (e.g. no pet summoned), skip the bar entirely.
+    if #buttons == #allButtons then
+        local shown = {}
+        for _, btn in ipairs(allButtons) do
+            if btn:IsShown() then
+                shown[#shown + 1] = btn
+            end
+        end
+        if #shown < #buttons then
+            buttons = shown
+        end
+    end
+
+    if #buttons < 2 then return end
+
+    local numCols, numRows, isVertical = GetBarGridLayout(barFrame, buttons)
 
     -- Effective scales for coordinate space conversion
     local containerEffScale = buttons[1]:GetParent():GetEffectiveScale()
@@ -1764,7 +1814,6 @@ local function ApplyButtonSpacing(barKey)
     -- Group dimensions in container coordinate space (buttons are scale 1.0 inside containers)
     local btnWidth = buttons[1]:GetWidth()
     local btnHeight = buttons[1]:GetHeight()
-    local numRows = math.ceil(#buttons / numCols)
     local groupWidth = numCols * btnWidth + math.max(0, numCols - 1) * spacing
     local groupHeight = numRows * btnHeight + math.max(0, numRows - 1) * spacing
 
@@ -1775,25 +1824,86 @@ local function ApplyButtonSpacing(barKey)
         groupHeight * containerEffScale / barEffScale
     )
 
-    -- Anchor button 1 to bar frame BOTTOMLEFT (bar now fits exactly, no offset needed)
-    buttons[1]:ClearAllPoints()
-    buttons[1]:SetPoint("BOTTOMLEFT", barFrame, "BOTTOMLEFT", 0, 0)
+    -- Reposition the CONTAINERS (button parents) instead of the buttons themselves.
+    -- Blizzard's LayoutFrame positions containers; button-level anchors don't
+    -- override the visual layout because the container is what renders.
+    local container1 = buttons[1]:GetParent()
+    container1:ClearAllPoints()
+    container1:SetPoint("TOPLEFT", barFrame, "TOPLEFT", 0, 0)
+    container1:SetSize(btnWidth, btnHeight)
 
-    -- Chain buttons 2..N off button 1
-    for i = 2, #buttons do
-        local colIndex = ((i - 1) % numCols) + 1
+    if isVertical then
+        -- Vertical: buttons flow top-to-bottom, then wrap to the next column
+        local buttonsPerCol = numRows
+        for i = 2, #buttons do
+            local container = buttons[i]:GetParent()
+            local rowInCol = (i - 1) % buttonsPerCol  -- 0 = first in new column
 
-        if colIndex == 1 then
-            -- First button in a new row: anchor below the button directly above
-            local aboveIndex = i - numCols
-            if aboveIndex >= 1 then
-                buttons[i]:ClearAllPoints()
-                buttons[i]:SetPoint("TOPLEFT", buttons[aboveIndex], "BOTTOMLEFT", 0, -spacing)
+            container:ClearAllPoints()
+            if rowInCol == 0 then
+                -- First button in a new column: anchor to the right of the column start
+                local prevColStart = i - buttonsPerCol
+                container:SetPoint("TOPLEFT", buttons[prevColStart]:GetParent(), "TOPRIGHT", spacing, 0)
+            else
+                -- Same column: anchor below previous button
+                container:SetPoint("TOPLEFT", buttons[i - 1]:GetParent(), "BOTTOMLEFT", 0, -spacing)
             end
-        else
-            -- Same row: anchor to the right of the previous button
-            buttons[i]:ClearAllPoints()
-            buttons[i]:SetPoint("LEFT", buttons[i - 1], "RIGHT", spacing, 0)
+            container:SetSize(btnWidth, btnHeight)
+        end
+    else
+        -- Horizontal: buttons flow left-to-right, then wrap to the next row
+        for i = 2, #buttons do
+            local container = buttons[i]:GetParent()
+            local colIndex = ((i - 1) % numCols) + 1
+
+            container:ClearAllPoints()
+            if colIndex == 1 then
+                -- First container in a new row: anchor below the container above
+                local aboveContainer = buttons[i - numCols]:GetParent()
+                container:SetPoint("TOPLEFT", aboveContainer, "BOTTOMLEFT", 0, -spacing)
+            else
+                -- Same row: anchor to the right of the previous container
+                local prevContainer = buttons[i - 1]:GetParent()
+                container:SetPoint("LEFT", prevContainer, "RIGHT", spacing, 0)
+            end
+            container:SetSize(btnWidth, btnHeight)
+        end
+    end
+
+    -- Re-anchor each button to fill its container (undo any previous cross-hierarchy anchors)
+    for i = 1, #buttons do
+        buttons[i]:ClearAllPoints()
+        buttons[i]:SetAllPoints(buttons[i]:GetParent())
+    end
+end
+
+-- Restore buttons and containers back to Blizzard's default layout.
+-- Invalidates the LayoutFrame so Blizzard can recalculate container positions
+-- (e.g., after column/row changes in Edit Mode).
+local function RestoreButtonsToContainers()
+    if InCombatLockdown() then return end
+
+    local settings = GetGlobalSettings()
+    if not settings or settings.buttonSpacing == nil then return end
+
+    for barKey, _ in pairs(BUTTON_PATTERNS) do
+        local barFrame = GetBarFrame(barKey)
+        local buttons = GetBarButtons(barKey)
+        for _, button in ipairs(buttons) do
+            -- Restore button to fill its container
+            button:ClearAllPoints()
+            button:SetAllPoints(button:GetParent())
+        end
+
+        -- Invalidate the LayoutFrame so Blizzard recalculates container positions.
+        -- The containers are children of a LayoutFrame inside the bar frame.
+        if barFrame and #buttons > 0 then
+            local layoutParent = buttons[1]:GetParent():GetParent()
+            if layoutParent and layoutParent.MarkDirty then
+                layoutParent:MarkDirty()
+            elseif layoutParent and layoutParent.Layout then
+                layoutParent:Layout()
+            end
         end
     end
 end
@@ -2653,6 +2763,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end)
 
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
+        -- Defer slot-change processing during combat to avoid taint
+        if InCombatLockdown() then
+            ActionBars.pendingSlotUpdate = true
+            return
+        end
         -- Re-apply text styling and empty slot visibility when actions change
         C_Timer.After(0.1, function()
             for barKey, _ in pairs(BUTTON_PATTERNS) do
@@ -2760,6 +2875,22 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             ActionBars.pendingSpacing = false
             ApplyAllBarSpacing()
         end
+        -- Process slot changes deferred from combat
+        if ActionBars.pendingSlotUpdate then
+            ActionBars.pendingSlotUpdate = false
+            C_Timer.After(0.1, function()
+                for barKey, _ in pairs(BUTTON_PATTERNS) do
+                    local effectiveSettings = GetEffectiveSettings(barKey)
+                    if effectiveSettings then
+                        local buttons = GetBarButtons(barKey)
+                        for _, button in ipairs(buttons) do
+                            UpdateButtonText(button, effectiveSettings)
+                            UpdateEmptySlotVisibility(button, effectiveSettings)
+                        end
+                    end
+                end
+            end)
+        end
     end
 end)
 
@@ -2786,6 +2917,10 @@ do
     local core = GetCore()
     if core and core.RegisterEditModeEnter then
         core:RegisterEditModeEnter(function()
+            -- Re-apply our spacing so the layout looks correct during Edit Mode too.
+            -- Blizzard's LayoutFrame will recalculate on exit; we re-apply again then.
+            ApplyAllBarSpacing()
+
             -- Force all bars to full opacity and cancel pending fades
             for barKey, state in pairs(ActionBars.fadeState) do
                 state.isFading = false
