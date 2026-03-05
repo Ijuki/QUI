@@ -1854,6 +1854,38 @@ local function ApplyButtonSpacing(barKey)
     local barFrame = GetBarFrame(barKey)
     if not barFrame then return end
 
+    -- Sort ALL buttons by layoutIndex BEFORE taking the NumIcons subset.
+    -- This ensures the correct buttons are selected when the user configures
+    -- fewer than 12 visible icons in Edit Mode.
+    do
+        local needsSort = false
+        for _, btn in ipairs(allButtons) do
+            local container = btn:GetParent()
+            if container and container.layoutIndex then
+                needsSort = true
+                break
+            end
+        end
+        if needsSort then
+            local sorted = {}
+            for i, btn in ipairs(allButtons) do
+                sorted[i] = btn
+            end
+            table.sort(sorted, function(a, b)
+                local indexA = a:GetParent() and a:GetParent().layoutIndex
+                local indexB = b:GetParent() and b:GetParent().layoutIndex
+                if indexA and indexB and indexA ~= indexB then
+                    return indexA < indexB
+                end
+                -- Tiebreaker: preserve name-based order
+                local numA = tonumber(a:GetName():match("%d+$")) or 0
+                local numB = tonumber(b:GetName():match("%d+$")) or 0
+                return numA < numB
+            end)
+            allButtons = sorted
+        end
+    end
+
     -- Read the visible icon count from Edit Mode API.
     -- Users can configure bars to show fewer than 12 buttons (e.g. 9 of 12).
     -- We must only layout the visible subset, otherwise the bar frame is sized
@@ -1899,6 +1931,12 @@ local function ApplyButtonSpacing(barKey)
 
     local numCols, numRows, isVertical = GetBarGridLayout(barFrame, buttons)
 
+    -- Read Blizzard's layout direction flags.
+    -- addButtonsToTop=true: rows stack bottom-to-top (button 1 at bottom row)
+    -- addButtonsToRight=true: columns stack left-to-right (button 1 at left column)
+    local addToTop = barFrame.addButtonsToTop
+    local addToRight = barFrame.addButtonsToRight
+
     -- Effective scales for coordinate space conversion
     local containerEffScale = buttons[1]:GetParent():GetEffectiveScale()
     local barEffScale = barFrame:GetEffectiveScale()
@@ -1910,8 +1948,11 @@ local function ApplyButtonSpacing(barKey)
     local groupWidth = numCols * btnWidth + math.max(0, numCols - 1) * spacing
     local groupHeight = numRows * btnHeight + math.max(0, numRows - 1) * spacing
 
-    -- Resize bar frame to exactly fit the button group (eliminates edge padding).
+    -- Resize bar frame to exactly fit the button group.
     -- Convert from container coordinate space to bar frame coordinate space.
+    -- We intentionally do NOT adjust anchor offsets to preserve the bar's center
+    -- position — that offset manipulation was the root cause of cumulative drift.
+    -- The bar resizes from whatever anchor point Edit Mode assigned it.
     barFrame:SetSize(
         groupWidth * containerEffScale / barEffScale,
         groupHeight * containerEffScale / barEffScale
@@ -1920,23 +1961,37 @@ local function ApplyButtonSpacing(barKey)
     -- Reposition the CONTAINERS (button parents) instead of the buttons themselves.
     -- Blizzard's LayoutFrame positions containers; button-level anchors don't
     -- override the visual layout because the container is what renders.
+    -- Respect Blizzard's addButtonsToTop/addButtonsToRight flags so QUI's
+    -- layout matches Edit Mode's visual order.
     local container1 = buttons[1]:GetParent()
     container1:ClearAllPoints()
-    container1:SetPoint("TOPLEFT", barFrame, "TOPLEFT", 0, 0)
     container1:SetSize(btnWidth, btnHeight)
 
     if isVertical then
-        -- Vertical: buttons flow top-to-bottom, then wrap to the next column
+        -- Vertical: buttons flow top-to-bottom, then wrap to the next column.
+        -- addButtonsToRight controls column stacking direction.
         local buttonsPerCol = numRows
+        if addToRight == false then
+            -- Columns stack right-to-left: first column at right edge
+            container1:SetPoint("TOPRIGHT", barFrame, "TOPRIGHT", 0, 0)
+        else
+            -- Columns stack left-to-right (default): first column at left edge
+            container1:SetPoint("TOPLEFT", barFrame, "TOPLEFT", 0, 0)
+        end
+
         for i = 2, #buttons do
             local container = buttons[i]:GetParent()
             local rowInCol = (i - 1) % buttonsPerCol  -- 0 = first in new column
 
             container:ClearAllPoints()
             if rowInCol == 0 then
-                -- First button in a new column: anchor to the right of the column start
+                -- First button in a new column
                 local prevColStart = i - buttonsPerCol
-                container:SetPoint("TOPLEFT", buttons[prevColStart]:GetParent(), "TOPRIGHT", spacing, 0)
+                if addToRight == false then
+                    container:SetPoint("TOPRIGHT", buttons[prevColStart]:GetParent(), "TOPLEFT", -spacing, 0)
+                else
+                    container:SetPoint("TOPLEFT", buttons[prevColStart]:GetParent(), "TOPRIGHT", spacing, 0)
+                end
             else
                 -- Same column: anchor below previous button
                 container:SetPoint("TOPLEFT", buttons[i - 1]:GetParent(), "BOTTOMLEFT", 0, -spacing)
@@ -1944,16 +1999,31 @@ local function ApplyButtonSpacing(barKey)
             container:SetSize(btnWidth, btnHeight)
         end
     else
-        -- Horizontal: buttons flow left-to-right, then wrap to the next row
+        -- Horizontal: buttons flow left-to-right, then wrap to the next row.
+        -- addButtonsToTop controls row stacking direction.
+        if addToTop then
+            -- Rows stack bottom-to-top: first row at bottom edge
+            container1:SetPoint("BOTTOMLEFT", barFrame, "BOTTOMLEFT", 0, 0)
+        else
+            -- Rows stack top-to-bottom (default): first row at top edge
+            container1:SetPoint("TOPLEFT", barFrame, "TOPLEFT", 0, 0)
+        end
+
         for i = 2, #buttons do
             local container = buttons[i]:GetParent()
             local colIndex = ((i - 1) % numCols) + 1
 
             container:ClearAllPoints()
             if colIndex == 1 then
-                -- First container in a new row: anchor below the container above
-                local aboveContainer = buttons[i - numCols]:GetParent()
-                container:SetPoint("TOPLEFT", aboveContainer, "BOTTOMLEFT", 0, -spacing)
+                -- First container in a new row
+                local prevRowStart = buttons[i - numCols]:GetParent()
+                if addToTop then
+                    -- New row goes ABOVE previous row
+                    container:SetPoint("BOTTOMLEFT", prevRowStart, "TOPLEFT", 0, spacing)
+                else
+                    -- New row goes BELOW previous row
+                    container:SetPoint("TOPLEFT", prevRowStart, "BOTTOMLEFT", 0, -spacing)
+                end
             else
                 -- Same row: anchor to the right of the previous container
                 local prevContainer = buttons[i - 1]:GetParent()
@@ -1990,6 +2060,10 @@ local function RestoreButtonsToContainers()
 
         -- Invalidate the LayoutFrame so Blizzard recalculates container positions.
         -- The containers are children of a LayoutFrame inside the bar frame.
+        -- NOTE: Do NOT clear container anchor points before MarkDirty — doing so
+        -- triggers a Blizzard scale-computation bug where the bar frame size is
+        -- computed using 1/scale instead of scale, inflating bars by ~scale² factor.
+        -- MarkDirty overrides container anchors internally.
         if barFrame and #buttons > 0 then
             local layoutParent = buttons[1]:GetParent():GetParent()
             if layoutParent and layoutParent.MarkDirty then
@@ -2010,17 +2084,6 @@ local function ApplyAllBarSpacing()
 
     for barKey, _ in pairs(BUTTON_PATTERNS) do
         ApplyButtonSpacing(barKey)
-    end
-
-    -- Safety net: if Blizzard's re-layout is deferred (async), re-apply next frame
-    local settings = GetGlobalSettings()
-    if settings and settings.buttonSpacing ~= nil then
-        C_Timer.After(0, function()
-            if InCombatLockdown() then return end
-            for barKey, _ in pairs(BUTTON_PATTERNS) do
-                ApplyButtonSpacing(barKey)
-            end
-        end)
     end
 end
 
