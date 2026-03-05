@@ -658,6 +658,7 @@ local defaults = {
                 rangeIndicator = true,
                 rangeColor = {0.8, 0.1, 0.1, 1},
                 usabilityIndicator = true,
+                clickableIcons = false,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 8,      -- How many icons in row 1 (0 = disabled)
@@ -731,6 +732,7 @@ local defaults = {
                 rangeIndicator = true,
                 rangeColor = {0.8, 0.1, 0.1, 1},
                 usabilityIndicator = true,
+                clickableIcons = false,
                 layoutDirection = "HORIZONTAL",
                 row1 = {
                     iconCount = 6,
