@@ -1,35 +1,35 @@
 diff --git a/modules/frames/unitframe_auras.lua b/modules/frames/unitframe_auras.lua
-index 8313a0b..6c3416d 100644
+index ba1a5a6..384e137 100644
 --- a/modules/frames/unitframe_auras.lua
 +++ b/modules/frames/unitframe_auras.lua
-@@ -289,6 +289,7 @@ local function UpdateAuras(frame)
-     local buffOffsetX = auraSettings.buffOffsetX or 0
-     local buffOffsetY = auraSettings.buffOffsetY or -2
-     local buffSpacing = auraSettings.buffSpacing or auraSettings.iconSpacing or 2
+@@ -278,6 +278,7 @@ local function UpdateAuras(frame)
+     local showBuffs = auraSettings.showBuffs ~= false  -- default true
+     local showDebuffs = auraSettings.showDebuffs ~= false  -- default true
+     local onlyMyDebuffs = auraSettings.onlyMyDebuffs ~= false  -- default true
 +    local hidePermanentBuffs = (unit == "player" and auraSettings.hidePermanentBuffs == true)
  
-     -- Initialize containers
-     frame.buffIcons = frame.buffIcons or {}
-@@ -463,74 +464,117 @@ local function UpdateAuras(frame)
-     -- Populate buffs (skip if preview is active)
-     local buffCount = 0
-     local buffIndex = 1
+     -- Check if in preview mode for either aura type
+     local unitKey = frame.unitKey
+@@ -389,6 +390,44 @@ local function UpdateAuras(frame)
+         end
+     end
+ 
 +    local function IsSecretValue(value)
 +        return type(issecretvalue) == "function" and issecretvalue(value)
 +    end
++
 +    local function IsSafeNumber(value)
 +        return type(value) == "number" and not IsSecretValue(value)
 +    end
++
 +    local function IsPermanentAura(auraData)
 +        if not auraData then return false end
 +
-+        -- Prefer direct numeric duration when safely readable.
 +        local duration = auraData.duration
 +        if IsSafeNumber(duration) then
 +            return duration <= 0
 +        end
 +
-+        -- Fallback to duration object API (combat-safe) when available.
 +        if auraData.auraInstanceID and C_UnitAuras and C_UnitAuras.GetAuraDuration then
 +            local okObj, durationObj = pcall(C_UnitAuras.GetAuraDuration, unit, auraData.auraInstanceID)
 +            if okObj and durationObj and durationObj.GetRemainingDuration then
@@ -40,22 +40,22 @@ index 8313a0b..6c3416d 100644
 +            end
 +        end
 +
-+        -- Last fallback: expiration time if safely numeric.
 +        local expirationTime = auraData.expirationTime
 +        if IsSafeNumber(expirationTime) then
 +            return expirationTime <= 0
 +        end
 +
-+        -- If no timing fields are available, treat as permanent.
 +        if duration == nil and expirationTime == nil then
 +            return true
 +        end
 +
-+        -- Unknown/secret values: fail open and keep the aura visible.
 +        return false
 +    end
-     if showBuffs and not buffPreviewActive then
-         while buffCount < buffMaxIcons do
++
+     -- Populate debuffs (skip if preview is active)
+     local debuffCount = 0
+     local debuffIndex = 1
+@@ -480,71 +519,74 @@ local function UpdateAuras(frame)
              local auraData = C_UnitAuras.GetAuraDataByIndex(unit, buffIndex, "HELPFUL")
              if not auraData then break end
  
@@ -67,13 +67,17 @@ index 8313a0b..6c3416d 100644
 -            local icon = GetAuraIcon(frame.buffIcons, buffCount, frame, buffIconSize, auraSettings, false)
 +                local icon = GetAuraIcon(frame.buffIcons, buffCount, frame, buffIconSize, auraSettings, false)
  
--            -- Store aura data for tooltip
--            icon.unit = unit
--            icon.auraInstanceID = auraData.auraInstanceID
+-            -- Store aura data in side-table (auraInstanceID is secret during combat)
+-            local state = auraIconState[icon]
+-            if not state then state = {}; auraIconState[icon] = state end
+-            state.unit = unit
+-            state.auraInstanceID = auraData.auraInstanceID
 -            icon.filter = "HELPFUL"
-+                -- Store aura data for tooltip
-+                icon.unit = unit
-+                icon.auraInstanceID = auraData.auraInstanceID
++                -- Store aura data in side-table (auraInstanceID is secret during combat)
++                local state = auraIconState[icon]
++                if not state then state = {}; auraIconState[icon] = state end
++                state.unit = unit
++                state.auraInstanceID = auraData.auraInstanceID
 +                icon.filter = "HELPFUL"
  
 -            -- Safely set texture
@@ -183,10 +187,10 @@ index 8313a0b..6c3416d 100644
              buffIndex = buffIndex + 1
          end
 diff --git a/options/tabs/frames/unitframes.lua b/options/tabs/frames/unitframes.lua
-index 7975557..249dbf7 100755
+index a2be8ce..12ef932 100755
 --- a/options/tabs/frames/unitframes.lua
 +++ b/options/tabs/frames/unitframes.lua
-@@ -1046,6 +1046,7 @@ local function CreateUnitFramesPage(parent)
+@@ -1108,6 +1108,7 @@ local function CreateUnitFramesPage(parent)
              local auraDB = unitDB.auras
              if auraDB.showBuffs == nil then auraDB.showBuffs = false end
              if auraDB.showDebuffs == nil then auraDB.showDebuffs = false end
@@ -194,7 +198,7 @@ index 7975557..249dbf7 100755
              if unitKey ~= "player" then
                  if auraDB.onlyMyDebuffs == nil then auraDB.onlyMyDebuffs = true end
              end
-@@ -1294,6 +1295,13 @@ local function CreateUnitFramesPage(parent)
+@@ -1356,6 +1357,13 @@ local function CreateUnitFramesPage(parent)
              buffHideSwipe:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
              y = y - FORM_ROW
  
