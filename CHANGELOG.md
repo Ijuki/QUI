@@ -72,6 +72,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.47.1 - 2026-03-07
+
+### Fixed
+- improve tooltip handling and enhance viewer alpha enforcement
 ## v2.47.0 - 2026-03-07
 
 ### Added
