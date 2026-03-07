@@ -1178,6 +1178,8 @@ local defaults = {
             staggerHeavy = { 1.00, 0.42, 0.42, 1 },     -- Red (60%+ of max health)
             useStaggerLevelColors = true,               -- Enable dynamic stagger colors
             soulFragments = { 0.64, 0.19, 0.79, 1 },
+            whirlwind = { 0.90, 0.20, 0.20, 1 },           -- Red (Warrior theme)
+            tipOfTheSpear = { 0.00, 0.80, 0.30, 1 },       -- Green (Hunter/Survival theme)
             runes = { 0.77, 0.12, 0.23, 1 },
             bloodRunes = { 0.77, 0.12, 0.23, 1 },
             frostRunes = { 0.00, 0.82, 1.00, 1 },
@@ -2886,7 +2888,7 @@ local defaults = {
             showBuffIconSwipe = false,  -- BuffIcon viewer swipe (opt-in)
             showGCDSwipe = false,       -- GCD swipe (~1.5s)
             showCooldownSwipe = false,  -- Actual spell cooldown swipe
-            showRechargeEdge = false,   -- Yellow edge on multi-charge abilities
+
             showActionSwipe = true,     -- Action bar cooldown swipe
             showNcdmSwipe = true,       -- NCDM cooldown swipe
             showCustomTrackerSwipe = true, -- Custom tracker cooldown swipe
@@ -3352,6 +3354,7 @@ local defaults = {
             -- Totem bar
             totemBar = 5,
         },
+        frameAnchoring = {},
     },
     -- Account-wide storage (shared across all characters)
     global = {
