@@ -275,9 +275,9 @@ local function BuildHUDVisibilityTab(tabContent)
         end
     end
 
-    local ufAlwaysCheck = GUI:CreateFormCheckbox(tabContent, "Show Always", "showAlways", ufVis, function()
-        RefreshUnitframesVisibility()
+    local ufAlwaysCheck = GUI:CreateFormCheckbox(tabContent, "Show Always", "showAlways", ufVis, function(val)
         UpdateUFConditionState()
+        RefreshUnitframesVisibility()
     end)
     ufAlwaysCheck:SetPoint("TOPLEFT", PADDING, y)
     ufAlwaysCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
