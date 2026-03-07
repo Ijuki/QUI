@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 --- QUI Core
 --- All branding changed to QUI
 
@@ -4745,7 +4744,6 @@ function QUICore:RefreshAll()
     end
 end
 
-=======
 --- QUI Core
 --- All branding changed to QUI
 
@@ -9487,4 +9485,3 @@ function QUICore:RefreshAll()
     end
 end
 
->>>>>>> f7a8894ef11b9a3d62366b1a2d24346e0d3b8962
