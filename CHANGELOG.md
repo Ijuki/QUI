@@ -71,6 +71,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.47.1 - 2026-03-07
+
+### Fixed
+- improve tooltip handling and enhance viewer alpha enforcement
+## v2.47.0 - 2026-03-07
+
+### Added
+- added party and raid frames
+
+### Fixed
+- fixed stancebar icons not rendering correctly
+- fixed HUD visibility with "show below 100% health" option
+- fixed some special secondary resource bars (whirlwind, tip of the spear, essence)
+- fixed some resource bar sizing issues
 ## v2.46.9 - 2026-03-07
 
 ### Added

@@ -142,6 +142,13 @@ local function TrackSecureFramePosition(frame, parentFrame, point, relPoint, off
     secureTaintCleaner:SetAttribute("relPoint" .. idx, relPoint)
     secureTaintCleaner:SetAttribute("offsetX" .. idx, offsetX)
     secureTaintCleaner:SetAttribute("offsetY" .. idx, offsetY)
+
+    -- Immediately re-stamp through secure code to clear taint left by the
+    -- addon-side ClearAllPoints/SetPoint that just ran.  Without this,
+    -- Blizzard's UpdateLayoutInfo -> InitSystemAnchors -> secureexecuterange
+    -- can hit the tainted SetPointBase before combat enter or ExitEditMode
+    -- has a chance to clean it (e.g. on login, entering Edit Mode).
+    secureTaintCleaner:SetAttribute("clean-now", GetTime())
 end
 
 ---------------------------------------------------------------------------
@@ -1207,6 +1214,25 @@ local FRAME_RESOLVERS = {
     focusCastAlert = function() return _G["QUI_FocusCastAlertFrame"] end,
     missingRaidBuffs = function() return _G["QUI_MissingRaidBuffs"] end,
     mplusTimer = function() return _G["QUI_MPlusTimerFrame"] end,
+    -- Group Frames
+    -- During edit/test mode the headers are hidden and re-parented to the mover;
+    -- return the mover/test container so anchoring works with preview frames.
+    partyFrames = function()
+        local GFEM = ns.QUI_GroupFrameEditMode
+        if GFEM then
+            local active = GFEM:GetActiveFrame()
+            if active then return active end
+        end
+        return ns.QUI_GroupFrames and ns.QUI_GroupFrames.headers and ns.QUI_GroupFrames.headers.party
+    end,
+    raidFrames = function()
+        local GFEM = ns.QUI_GroupFrameEditMode
+        if GFEM then
+            local active = GFEM:GetActiveFrame()
+            if active then return active end
+        end
+        return ns.QUI_GroupFrames and ns.QUI_GroupFrames.headers and ns.QUI_GroupFrames.headers.raid
+    end,
     -- Display
     minimap = function() return _G["Minimap"] end,
     objectiveTracker = function() return _G["ObjectiveTrackerFrame"] end,
@@ -1329,6 +1355,8 @@ local FRAME_ANCHOR_INFO = {
     focusCastAlert  = { displayName = "Focus Cast Alert",      category = "QoL",               order = 8 },
     missingRaidBuffs = { displayName = "Missing Raid Buffs",   category = "QoL",               order = 9 },
     mplusTimer      = { displayName = "M+ Timer",              category = "QoL",               order = 10 },
+    partyFrames     = { displayName = "Party Frames",           category = "Group Frames",      order = 1 },
+    raidFrames      = { displayName = "Raid Frames",            category = "Group Frames",      order = 2 },
     minimap         = { displayName = "Minimap",               category = "Display",           order = 1 },
     objectiveTracker = { displayName = "Objective Tracker",    category = "Display",           order = 2 },
     buffFrame       = { displayName = "Buff Frame",            category = "Display",           order = 3 },
@@ -1347,8 +1375,8 @@ local ANCHOR_PROXY_SOURCES = {
     cdmUtility     = { resolver = function() return _G.QUI_GetCDMViewerFrame and _G.QUI_GetCDMViewerFrame("utility") end,   cdm = true },
     buffIcon       = { resolver = function() return _G.QUI_GetCDMViewerFrame and _G.QUI_GetCDMViewerFrame("buffIcon") end,  cdm = true },
     buffBar        = { resolver = function() return _G.QUI_GetCDMViewerFrame and _G.QUI_GetCDMViewerFrame("buffBar") end,   cdm = true },
-    primaryPower   = { resolver = function() return QUICore and QUICore.powerBar end },
-    secondaryPower = { resolver = function() return QUICore and QUICore.secondaryPowerBar end },
+    primaryPower   = { resolver = function() return QUICore and QUICore.powerBar end, hudMinWidth = true },
+    secondaryPower = { resolver = function() return QUICore and QUICore.secondaryPowerBar end, hudMinWidth = true },
 }
 local cdmAnchorProxies = {}
 local cdmAnchorProxyPendingAfterCombat = {}
@@ -1397,6 +1425,24 @@ local function CDMSizeResolver(source)
     if scale <= 0 then scale = 1 end
     local minWidthEnabled, minWidth = GetHUDMinWidthSettings()
     if minWidthEnabled and IsHUDAnchoredToCDM() then
+        local visualW = width * scale
+        if visualW < minWidth then
+            width = minWidth / scale
+        end
+    end
+    return width, height
+end
+
+-- Resource bar proxy size resolver: mirrors real frame size but enforces
+-- the HUD min-width floor so frames anchored to resource bars still see
+-- the minimum width (even though the resource bar itself is raw content width).
+local function HUDMinWidthSizeResolver(source)
+    local width = source:GetWidth() or 0
+    local height = source:GetHeight() or 0
+    local minWidthEnabled, minWidth = GetHUDMinWidthSettings()
+    if minWidthEnabled and IsHUDAnchoredToCDM() then
+        local scale = source:GetScale() or 1
+        if scale <= 0 then scale = 1 end
         local visualW = width * scale
         if visualW < minWidth then
             width = minWidth / scale
@@ -1463,7 +1509,9 @@ local function GetCDMAnchorProxy(parentKey)
             -- CDM + HUD proxy frames are addon-owned and safe to resize/anchor in combat.
             -- Keeping them live avoids stale bounds when CDM reflows during combat.
             combatFreeze = false,
-            sizeResolver = sourceInfo.cdm and CDMSizeResolver or nil,
+            sizeResolver = sourceInfo.cdm and CDMSizeResolver
+                or sourceInfo.hudMinWidth and HUDMinWidthSizeResolver
+                or nil,
             anchorResolver = sourceInfo.cdm and CDMAnchorResolver or nil,
         })
         if not proxy then
@@ -1559,6 +1607,7 @@ local function UpdateCDMAnchorProxies()
             GetCDMAnchorProxy(key)
         end
     end
+
 end
 
 -- Fallback anchor targets for when a resolved frame is unavailable (nil or hidden).
@@ -1938,6 +1987,41 @@ local function ApplyAutoSizing(frame, settings, parentFrame, key)
     if settings.autoWidth and parentFrame and parentFrame ~= UIParent then
         local ok, parentWidth = pcall(function() return parentFrame:GetWidth() end)
         if ok and parentWidth and parentWidth > 0 then
+            -- Resource bars should use raw CDM content width, bypassing the
+            -- min-width floor that CDMSizeResolver applies to the proxy.
+            -- The min-width setting is meant for player/target only.
+            local isResourceBar = (key == "primaryPower" or key == "secondaryPower")
+            if isResourceBar then
+                local parentKey = settings.parent
+                if parentKey == "essential" then parentKey = "cdmEssential"
+                elseif parentKey == "utility" then parentKey = "cdmUtility" end
+                if parentKey and CDM_LOGICAL_SIZE_KEYS[parentKey] then
+                    -- Parent is a CDM viewer — read raw content width from viewer state
+                    local source = ANCHOR_PROXY_SOURCES[parentKey]
+                    if source then
+                        local sourceFrame = source.resolver()
+                        if sourceFrame then
+                            local vs = _G.QUI_GetCDMViewerState and _G.QUI_GetCDMViewerState(sourceFrame)
+                            local rawWidth = vs and vs.rawContentWidth
+                            if rawWidth and rawWidth > 0 then
+                                parentWidth = rawWidth
+                            end
+                        end
+                    end
+                elseif parentKey and ANCHOR_PROXY_SOURCES[parentKey]
+                    and ANCHOR_PROXY_SOURCES[parentKey].hudMinWidth then
+                    -- Parent is another resource bar whose proxy has min-width
+                    -- inflation. Read the actual frame width instead.
+                    local source = ANCHOR_PROXY_SOURCES[parentKey]
+                    local sourceFrame = source.resolver()
+                    if sourceFrame then
+                        local frameOk, frameWidth = pcall(function() return sourceFrame:GetWidth() end)
+                        if frameOk and frameWidth and frameWidth > 0 then
+                            parentWidth = frameWidth
+                        end
+                    end
+                end
+            end
             local adjustedWidth = parentWidth + (settings.widthAdjust or 0)
             if adjustedWidth > 0 then
                 pcall(function() frame:SetWidth(adjustedWidth) end)

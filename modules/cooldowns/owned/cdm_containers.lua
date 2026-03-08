@@ -621,6 +621,9 @@ local function LayoutContainer(trackerKey)
         vs.cdmProxyYOffset = (actualTop + actualBot) / 2
     end
 
+    -- Save raw content width before min-width inflation (used by resource bars)
+    local rawContentWidth = maxRowWidth
+
     -- HUD min-width floor
     local minWidthEnabled, minWidth = GetHUDMinWidth()
     local applyHUDMinWidth = minWidthEnabled and IsHUDAnchoredToCDM()
@@ -699,6 +702,7 @@ local function LayoutContainer(trackerKey)
 
     -- Store dimensions in viewer state
     vs.cdmIconWidth = maxRowWidth
+    vs.cdmRawContentWidth = rawContentWidth
     vs.cdmTotalHeight = proxyTotalHeight
 
     -- Persist for next reload
@@ -909,6 +913,7 @@ local function GetViewerState(viewer)
         _stateSnapshots[viewer] = snap
     end
     snap.iconWidth              = vs.cdmIconWidth
+    snap.rawContentWidth        = vs.cdmRawContentWidth
     snap.totalHeight            = vs.cdmTotalHeight
     snap.row1Width              = vs.cdmRow1Width
     snap.bottomRowWidth         = vs.cdmBottomRowWidth

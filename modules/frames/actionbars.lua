@@ -293,6 +293,58 @@ local function GetButtonIndex(button)
     return tonumber(name:match("%d+$"))
 end
 
+-- Resolve a button's icon texture object.
+-- Stance buttons are inconsistent across clients:
+-- - some expose button.icon/button.Icon,
+-- - some use a named region (<ButtonName>Icon),
+-- - some use NormalTexture as the icon.
+local function GetButtonIconTexture(button)
+    if not button then return nil, false end
+
+    local isStance = GetBarKeyFromButton(button) == "stance"
+    local buttonName = button.GetName and button:GetName()
+    local namedIcon = buttonName and _G[buttonName .. "Icon"] or nil
+    local icon = button.icon or button.Icon
+
+    local function HasTexture(texture)
+        if not texture or not texture.GetTexture then return false end
+        return texture:GetTexture() ~= nil
+    end
+
+    local chosenTexture, usesNormalTexture = nil, false
+
+    if isStance then
+        -- Prefer the texture object that actually has an assigned texture.
+        if HasTexture(icon) then
+            chosenTexture, usesNormalTexture = icon, false
+        elseif HasTexture(namedIcon) then
+            chosenTexture, usesNormalTexture = namedIcon, false
+        else
+            local normalTex = button:GetNormalTexture() or button.NormalTexture
+            if HasTexture(normalTex) then
+                chosenTexture, usesNormalTexture = normalTex, true
+            elseif icon then
+                chosenTexture, usesNormalTexture = icon, false
+            elseif namedIcon then
+                chosenTexture, usesNormalTexture = namedIcon, false
+            elseif normalTex then
+                chosenTexture, usesNormalTexture = normalTex, true
+            end
+        end
+
+        return chosenTexture, usesNormalTexture
+    end
+
+    if icon then
+        return icon, false
+    end
+    if namedIcon then
+        return namedIcon, false
+    end
+
+    return nil, false
+end
+
 -- Register a button's binding command so LibKeyBound can bind keys to it.
 -- On pre-Midnight clients the methods are injected directly onto the button.
 -- On Midnight (12.0+) mutating secure action buttons spreads taint, so we
@@ -659,7 +711,6 @@ local function GetBarButtons(barKey)
 
     return buttons
 end
-
 -- Get the bar container frame
 local function GetBarFrame(barKey)
     local frameName = BAR_FRAMES[barKey]
@@ -1070,14 +1121,17 @@ end
 -- Remove Blizzard's default textures and masks
 local function StripBlizzardArtwork(button)
     local state = GetFrameState(button)
+    local icon, iconUsesNormalTexture = GetButtonIconTexture(button)
+    local isStance = GetBarKeyFromButton(button) == "stance"
 
     -- Always re-hide NormalTexture — Blizzard may reset it after our init
     -- (e.g. action bar updates that call SetNormalTexture post-PLAYER_LOGIN).
+    -- EXCEPTION: stance buttons can use NormalTexture as their icon.
     local normalTex = button:GetNormalTexture()
-    if normalTex then
+    if normalTex and not isStance and not iconUsesNormalTexture then
         normalTex:SetAlpha(0)
     end
-    if button.NormalTexture then
+    if button.NormalTexture and not isStance and not iconUsesNormalTexture then
         button.NormalTexture:SetAlpha(0)
     end
 
@@ -1086,8 +1140,7 @@ local function StripBlizzardArtwork(button)
     state.stripped = true
 
     -- Remove mask textures from icon
-    local icon = button.icon or button.Icon
-    if icon and icon.GetMaskTexture and icon.RemoveMaskTexture then
+    if icon and not iconUsesNormalTexture and icon.GetMaskTexture and icon.RemoveMaskTexture then
         for i = 1, 10 do
             local mask = icon:GetMaskTexture(i)
             if mask then
@@ -1141,11 +1194,13 @@ local function SkinButton(button, settings)
     local zoom = settings.iconZoom or 0.07
 
     -- Apply icon TexCoords (crop transparent edges)
-    local icon = button.icon or button.Icon
+    local icon = GetButtonIconTexture(button)
     if icon then
         icon:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         icon:ClearAllPoints()
         icon:SetAllPoints(button)
+        icon:SetAlpha(1)
+        if icon.Show then icon:Show() end
     end
 
     -- Create or update backdrop (behind icon, configurable opacity)
@@ -1461,6 +1516,18 @@ local function UpdateEmptySlotVisibility(button, settings)
     local fadeState = barKey and ActionBars.fadeState and ActionBars.fadeState[barKey]
     local targetAlpha = fadeState and fadeState.currentAlpha or 1
 
+    -- Stance/pet buttons are not standard action slots and can report action
+    -- data that does not map cleanly to HasAction(). Never apply hide-empty
+    -- logic to them.
+    if barKey == "stance" or barKey == "pet" then
+        if state.hiddenEmpty then
+            state.hiddenEmpty = nil
+            FadeShowTextures(state)
+        end
+        button:SetAlpha(targetAlpha)
+        return
+    end
+
     if not settings.hideEmptySlots then
         -- Restore visibility if setting is off (respect fade state)
         if state.hiddenEmpty then
@@ -1574,7 +1641,7 @@ end
 local function GetTintOverlay(button)
     local state = GetFrameState(button)
     if not state.tintOverlay then
-        local icon = button.icon or button.Icon
+        local icon = GetButtonIconTexture(button)
         if not icon then return nil end
         local overlay = button:CreateTexture(nil, "ARTWORK", nil, 1)
         overlay:SetAllPoints(icon)
