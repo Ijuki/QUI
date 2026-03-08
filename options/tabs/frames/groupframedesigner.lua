@@ -462,6 +462,14 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         childRefs.powerBar = nil
     end
 
+    -- Bottom-anchor offset: push elements above power bar in preview
+    local powerH = (powerDB.showPowerBar ~= false) and ((powerDB.powerBarHeight or 4) * PREVIEW_SCALE) or 0
+    local previewBottomPad = powerH + borderSize
+    local function PreviewBottomPadY(anchor, offY)
+        if anchor:find("BOTTOM") then return offY + previewBottomPad end
+        return offY
+    end
+
     -- Text frame (above health bar for overlaid text)
     local textFrame = CreateFrame("Frame", nil, frame)
     textFrame:SetAllPoints(healthBar)
@@ -583,7 +591,7 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         local a = indDB[anchorKey] or defAnchor
         local ox = (indDB[offXKey] or defX) * PREVIEW_SCALE
         local oy = (indDB[offYKey] or defY) * PREVIEW_SCALE
-        tex:SetPoint(a, frame, a, ox, oy)
+        tex:SetPoint(a, frame, a, ox, PreviewBottomPadY(a, oy))
     end
 
     -- Ready check
@@ -647,10 +655,12 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         local maxBuffs = auraDB.maxBuffs or 3
 
         local buffContainer = CreateFrame("Frame", nil, frame)
-        buffContainer:SetSize(1, buffSize)
+        local buffCount = math.min(maxBuffs, #FAKE_BUFF_ICONS)
+        local buffContainerW = buffCount * buffSize + math.max(buffCount - 1, 0) * buffSpacing
+        buffContainer:SetSize(math.max(buffContainerW, 1), buffSize)
         local offX = (auraDB.buffOffsetX or 2) * PREVIEW_SCALE
         local offY = (auraDB.buffOffsetY or 16) * PREVIEW_SCALE
-        buffContainer:SetPoint(buffAnchor, frame, buffAnchor, offX, offY)
+        buffContainer:SetPoint(buffAnchor, frame, buffAnchor, offX, PreviewBottomPadY(buffAnchor, offY))
 
         for i = 1, math.min(maxBuffs, #FAKE_BUFF_ICONS) do
             local icon = buffContainer:CreateTexture(nil, "OVERLAY")
@@ -683,10 +693,12 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         local maxDebuffs = auraDB.maxDebuffs or 3
 
         local debuffContainer = CreateFrame("Frame", nil, frame)
-        debuffContainer:SetSize(1, debuffSize)
+        local debuffCount = math.min(maxDebuffs, #FAKE_DEBUFF_ICONS)
+        local debuffContainerW = debuffCount * debuffSize + math.max(debuffCount - 1, 0) * debuffSpacing
+        debuffContainer:SetSize(math.max(debuffContainerW, 1), debuffSize)
         local offX = (auraDB.debuffOffsetX or -2) * PREVIEW_SCALE
         local offY = (auraDB.debuffOffsetY or -18) * PREVIEW_SCALE
-        debuffContainer:SetPoint(debuffAnchor, frame, debuffAnchor, offX, offY)
+        debuffContainer:SetPoint(debuffAnchor, frame, debuffAnchor, offX, PreviewBottomPadY(debuffAnchor, offY))
 
         for i = 1, math.min(maxDebuffs, #FAKE_DEBUFF_ICONS) do
             local icon = debuffContainer:CreateTexture(nil, "OVERLAY")
@@ -801,25 +813,34 @@ local function CreateDesignerPreview(container, previewType, childRefs)
     local paMax = paDB.maxPerFrame or 2
 
     local paContainer = CreateFrame("Frame", nil, frame)
-    paContainer:SetSize(1, paSize)
-    paContainer:SetPoint(paAnchor, frame, paAnchor, paOffX, paOffY)
+    local paCount = math.min(paMax, 2)
+    local paContainerW = paCount * paSize + math.max(paCount - 1, 0) * paSpacing
+    paContainer:SetSize(math.max(paContainerW, 1), paSize)
+    paContainer:SetPoint(paAnchor, frame, paAnchor, paOffX, PreviewBottomPadY(paAnchor, paOffY))
 
-    local FAKE_PA_ICONS = { 135945, 135994 } -- Placeholder boss debuff textures
-    for i = 1, math.min(paMax, #FAKE_PA_ICONS) do
-        local icon = paContainer:CreateTexture(nil, "OVERLAY")
-        icon:SetSize(paSize, paSize)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        icon:SetTexture(FAKE_PA_ICONS[i])
+    for i = 1, math.min(paMax, 2) do
+        local iconFrame = CreateFrame("Frame", nil, paContainer)
+        iconFrame:SetSize(paSize, paSize)
         if i == 1 then
-            icon:SetPoint("LEFT", paContainer, "LEFT", 0, 0)
+            iconFrame:SetPoint("LEFT", paContainer, "LEFT", 0, 0)
         else
             local offset = (i - 1) * (paSize + paSpacing)
             if paGrow == "LEFT" then
-                icon:SetPoint("RIGHT", paContainer, "RIGHT", -offset, 0)
+                iconFrame:SetPoint("RIGHT", paContainer, "RIGHT", -offset, 0)
             else
-                icon:SetPoint("LEFT", paContainer, "LEFT", offset, 0)
+                iconFrame:SetPoint("LEFT", paContainer, "LEFT", offset, 0)
             end
         end
+        -- Red background
+        local bg = iconFrame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.6, 0.1, 0.1, 0.9)
+        -- "PA" label
+        local label = iconFrame:CreateFontString(nil, "OVERLAY")
+        label:SetFont(GUI.FONT_PATH or "Fonts\\FRIZQT__.TTF", paSize * 0.4, "OUTLINE")
+        label:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
+        label:SetText("PA")
+        label:SetTextColor(1, 1, 1, 1)
     end
     if paDB.enabled == false then
         paContainer:Hide()
@@ -837,8 +858,8 @@ local function CreateDesignerPreview(container, previewType, childRefs)
     local aiOffY = (aiDB.anchorOffsetY or 0) * PREVIEW_SCALE
 
     local aiContainer = CreateFrame("Frame", nil, frame)
-    aiContainer:SetSize(1, aiIconSize)
-    aiContainer:SetPoint(aiAnchor, frame, aiAnchor, aiOffX, aiOffY)
+    aiContainer:SetHeight(aiIconSize)
+    aiContainer:SetPoint(aiAnchor, frame, aiAnchor, aiOffX, PreviewBottomPadY(aiAnchor, aiOffY))
     aiContainer:SetFrameLevel(frame:GetFrameLevel() + 6)
 
     -- Show sample indicator icons from tracked spells or spec preset spells
@@ -907,6 +928,9 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         end
         aiContainer["icon" .. i] = icon
     end
+    local aiCount = math.min(aiMax, #sampleSpells)
+    local aiContainerW = aiCount * aiIconSize + math.max(aiCount - 1, 0) * aiSpacing
+    aiContainer:SetWidth(math.max(aiContainerW, 1))
 
     if aiDB.enabled == false then
         aiContainer:Hide()
@@ -919,9 +943,9 @@ end
 ---------------------------------------------------------------------------
 -- HIT OVERLAY FACTORY
 ---------------------------------------------------------------------------
-local function CreateHitOverlay(parent, previewFrame, elementKey, anchorFrame, mode, width, height, anchorPoint, anchorRelPoint, offX, offY)
+local function CreateHitOverlay(parent, previewFrame, elementKey, anchorFrame, mode, width, height, anchorPoint, anchorRelPoint, offX, offY, frameLevel)
     local overlay = CreateFrame("Button", nil, parent)
-    overlay:SetFrameLevel(previewFrame:GetFrameLevel() + 10)
+    overlay:SetFrameLevel(frameLevel or (previewFrame:GetFrameLevel() + 10))
     overlay.elementKey = elementKey
 
     if mode == "fill" then
@@ -945,6 +969,26 @@ local function CreateHitOverlay(parent, previewFrame, elementKey, anchorFrame, m
 
     return overlay
 end
+
+---------------------------------------------------------------------------
+-- DRAG CONFIG: Maps element keys to their DB offset keys for drag support
+---------------------------------------------------------------------------
+local DRAG_CONFIG = {
+    name        = { sub = "name",       xKey = "nameOffsetX",       yKey = "nameOffsetY" },
+    healthText  = { sub = "health",     xKey = "healthOffsetX",     yKey = "healthOffsetY" },
+    role        = { sub = "indicators", xKey = "roleIconOffsetX",   yKey = "roleIconOffsetY" },
+    buffs       = { sub = "auras",      xKey = "buffOffsetX",       yKey = "buffOffsetY" },
+    debuffs     = { sub = "auras",      xKey = "debuffOffsetX",     yKey = "debuffOffsetY" },
+    privateAuras    = { sub = "privateAuras",    xKey = "anchorOffsetX", yKey = "anchorOffsetY" },
+    auraIndicators  = { sub = "auraIndicators",  xKey = "anchorOffsetX", yKey = "anchorOffsetY" },
+    defensive       = { sub = "healer",          xKey = "offsetX",       yKey = "offsetY",  nested = "defensiveIndicator" },
+    readyCheck      = { sub = "indicators", xKey = "readyCheckOffsetX",    yKey = "readyCheckOffsetY" },
+    resurrection    = { sub = "indicators", xKey = "resurrectionOffsetX",  yKey = "resurrectionOffsetY" },
+    summon          = { sub = "indicators", xKey = "summonOffsetX",        yKey = "summonOffsetY" },
+    leader          = { sub = "indicators", xKey = "leaderOffsetX",        yKey = "leaderOffsetY" },
+    targetMarker    = { sub = "indicators", xKey = "targetMarkerOffsetX",  yKey = "targetMarkerOffsetY" },
+    phase           = { sub = "indicators", xKey = "phaseOffsetX",         yKey = "phaseOffsetY" },
+}
 
 ---------------------------------------------------------------------------
 -- ELEMENT SETTINGS BUILDERS
@@ -2745,50 +2789,183 @@ local function BuildDesignerView(tabContent, previewType)
         local frame = childRefs.frame
         if not frame then return end
 
-        -- Helper to create overlay, wire hover/click, store in state
-        local function MakeOverlay(key, anchorFrame, mode, w, h, aPoint, arPoint, oX, oY)
-            local overlay = CreateHitOverlay(tabContent, frame, key, anchorFrame, mode, w, h, aPoint, arPoint, oX, oY)
+        -- Frame level tiers: frame=base, sub-regions=+1, small elements=+2
+        local baseFLvl = frame:GetFrameLevel() + 10
+        local subFLvl = baseFLvl + 2
+        local elemFLvl = baseFLvl + 4
+
+        -- Map sub-element keys to the widget bar tab they should select
+        local CLICK_TARGET = {
+            readyCheck = "indicators", resurrection = "indicators",
+            summon = "indicators", leader = "indicators",
+            targetMarker = "indicators", phase = "indicators",
+        }
+
+        -- Helper to create overlay, wire hover/click/drag, store in state
+        local function MakeOverlay(key, anchorFrame, mode, fLvl, w, h, aPoint, arPoint, oX, oY)
+            local overlay = CreateHitOverlay(tabContent, frame, key, anchorFrame, mode, w, h, aPoint, arPoint, oX, oY, fLvl)
+            local selectKey = CLICK_TARGET[key] or key
             overlay:SetScript("OnEnter", function(self)
                 self.highlight:Show()
+                GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                GameTooltip:SetText(ELEMENT_LABELS[selectKey] or key)
+                if DRAG_CONFIG[key] then
+                    GameTooltip:AddLine("Drag to reposition", 0.7, 0.7, 0.7)
+                end
+                GameTooltip:Show()
             end)
             overlay:SetScript("OnLeave", function(self)
-                if state.selectedElement ~= key then
+                if state.selectedElement ~= selectKey then
                     self.highlight:Hide()
                 end
+                GameTooltip:Hide()
             end)
-            overlay:SetScript("OnClick", function()
+            overlay:SetScript("OnClick", function(self)
+                if self._dragFired then self._dragFired = false return end
                 if state.selectElement then
-                    state.selectElement(key)
+                    state.selectElement(selectKey)
                 end
             end)
+
+            -- Drag support for elements with offset keys
+            local dragCfg = DRAG_CONFIG[key]
+            if dragCfg then
+                overlay:RegisterForDrag("LeftButton")
+                overlay:SetScript("OnDragStart", function(self)
+                    self._dragFired = true
+                    local gfdb = GetGFDB()
+                    if not gfdb then return end
+                    local dbTbl = gfdb[dragCfg.sub]
+                    if not dbTbl then return end
+                    if dragCfg.nested then dbTbl = dbTbl[dragCfg.nested] end
+                    if not dbTbl then return end
+
+                    GameTooltip:Hide()
+                    self.highlight:Show()
+
+                    local cx, cy = GetCursorPosition()
+                    local scale = self:GetEffectiveScale()
+                    self._dragStartCX = cx / scale
+                    self._dragStartCY = cy / scale
+                    self._dragStartValX = dbTbl[dragCfg.xKey] or 0
+                    self._dragStartValY = dbTbl[dragCfg.yKey] or 0
+                    self._dragDBTbl = dbTbl
+
+                    -- Disable mouse on all OTHER overlays so they can't steal hover
+                    for oKey, oFrame in pairs(state.hitOverlays) do
+                        if oFrame ~= self then oFrame:EnableMouse(false) end
+                    end
+
+                    -- Ghost outline follows cursor
+                    local ghost = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+                    ghost:SetFrameStrata("TOOLTIP")
+                    local ow, oh = self:GetSize()
+                    ghost:SetSize(math.max(ow, 8), math.max(oh, 8))
+                    ghost:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+                    ghost:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.8)
+                    local olCX, olCY = self:GetCenter()
+                    ghost:SetPoint("CENTER", UIParent, "BOTTOMLEFT", olCX, olCY)
+                    ghost:EnableMouse(false)
+                    self._dragGhost = ghost
+                    self._dragOlCX = olCX
+                    self._dragOlCY = olCY
+                end)
+                overlay:SetScript("OnDragStop", function(self)
+                    -- Clean up ghost
+                    if self._dragGhost then
+                        self._dragGhost:Hide()
+                        self._dragGhost:SetParent(nil)
+                        self._dragGhost = nil
+                    end
+
+                    -- Re-enable mouse on all overlays
+                    for oKey, oFrame in pairs(state.hitOverlays) do
+                        oFrame:EnableMouse(true)
+                    end
+
+                    if not self._dragDBTbl then return end
+
+                    -- Compute final offset
+                    local cx, cy = GetCursorPosition()
+                    local scale = self:GetEffectiveScale()
+                    local dx = (cx / scale - self._dragStartCX) / PREVIEW_SCALE
+                    local dy = (cy / scale - self._dragStartCY) / PREVIEW_SCALE
+                    self._dragDBTbl[dragCfg.xKey] = math.floor(self._dragStartValX + dx + 0.5)
+                    self._dragDBTbl[dragCfg.yKey] = math.floor(self._dragStartValY + dy + 0.5)
+                    self._dragDBTbl = nil
+
+                    -- Rebuild preview + refresh live frames
+                    RebuildPreview()
+                    RefreshGF()
+
+                    -- Refresh settings panel to show new slider values
+                    local panelKey = selectKey
+                    if state.settingsPanels[panelKey] then
+                        state.settingsPanels[panelKey]:Hide()
+                        state.settingsPanels[panelKey]:SetParent(nil)
+                        state.settingsPanels[panelKey] = nil
+                    end
+                    for pKey, panel in pairs(state.settingsPanels) do
+                        panel:Hide()
+                    end
+                    state.selectedElement = nil
+                    if state.selectElement then state.selectElement(panelKey) end
+                end)
+                overlay:SetScript("OnUpdate", function(self)
+                    if not self._dragGhost then return end
+                    local cx, cy = GetCursorPosition()
+                    local scale = self:GetEffectiveScale()
+                    local dx = cx / scale - self._dragStartCX
+                    local dy = cy / scale - self._dragStartCY
+                    self._dragGhost:ClearAllPoints()
+                    self._dragGhost:SetPoint("CENTER", UIParent, "BOTTOMLEFT", self._dragOlCX + dx, self._dragOlCY + dy)
+                end)
+            end
+
             state.hitOverlays[key] = overlay
         end
 
-        -- Overlays for each element
-        MakeOverlay("frame", frame, "fill")
-        if childRefs.healthBar then MakeOverlay("health", childRefs.healthBar, "fill") end
-        if childRefs.powerBar then MakeOverlay("power", childRefs.powerBar, "fill") end
+        -- Overlays for each element (frame = catch-all at lowest level)
+        MakeOverlay("frame", frame, "fill", baseFLvl)
+        if childRefs.healthBar then MakeOverlay("health", childRefs.healthBar, "fill", subFLvl) end
+        if childRefs.powerBar then MakeOverlay("power", childRefs.powerBar, "fill", subFLvl) end
         if childRefs.nameText then
             local nameW = childRefs.nameText:GetStringWidth() or 60
-            MakeOverlay("name", childRefs.nameText, "fixed", nameW + 4, 20, "LEFT", "LEFT", -2, 0)
+            MakeOverlay("name", childRefs.nameText, "fixed", elemFLvl, nameW + 4, 20, "LEFT", "LEFT", -2, 0)
         end
         if childRefs.healthText then
             local htW = childRefs.healthText:GetStringWidth() or 40
-            MakeOverlay("healthText", childRefs.healthText, "fixed", htW + 4, 20, "RIGHT", "RIGHT", 2, 0)
+            MakeOverlay("healthText", childRefs.healthText, "fixed", elemFLvl, htW + 4, 20, "RIGHT", "RIGHT", 2, 0)
         end
-        if childRefs.buffContainer then MakeOverlay("buffs", childRefs.buffContainer, "fill") end
-        if childRefs.debuffContainer then MakeOverlay("debuffs", childRefs.debuffContainer, "fill") end
-        if childRefs.roleIcon then MakeOverlay("role", childRefs.roleIcon, "fill") end
-        if childRefs.indicatorFrame then MakeOverlay("indicators", childRefs.indicatorFrame, "fill") end
-        if childRefs.absorbOverlay then MakeOverlay("absorbs", childRefs.absorbOverlay, "fill") end
-        if childRefs.dispelOverlay then MakeOverlay("healer", childRefs.dispelOverlay, "fill") end
-        if childRefs.defIcon then MakeOverlay("defensive", childRefs.defIcon, "fill") end
-        if childRefs.auraIndicatorContainer then MakeOverlay("auraIndicators", childRefs.auraIndicatorContainer, "fill") end
-        if childRefs.paContainer then MakeOverlay("privateAuras", childRefs.paContainer, "fill") end
+        if childRefs.buffContainer then MakeOverlay("buffs", childRefs.buffContainer, "fill", elemFLvl) end
+        if childRefs.debuffContainer then MakeOverlay("debuffs", childRefs.debuffContainer, "fill", elemFLvl) end
+        if childRefs.roleIcon and childRefs.roleIcon:IsShown() then MakeOverlay("role", childRefs.roleIcon, "fill", elemFLvl) end
+        -- Individual indicator overlays (only for visible indicators)
+        if childRefs.readyCheckIcon and childRefs.readyCheckIcon:IsShown() then MakeOverlay("readyCheck", childRefs.readyCheckIcon, "fill", elemFLvl) end
+        if childRefs.resIcon and childRefs.resIcon:IsShown() then MakeOverlay("resurrection", childRefs.resIcon, "fill", elemFLvl) end
+        if childRefs.summonIcon and childRefs.summonIcon:IsShown() then MakeOverlay("summon", childRefs.summonIcon, "fill", elemFLvl) end
+        if childRefs.leaderIcon and childRefs.leaderIcon:IsShown() then MakeOverlay("leader", childRefs.leaderIcon, "fill", elemFLvl) end
+        if childRefs.targetMarker and childRefs.targetMarker:IsShown() then MakeOverlay("targetMarker", childRefs.targetMarker, "fill", elemFLvl) end
+        if childRefs.phaseIcon and childRefs.phaseIcon:IsShown() then MakeOverlay("phase", childRefs.phaseIcon, "fill", elemFLvl) end
+        if childRefs.absorbOverlay then MakeOverlay("absorbs", childRefs.absorbOverlay, "fill", subFLvl) end
+        if childRefs.dispelOverlay then MakeOverlay("healer", childRefs.dispelOverlay, "fill", subFLvl) end
+        if childRefs.defIcon and childRefs.defIcon:IsShown() then MakeOverlay("defensive", childRefs.defIcon, "fill", elemFLvl) end
+        if childRefs.auraIndicatorContainer and childRefs.auraIndicatorContainer:IsShown() then MakeOverlay("auraIndicators", childRefs.auraIndicatorContainer, "fill", elemFLvl) end
+        if childRefs.paContainer and childRefs.paContainer:IsShown() then MakeOverlay("privateAuras", childRefs.paContainer, "fill", elemFLvl) end
 
-        -- Re-highlight selected element
-        if state.selectedElement and state.hitOverlays[state.selectedElement] then
-            state.hitOverlays[state.selectedElement].highlight:Show()
+        -- Re-highlight selected element (direct + sub-element overlays)
+        if state.selectedElement then
+            local sel = state.selectedElement
+            local o = state.hitOverlays[sel]
+            if o then o.highlight:Show() end
+            -- Also highlight sub-element overlays belonging to this tab
+            local INDICATOR_SUBS = { "readyCheck", "resurrection", "summon", "leader", "targetMarker", "phase" }
+            if sel == "indicators" then
+                for _, subKey in ipairs(INDICATOR_SUBS) do
+                    local so = state.hitOverlays[subKey]
+                    if so then so.highlight:Show() end
+                end
+            end
         end
     end
 
@@ -2801,6 +2978,31 @@ local function BuildDesignerView(tabContent, previewType)
     ---------------------------------------------------------------------------
     -- WIDGET BAR
     ---------------------------------------------------------------------------
+    -- Sub-element keys that map to a parent widget bar key
+    local SUB_ELEMENT_MAP = {
+        readyCheck = "indicators", resurrection = "indicators",
+        summon = "indicators", leader = "indicators",
+        targetMarker = "indicators", phase = "indicators",
+    }
+
+    -- Helper: show/hide highlights on all overlays that belong to a tab key
+    local function SetOverlayHighlights(tabKey, show)
+        -- Direct overlay
+        local overlay = state.hitOverlays[tabKey]
+        if overlay then
+            if show then overlay.highlight:Show() else overlay.highlight:Hide() end
+        end
+        -- Sub-element overlays that map to this tab key
+        for subKey, parentKey in pairs(SUB_ELEMENT_MAP) do
+            if parentKey == tabKey then
+                local subOverlay = state.hitOverlays[subKey]
+                if subOverlay then
+                    if show then subOverlay.highlight:Show() else subOverlay.highlight:Hide() end
+                end
+            end
+        end
+    end
+
     local function SelectElement(key)
         -- Deselect previous
         if state.selectedElement then
@@ -2809,8 +3011,7 @@ local function BuildDesignerView(tabContent, previewType)
                 prevBtn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
                 prevBtn:SetBackdropColor(0.12, 0.12, 0.12, 1)
             end
-            local prevOverlay = state.hitOverlays[state.selectedElement]
-            if prevOverlay then prevOverlay.highlight:Hide() end
+            SetOverlayHighlights(state.selectedElement, false)
             local prevPanel = state.settingsPanels[state.selectedElement]
             if prevPanel then prevPanel:Hide() end
         end
@@ -2824,9 +3025,8 @@ local function BuildDesignerView(tabContent, previewType)
             btn:SetBackdropColor(C.accent[1] * 0.2, C.accent[2] * 0.2, C.accent[3] * 0.2, 1)
         end
 
-        -- Highlight overlay
-        local overlay = state.hitOverlays[key]
-        if overlay then overlay.highlight:Show() end
+        -- Highlight overlay(s)
+        SetOverlayHighlights(key, true)
 
         -- Lazy-create or show settings panel
         local panel = state.settingsPanels[key]

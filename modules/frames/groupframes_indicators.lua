@@ -153,6 +153,7 @@ local function PositionContainer(frame)
     local offY = ai.anchorOffsetY or 0
 
     container:ClearAllPoints()
+    if anchor:find("BOTTOM") then offY = offY + (frame._bottomPad or 0) end
     container:SetPoint(anchor, frame, anchor, offX, offY)
 end
 

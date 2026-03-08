@@ -1420,6 +1420,10 @@ local function DecorateGroupFrame(frame)
     statusText:Hide()
     frame.statusText = statusText
 
+    -- Bottom-anchor offset: push elements above power bar + separator
+    local bottomPad = powerHeight + separatorHeight + borderSize
+    frame._bottomPad = bottomPad
+
     -- Name text
     local fontPath = GetFontPath()
     local fontOutline = GetFontOutline()
@@ -1428,13 +1432,14 @@ local function DecorateGroupFrame(frame)
     local nameAnchor = GetTextAnchorInfo(nameSettings and nameSettings.nameAnchor or "LEFT")
     local nameOffsetX = nameSettings and nameSettings.nameOffsetX or 4
     local nameOffsetY = nameSettings and nameSettings.nameOffsetY or 0
+    local nameBottomPad = nameAnchor.point:find("BOTTOM") and bottomPad or 0
 
     local nameText = frame.nameText or textFrame:CreateFontString(nil, "OVERLAY")
     nameText:ClearAllPoints()
     nameText:SetFont(fontPath, nameFontSize, fontOutline)
     local namePadX = math.abs(nameOffsetX)
-    nameText:SetPoint(nameAnchor.leftPoint, frame, nameAnchor.leftPoint, namePadX, nameOffsetY)
-    nameText:SetPoint(nameAnchor.rightPoint, frame, nameAnchor.rightPoint, -namePadX, nameOffsetY)
+    nameText:SetPoint(nameAnchor.leftPoint, frame, nameAnchor.leftPoint, namePadX, nameOffsetY + nameBottomPad)
+    nameText:SetPoint(nameAnchor.rightPoint, frame, nameAnchor.rightPoint, -namePadX, nameOffsetY + nameBottomPad)
     local nameJustify = nameSettings and nameSettings.nameJustify or nameAnchor.justify
     nameText:SetJustifyH(nameJustify)
     nameText:SetJustifyV(nameAnchor.justifyV)
@@ -1448,13 +1453,14 @@ local function DecorateGroupFrame(frame)
     local healthAnchor = GetTextAnchorInfo(healthSettings and healthSettings.healthAnchor or "RIGHT")
     local healthOffsetX = healthSettings and healthSettings.healthOffsetX or -4
     local healthOffsetY = healthSettings and healthSettings.healthOffsetY or 0
+    local healthBottomPad = healthAnchor.point:find("BOTTOM") and bottomPad or 0
 
     local healthText = frame.healthText or textFrame:CreateFontString(nil, "OVERLAY")
     healthText:ClearAllPoints()
     healthText:SetFont(fontPath, healthFontSize, fontOutline)
     local healthPadX = math.abs(healthOffsetX)
-    healthText:SetPoint(healthAnchor.leftPoint, frame, healthAnchor.leftPoint, healthPadX, healthOffsetY)
-    healthText:SetPoint(healthAnchor.rightPoint, frame, healthAnchor.rightPoint, -healthPadX, healthOffsetY)
+    healthText:SetPoint(healthAnchor.leftPoint, frame, healthAnchor.leftPoint, healthPadX, healthOffsetY + healthBottomPad)
+    healthText:SetPoint(healthAnchor.rightPoint, frame, healthAnchor.rightPoint, -healthPadX, healthOffsetY + healthBottomPad)
     local healthJustify = healthSettings and healthSettings.healthJustify or healthAnchor.justify
     healthText:SetJustifyH(healthJustify)
     healthText:SetJustifyV(healthAnchor.justifyV)
@@ -1465,6 +1471,12 @@ local function DecorateGroupFrame(frame)
     -- Read indicator positioning from DB
     local indDB = GetIndicatorSettings() or {}
 
+    -- Helper: add bottomPad to Y offset for any BOTTOM* anchor
+    local function BottomPadY(anchor, offY)
+        if anchor:find("BOTTOM") then return offY + bottomPad end
+        return offY
+    end
+
     -- Role icon
     local roleIconSize = indDB.roleIconSize or 12
     local roleAnchor = indDB.roleIconAnchor or "TOPLEFT"
@@ -1474,7 +1486,7 @@ local function DecorateGroupFrame(frame)
     local roleIcon = frame.roleIcon or textFrame:CreateTexture(nil, "OVERLAY")
     roleIcon:ClearAllPoints()
     roleIcon:SetSize(roleIconSize, roleIconSize)
-    roleIcon:SetPoint(roleAnchor, frame, roleAnchor, roleOffX, roleOffY)
+    roleIcon:SetPoint(roleAnchor, frame, roleAnchor, roleOffX, BottomPadY(roleAnchor, roleOffY))
     roleIcon:Hide()
     frame.roleIcon = roleIcon
 
@@ -1483,7 +1495,7 @@ local function DecorateGroupFrame(frame)
     readyCheckIcon:ClearAllPoints()
     readyCheckIcon:SetSize(16, 16)
     local rcAnchor = indDB.readyCheckAnchor or "CENTER"
-    readyCheckIcon:SetPoint(rcAnchor, frame, rcAnchor, indDB.readyCheckOffsetX or 0, indDB.readyCheckOffsetY or 0)
+    readyCheckIcon:SetPoint(rcAnchor, frame, rcAnchor, indDB.readyCheckOffsetX or 0, BottomPadY(rcAnchor, indDB.readyCheckOffsetY or 0))
     readyCheckIcon:Hide()
     frame.readyCheckIcon = readyCheckIcon
 
@@ -1492,7 +1504,7 @@ local function DecorateGroupFrame(frame)
     resIcon:ClearAllPoints()
     resIcon:SetSize(16, 16)
     local resAnchor = indDB.resurrectionAnchor or "CENTER"
-    resIcon:SetPoint(resAnchor, frame, resAnchor, indDB.resurrectionOffsetX or 0, indDB.resurrectionOffsetY or 0)
+    resIcon:SetPoint(resAnchor, frame, resAnchor, indDB.resurrectionOffsetX or 0, BottomPadY(resAnchor, indDB.resurrectionOffsetY or 0))
     resIcon:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
     resIcon:Hide()
     frame.resIcon = resIcon
@@ -1502,7 +1514,7 @@ local function DecorateGroupFrame(frame)
     summonIcon:ClearAllPoints()
     summonIcon:SetSize(16, 16)
     local sumAnchor = indDB.summonAnchor or "CENTER"
-    summonIcon:SetPoint(sumAnchor, frame, sumAnchor, indDB.summonOffsetX or 16, indDB.summonOffsetY or 0)
+    summonIcon:SetPoint(sumAnchor, frame, sumAnchor, indDB.summonOffsetX or 16, BottomPadY(sumAnchor, indDB.summonOffsetY or 0))
     summonIcon:SetAtlas("RaidFrame-Icon-SummonPending")
     summonIcon:Hide()
     frame.summonIcon = summonIcon
@@ -1512,7 +1524,7 @@ local function DecorateGroupFrame(frame)
     leaderIcon:ClearAllPoints()
     leaderIcon:SetSize(12, 12)
     local ldrAnchor = indDB.leaderAnchor or "TOP"
-    leaderIcon:SetPoint(ldrAnchor, frame, ldrAnchor, indDB.leaderOffsetX or 0, indDB.leaderOffsetY or 6)
+    leaderIcon:SetPoint(ldrAnchor, frame, ldrAnchor, indDB.leaderOffsetX or 0, BottomPadY(ldrAnchor, indDB.leaderOffsetY or 6))
     leaderIcon:Hide()
     frame.leaderIcon = leaderIcon
 
@@ -1521,7 +1533,7 @@ local function DecorateGroupFrame(frame)
     targetMarker:ClearAllPoints()
     targetMarker:SetSize(14, 14)
     local tmAnchor = indDB.targetMarkerAnchor or "TOPRIGHT"
-    targetMarker:SetPoint(tmAnchor, frame, tmAnchor, indDB.targetMarkerOffsetX or -2, indDB.targetMarkerOffsetY or -2)
+    targetMarker:SetPoint(tmAnchor, frame, tmAnchor, indDB.targetMarkerOffsetX or -2, BottomPadY(tmAnchor, indDB.targetMarkerOffsetY or -2))
     targetMarker:Hide()
     frame.targetMarker = targetMarker
 
@@ -1530,7 +1542,7 @@ local function DecorateGroupFrame(frame)
     phaseIcon:ClearAllPoints()
     phaseIcon:SetSize(16, 16)
     local phAnchor = indDB.phaseAnchor or "BOTTOMLEFT"
-    phaseIcon:SetPoint(phAnchor, frame, phAnchor, indDB.phaseOffsetX or 2, indDB.phaseOffsetY or 2)
+    phaseIcon:SetPoint(phAnchor, frame, phAnchor, indDB.phaseOffsetX or 2, BottomPadY(phAnchor, indDB.phaseOffsetY or 2))
     phaseIcon:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
     phaseIcon:Hide()
     frame.phaseIcon = phaseIcon

@@ -680,6 +680,7 @@ local function UpdateFrameAuras(frame)
         local dSpacing = auraSettings.debuffSpacing or 2
         local dOffX = auraSettings.debuffOffsetX or -2
         local dOffY = auraSettings.debuffOffsetY or -18
+        if dAnchor:find("BOTTOM") then dOffY = dOffY + (frame._bottomPad or 0) end
         for i = 1, maxDebuffs do
             local entry = sortedAuras[i]
             if not frame.debuffIcons[i] then
@@ -772,6 +773,7 @@ local function UpdateFrameAuras(frame)
         local bSpacing = auraSettings.buffSpacing or 2
         local bOffX = auraSettings.buffOffsetX or 2
         local bOffY = auraSettings.buffOffsetY or 16
+        if bAnchor:find("BOTTOM") then bOffY = bOffY + (frame._bottomPad or 0) end
         for i = 1, maxBuffs do
             local entry = sortedAuras[i]
             if not frame.buffIcons[i] then
