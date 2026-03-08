@@ -2025,16 +2025,30 @@ local function ApplyAutoSizing(frame, settings, parentFrame, key)
                 local parentKey = settings.parent
                 if parentKey == "essential" then parentKey = "cdmEssential"
                 elseif parentKey == "utility" then parentKey = "cdmUtility" end
-                -- Resource bars should size to the actual CDM container (or
-                -- the actual source frame), not the proxy.  The proxy applies
-                -- a min-width floor meant for player/target frames only.
+                -- Resource bars should size to the actual icon content width,
+                -- not the proxy (which includes HUD min-width inflation).
+                -- For CDM sources, prefer viewer state rawContentWidth (the
+                -- pre-inflation icon row width). For non-CDM sources (e.g.
+                -- another resource bar), use the source frame's GetWidth.
                 local source = parentKey and ANCHOR_PROXY_SOURCES[parentKey]
                 if source then
                     local sourceFrame = source.resolver()
                     if sourceFrame then
-                        local frameOk, frameWidth = pcall(function() return sourceFrame:GetWidth() end)
-                        if frameOk and frameWidth and frameWidth > 0 then
-                            parentWidth = frameWidth
+                        local contentWidth
+                        if source.cdm then
+                            -- CDM container SetSize uses the min-width-inflated
+                            -- width; rawContentWidth is the actual icon row span.
+                            local vs = _G.QUI_GetCDMViewerState and _G.QUI_GetCDMViewerState(sourceFrame)
+                            contentWidth = vs and vs.rawContentWidth
+                        end
+                        if not contentWidth or contentWidth <= 0 then
+                            local frameOk, frameWidth = pcall(function() return sourceFrame:GetWidth() end)
+                            if frameOk and frameWidth and frameWidth > 0 then
+                                contentWidth = frameWidth
+                            end
+                        end
+                        if contentWidth and contentWidth > 0 then
+                            parentWidth = contentWidth
                         end
                     end
                 end
@@ -2042,6 +2056,18 @@ local function ApplyAutoSizing(frame, settings, parentFrame, key)
             local adjustedWidth = parentWidth + (settings.widthAdjust or 0)
             if adjustedWidth > 0 then
                 pcall(function() frame:SetWidth(adjustedWidth) end)
+                -- Resource bars use fragmented power displays (runes, essence)
+                -- that size from bar:GetWidth(). Trigger a module refresh so
+                -- fragments re-layout to match the new width.
+                if isResourceBar then
+                    C_Timer.After(0, function()
+                        if key == "primaryPower" then
+                            if QUICore and QUICore.UpdatePowerBar then QUICore:UpdatePowerBar() end
+                        elseif key == "secondaryPower" then
+                            if QUICore and QUICore.UpdateSecondaryPowerBar then QUICore:UpdateSecondaryPowerBar() end
+                        end
+                    end)
+                end
             end
         end
 
