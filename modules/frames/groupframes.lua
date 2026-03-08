@@ -720,6 +720,12 @@ local ROLE_ATLAS = {
     DAMAGER = "roleicon-tiny-dps",
 }
 
+local ROLE_TOGGLE_KEY = {
+    TANK    = "showRoleTank",
+    HEALER  = "showRoleHealer",
+    DAMAGER = "showRoleDPS",
+}
+
 local function UpdateRoleIcon(frame)
     if not frame or not frame.unit or not frame.roleIcon then return end
     local indSettings = GetIndicatorSettings()
@@ -729,6 +735,13 @@ local function UpdateRoleIcon(frame)
     end
 
     local role = UnitGroupRolesAssigned(frame.unit)
+    -- Check per-role toggle
+    local toggleKey = ROLE_TOGGLE_KEY[role]
+    if toggleKey and indSettings[toggleKey] == false then
+        frame.roleIcon:Hide()
+        return
+    end
+
     local atlas = ROLE_ATLAS[role]
     if atlas then
         frame.roleIcon:SetAtlas(atlas)
@@ -845,7 +858,8 @@ local function UpdateTargetMarker(frame)
 
     local index = GetRaidTargetIndex(frame.unit)
     if index then
-        frame.targetMarker:SetAtlas("raidtargetingicon_" .. index)
+        frame.targetMarker:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+        SetRaidTargetIconTexture(frame.targetMarker, index)
         frame.targetMarker:Show()
     else
         frame.targetMarker:Hide()
@@ -1042,103 +1056,136 @@ end
 ---------------------------------------------------------------------------
 -- UPDATE: Defensive Indicator
 ---------------------------------------------------------------------------
+-- Growth direction offsets for multi-icon layout
+local DEFENSIVE_GROWTH_OFFSETS = {
+    RIGHT = function(size, spacing) return size + spacing, 0 end,
+    LEFT  = function(size, spacing) return -(size + spacing), 0 end,
+    UP    = function(size, spacing) return 0, size + spacing end,
+    DOWN  = function(size, spacing) return 0, -(size + spacing) end,
+}
+
 local function UpdateDefensiveIndicator(frame)
-    if not frame or not frame.unit or not frame.defensiveIcon then return end
+    if not frame or not frame.unit or not frame.defensiveIcons then return end
 
     local healerSettings = GetHealerSettings()
     if not healerSettings or not healerSettings.defensiveIndicator
        or not healerSettings.defensiveIndicator.enabled then
-        frame.defensiveIcon:Hide()
+        for _, icon in ipairs(frame.defensiveIcons) do icon:Hide() end
         return
     end
 
     local unit = frame.unit
     if not UnitExists(unit) or UnitIsDeadOrGhost(unit) then
-        frame.defensiveIcon:Hide()
+        for _, icon in ipairs(frame.defensiveIcons) do icon:Hide() end
         return
     end
 
-    -- Try WoW 12.0+ AuraUtil.AuraFilters first (C-side, secret-safe, 1 result each)
-    local foundAura = nil
+    local defSettings = healerSettings.defensiveIndicator
+    local maxIcons = defSettings.maxIcons or 3
+
+    -- Collect defensive auras (deduplicated by auraInstanceID)
+    local foundAuras = {}
+    local seen = {}
+
     if C_UnitAuras and C_UnitAuras.GetUnitAuras then
         -- BIG_DEFENSIVE filter
         if AuraUtil and AuraUtil.AuraFilters and AuraUtil.AuraFilters.BigDefensive then
             local ok, auras = pcall(C_UnitAuras.GetUnitAuras, unit,
-                "HELPFUL|" .. AuraUtil.AuraFilters.BigDefensive, 1)
-            if ok and auras and auras[1] then
-                foundAura = auras[1]
+                "HELPFUL|" .. AuraUtil.AuraFilters.BigDefensive, maxIcons)
+            if ok and auras then
+                for _, aura in ipairs(auras) do
+                    if aura.auraInstanceID and not seen[aura.auraInstanceID] then
+                        seen[aura.auraInstanceID] = true
+                        foundAuras[#foundAuras + 1] = aura
+                    end
+                end
             end
         end
-        -- EXTERNAL_DEFENSIVE filter (if no big defensive found)
-        if not foundAura and AuraUtil and AuraUtil.AuraFilters
+        -- EXTERNAL_DEFENSIVE filter
+        if #foundAuras < maxIcons and AuraUtil and AuraUtil.AuraFilters
            and AuraUtil.AuraFilters.ExternalDefensive then
             local ok, auras = pcall(C_UnitAuras.GetUnitAuras, unit,
-                "HELPFUL|" .. AuraUtil.AuraFilters.ExternalDefensive, 1)
-            if ok and auras and auras[1] then
-                foundAura = auras[1]
+                "HELPFUL|" .. AuraUtil.AuraFilters.ExternalDefensive, maxIcons - #foundAuras)
+            if ok and auras then
+                for _, aura in ipairs(auras) do
+                    if aura.auraInstanceID and not seen[aura.auraInstanceID] then
+                        seen[aura.auraInstanceID] = true
+                        foundAuras[#foundAuras + 1] = aura
+                        if #foundAuras >= maxIcons then break end
+                    end
+                end
             end
         end
         -- Fallback: check shared aura cache for known defensive spell IDs
-        -- (cache populated by groupframes_auras.lua — avoids redundant bulk scan)
-        if not foundAura then
+        if #foundAuras < maxIcons then
             local GFA = ns.QUI_GroupFrameAuras
             local cache = GFA and GFA.unitAuraCache and GFA.unitAuraCache[unit]
             if cache and cache.helpful then
                 for _, auraData in ipairs(cache.helpful) do
                     local spellID = SafeValue(auraData.spellId, nil)
                     if spellID and DEFENSIVE_SPELL_IDS[spellID] then
-                        foundAura = auraData
-                        break
+                        local instID = auraData.auraInstanceID
+                        if not instID or not seen[instID] then
+                            if instID then seen[instID] = true end
+                            foundAuras[#foundAuras + 1] = auraData
+                            if #foundAuras >= maxIcons then break end
+                        end
                     end
                 end
             end
         end
     end
 
-    if not foundAura then
-        frame.defensiveIcon:Hide()
-        return
-    end
-
-    -- Update icon texture (C-side SetTexture handles secret values)
-    if foundAura.icon and frame.defensiveIcon.icon then
-        pcall(frame.defensiveIcon.icon.SetTexture, frame.defensiveIcon.icon, foundAura.icon)
-    end
-
-    -- Update cooldown swipe
-    local cd = frame.defensiveIcon.cooldown
-    if cd and foundAura.duration and foundAura.expirationTime then
-        if foundAura.auraInstanceID and C_UnitAuras.GetAuraDuration
-           and cd.SetCooldownFromDurationObject then
-            local ok, durationObj = pcall(C_UnitAuras.GetAuraDuration, unit, foundAura.auraInstanceID)
-            if ok and durationObj then
-                pcall(cd.SetCooldownFromDurationObject, cd, durationObj)
-            elseif cd.SetCooldownFromExpirationTime then
-                pcall(cd.SetCooldownFromExpirationTime, cd, foundAura.expirationTime, foundAura.duration)
-            end
-        elseif cd.SetCooldownFromExpirationTime then
-            pcall(cd.SetCooldownFromExpirationTime, cd, foundAura.expirationTime, foundAura.duration)
-        else
-            pcall(function()
-                cd:SetCooldown(foundAura.expirationTime - foundAura.duration, foundAura.duration)
-            end)
-        end
-    elseif cd then
-        cd:Clear()
-    end
-
-    -- Size and position
-    local defSettings = healerSettings.defensiveIndicator
+    -- Layout settings
     local iconSize = defSettings.iconSize or 16
     local position = defSettings.position or "CENTER"
     local offsetX = defSettings.offsetX or 0
     local offsetY = defSettings.offsetY or 0
-    frame.defensiveIcon:SetSize(iconSize, iconSize)
-    frame.defensiveIcon:ClearAllPoints()
-    frame.defensiveIcon:SetPoint(position, frame, position, offsetX, offsetY)
-    frame.defensiveIcon:SetFrameLevel(frame:GetFrameLevel() + 10)
+    local spacing = defSettings.spacing or 2
+    local growDir = defSettings.growDirection or "RIGHT"
+    local growFn = DEFENSIVE_GROWTH_OFFSETS[growDir] or DEFENSIVE_GROWTH_OFFSETS.RIGHT
+    local stepX, stepY = growFn(iconSize, spacing)
 
-    frame.defensiveIcon:Show()
+    for i, defIcon in ipairs(frame.defensiveIcons) do
+        local aura = foundAuras[i]
+        if aura then
+            -- Update icon texture
+            if aura.icon and defIcon.icon then
+                pcall(defIcon.icon.SetTexture, defIcon.icon, aura.icon)
+            end
+
+            -- Update cooldown swipe
+            local cd = defIcon.cooldown
+            if cd and aura.duration and aura.expirationTime then
+                if aura.auraInstanceID and C_UnitAuras.GetAuraDuration
+                   and cd.SetCooldownFromDurationObject then
+                    local ok, durationObj = pcall(C_UnitAuras.GetAuraDuration, unit, aura.auraInstanceID)
+                    if ok and durationObj then
+                        pcall(cd.SetCooldownFromDurationObject, cd, durationObj)
+                    elseif cd.SetCooldownFromExpirationTime then
+                        pcall(cd.SetCooldownFromExpirationTime, cd, aura.expirationTime, aura.duration)
+                    end
+                elseif cd.SetCooldownFromExpirationTime then
+                    pcall(cd.SetCooldownFromExpirationTime, cd, aura.expirationTime, aura.duration)
+                else
+                    pcall(function()
+                        cd:SetCooldown(aura.expirationTime - aura.duration, aura.duration)
+                    end)
+                end
+            elseif cd then
+                cd:Clear()
+            end
+
+            -- Position: first icon at anchor, subsequent offset by growth direction
+            defIcon:SetSize(iconSize, iconSize)
+            defIcon:ClearAllPoints()
+            defIcon:SetPoint(position, frame, position, offsetX + stepX * (i - 1), offsetY + stepY * (i - 1))
+            defIcon:SetFrameLevel(frame:GetFrameLevel() + 10)
+            defIcon:Show()
+        else
+            defIcon:Hide()
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -1388,7 +1435,8 @@ local function DecorateGroupFrame(frame)
     local namePadX = math.abs(nameOffsetX)
     nameText:SetPoint(nameAnchor.leftPoint, frame, nameAnchor.leftPoint, namePadX, nameOffsetY)
     nameText:SetPoint(nameAnchor.rightPoint, frame, nameAnchor.rightPoint, -namePadX, nameOffsetY)
-    nameText:SetJustifyH(nameAnchor.justify)
+    local nameJustify = nameSettings and nameSettings.nameJustify or nameAnchor.justify
+    nameText:SetJustifyH(nameJustify)
     nameText:SetJustifyV(nameAnchor.justifyV)
     nameText:SetTextColor(1, 1, 1, 1)
     nameText:SetWordWrap(false)
@@ -1407,21 +1455,26 @@ local function DecorateGroupFrame(frame)
     local healthPadX = math.abs(healthOffsetX)
     healthText:SetPoint(healthAnchor.leftPoint, frame, healthAnchor.leftPoint, healthPadX, healthOffsetY)
     healthText:SetPoint(healthAnchor.rightPoint, frame, healthAnchor.rightPoint, -healthPadX, healthOffsetY)
-    healthText:SetJustifyH(healthAnchor.justify)
+    local healthJustify = healthSettings and healthSettings.healthJustify or healthAnchor.justify
+    healthText:SetJustifyH(healthJustify)
     healthText:SetJustifyV(healthAnchor.justifyV)
     healthText:SetTextColor(1, 1, 1, 1)
     healthText:SetWordWrap(false)
     frame.healthText = healthText
 
+    -- Read indicator positioning from DB
+    local indDB = GetIndicatorSettings() or {}
+
     -- Role icon
-    local indSettings = GetIndicatorSettings()
-    local roleIconSize = indSettings and indSettings.roleIconSize or 12
-    local roleAnchor = indSettings and indSettings.roleIconAnchor or "TOPLEFT"
+    local roleIconSize = indDB.roleIconSize or 12
+    local roleAnchor = indDB.roleIconAnchor or "TOPLEFT"
+    local roleOffX = indDB.roleIconOffsetX or 2
+    local roleOffY = indDB.roleIconOffsetY or -2
 
     local roleIcon = frame.roleIcon or textFrame:CreateTexture(nil, "OVERLAY")
     roleIcon:ClearAllPoints()
     roleIcon:SetSize(roleIconSize, roleIconSize)
-    roleIcon:SetPoint(roleAnchor, frame, roleAnchor, 2, -2)
+    roleIcon:SetPoint(roleAnchor, frame, roleAnchor, roleOffX, roleOffY)
     roleIcon:Hide()
     frame.roleIcon = roleIcon
 
@@ -1429,7 +1482,8 @@ local function DecorateGroupFrame(frame)
     local readyCheckIcon = frame.readyCheckIcon or textFrame:CreateTexture(nil, "OVERLAY")
     readyCheckIcon:ClearAllPoints()
     readyCheckIcon:SetSize(16, 16)
-    readyCheckIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    local rcAnchor = indDB.readyCheckAnchor or "CENTER"
+    readyCheckIcon:SetPoint(rcAnchor, frame, rcAnchor, indDB.readyCheckOffsetX or 0, indDB.readyCheckOffsetY or 0)
     readyCheckIcon:Hide()
     frame.readyCheckIcon = readyCheckIcon
 
@@ -1437,8 +1491,8 @@ local function DecorateGroupFrame(frame)
     local resIcon = frame.resIcon or textFrame:CreateTexture(nil, "OVERLAY")
     resIcon:ClearAllPoints()
     resIcon:SetSize(16, 16)
-    resIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    resIcon:SetAtlas("nameplates-icon-flag-horde") -- Placeholder, will be proper res icon
+    local resAnchor = indDB.resurrectionAnchor or "CENTER"
+    resIcon:SetPoint(resAnchor, frame, resAnchor, indDB.resurrectionOffsetX or 0, indDB.resurrectionOffsetY or 0)
     resIcon:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
     resIcon:Hide()
     frame.resIcon = resIcon
@@ -1447,8 +1501,9 @@ local function DecorateGroupFrame(frame)
     local summonIcon = frame.summonIcon or textFrame:CreateTexture(nil, "OVERLAY")
     summonIcon:ClearAllPoints()
     summonIcon:SetSize(16, 16)
-    summonIcon:SetPoint("CENTER", frame, "CENTER", 16, 0)
-    summonIcon:SetAtlas("Raid-Icon-SummonPending")
+    local sumAnchor = indDB.summonAnchor or "CENTER"
+    summonIcon:SetPoint(sumAnchor, frame, sumAnchor, indDB.summonOffsetX or 16, indDB.summonOffsetY or 0)
+    summonIcon:SetAtlas("RaidFrame-Icon-SummonPending")
     summonIcon:Hide()
     frame.summonIcon = summonIcon
 
@@ -1456,7 +1511,8 @@ local function DecorateGroupFrame(frame)
     local leaderIcon = frame.leaderIcon or textFrame:CreateTexture(nil, "OVERLAY")
     leaderIcon:ClearAllPoints()
     leaderIcon:SetSize(12, 12)
-    leaderIcon:SetPoint("TOP", frame, "TOP", 0, 6)
+    local ldrAnchor = indDB.leaderAnchor or "TOP"
+    leaderIcon:SetPoint(ldrAnchor, frame, ldrAnchor, indDB.leaderOffsetX or 0, indDB.leaderOffsetY or 6)
     leaderIcon:Hide()
     frame.leaderIcon = leaderIcon
 
@@ -1464,7 +1520,8 @@ local function DecorateGroupFrame(frame)
     local targetMarker = frame.targetMarker or textFrame:CreateTexture(nil, "OVERLAY")
     targetMarker:ClearAllPoints()
     targetMarker:SetSize(14, 14)
-    targetMarker:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -2, -2)
+    local tmAnchor = indDB.targetMarkerAnchor or "TOPRIGHT"
+    targetMarker:SetPoint(tmAnchor, frame, tmAnchor, indDB.targetMarkerOffsetX or -2, indDB.targetMarkerOffsetY or -2)
     targetMarker:Hide()
     frame.targetMarker = targetMarker
 
@@ -1472,8 +1529,8 @@ local function DecorateGroupFrame(frame)
     local phaseIcon = frame.phaseIcon or textFrame:CreateTexture(nil, "OVERLAY")
     phaseIcon:ClearAllPoints()
     phaseIcon:SetSize(16, 16)
-    phaseIcon:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 2, 2)
-    phaseIcon:SetAtlas("nameplates-icon-flag-horde") -- Placeholder
+    local phAnchor = indDB.phaseAnchor or "BOTTOMLEFT"
+    phaseIcon:SetPoint(phAnchor, frame, phAnchor, indDB.phaseOffsetX or 2, indDB.phaseOffsetY or 2)
     phaseIcon:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
     phaseIcon:Hide()
     frame.phaseIcon = phaseIcon
@@ -1549,40 +1606,45 @@ local function DecorateGroupFrame(frame)
     dispelOverlay:Hide()
     frame.dispelOverlay = dispelOverlay
 
-    -- Defensive indicator icon (centered, high frame level)
-    local defensiveIcon = frame.defensiveIcon or CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    defensiveIcon:SetSize(16, 16)
-    defensiveIcon:ClearAllPoints()
-    defensiveIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    defensiveIcon:SetFrameLevel(frame:GetFrameLevel() + 10)
+    -- Defensive indicator icons (pool of up to MAX_DEFENSIVE_ICONS)
+    local MAX_DEFENSIVE_ICONS = 5
+    if not frame.defensiveIcons then frame.defensiveIcons = {} end
+    for i = 1, MAX_DEFENSIVE_ICONS do
+        local defIcon = frame.defensiveIcons[i] or CreateFrame("Frame", nil, frame, "BackdropTemplate")
+        defIcon:SetSize(16, 16)
+        defIcon:ClearAllPoints()
+        defIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
+        defIcon:SetFrameLevel(frame:GetFrameLevel() + 10)
 
-    local defTex = defensiveIcon.icon or defensiveIcon:CreateTexture(nil, "ARTWORK")
-    defTex:SetAllPoints()
-    defTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    defensiveIcon.icon = defTex
+        local defTex = defIcon.icon or defIcon:CreateTexture(nil, "ARTWORK")
+        defTex:SetAllPoints()
+        defTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        defIcon.icon = defTex
 
-    defensiveIcon:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    defensiveIcon:SetBackdropBorderColor(0, 0.8, 0, 1)
+        defIcon:SetBackdrop({
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        defIcon:SetBackdropBorderColor(0, 0.8, 0, 1)
 
-    local defCD = defensiveIcon.cooldown or CreateFrame("Cooldown", nil, defensiveIcon, "CooldownFrameTemplate")
-    defCD:SetAllPoints(defTex)
-    defCD:SetDrawEdge(false)
-    defCD:SetDrawSwipe(true)
-    defCD:SetReverse(true)
-    defCD:SetHideCountdownNumbers(false)
-    defensiveIcon.cooldown = defCD
+        local defCD = defIcon.cooldown or CreateFrame("Cooldown", nil, defIcon, "CooldownFrameTemplate")
+        defCD:SetAllPoints(defTex)
+        defCD:SetDrawEdge(false)
+        defCD:SetDrawSwipe(true)
+        defCD:SetReverse(true)
+        defCD:SetHideCountdownNumbers(false)
+        defIcon.cooldown = defCD
 
-    -- Disable mouse on the icon so clicks pass through to the unit frame
-    if defensiveIcon.SetMouseClickEnabled then
-        defensiveIcon:SetMouseClickEnabled(false)
+        if defIcon.SetMouseClickEnabled then
+            defIcon:SetMouseClickEnabled(false)
+        end
+        defIcon:EnableMouse(false)
+
+        defIcon:Hide()
+        frame.defensiveIcons[i] = defIcon
     end
-    defensiveIcon:EnableMouse(false)
-
-    defensiveIcon:Hide()
-    frame.defensiveIcon = defensiveIcon
+    -- Keep backward compat alias for single-icon references
+    frame.defensiveIcon = frame.defensiveIcons[1]
 
     -- Portrait (optional, side-attached)
     local portraitSettings = GetPortraitSettings()

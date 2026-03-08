@@ -56,7 +56,7 @@ local FAKE_DEBUFF_ICONS = {
 local PREVIEW_INDICATORS = {
     [1] = { leader = true, targetHighlight = true, threatBorder = true, buffs = 1 },
     [2] = { readyCheck = true, raidMarker = 1, debuffs = 2, buffs = 1 },
-    [3] = { phaseIcon = true, resurrection = true, debuffs = 1, defensiveIndicator = true },
+    [3] = { phaseIcon = true, resurrection = true, debuffs = 1, defensiveIndicator = 2 },
     [4] = { dispelOverlay = true, summonPending = true, debuffs = 3 },
     [5] = { raidMarker = 8, buffs = 2 },
 }
@@ -320,11 +320,17 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
     local baseLevel = frame:GetFrameLevel()
 
     if prev and indSettings then
+        -- Helper to position from DB
+        local function IndPoint(tex, anchorKey, offXKey, offYKey, defAnchor, defX, defY)
+            local a = indSettings[anchorKey] or defAnchor
+            tex:SetPoint(a, frame, a, indSettings[offXKey] or defX, indSettings[offYKey] or defY)
+        end
+
         -- Ready Check icon
         if prev.readyCheck and indSettings.showReadyCheck ~= false then
             local rc = textFrame:CreateTexture(nil, "OVERLAY")
             rc:SetSize(16, 16)
-            rc:SetPoint("CENTER", frame, "CENTER", 0, 0)
+            IndPoint(rc, "readyCheckAnchor", "readyCheckOffsetX", "readyCheckOffsetY", "CENTER", 0, 0)
             rc:SetTexture("INTERFACE\\RAIDFRAME\\ReadyCheck-Ready")
         end
 
@@ -332,7 +338,7 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
         if prev.resurrection and indSettings.showResurrection ~= false then
             local ri = textFrame:CreateTexture(nil, "OVERLAY")
             ri:SetSize(16, 16)
-            ri:SetPoint("CENTER", frame, "CENTER", 0, 0)
+            IndPoint(ri, "resurrectionAnchor", "resurrectionOffsetX", "resurrectionOffsetY", "CENTER", 0, 0)
             ri:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
         end
 
@@ -340,15 +346,15 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
         if prev.summonPending and indSettings.showSummonPending ~= false then
             local si = textFrame:CreateTexture(nil, "OVERLAY")
             si:SetSize(20, 20)
-            si:SetPoint("CENTER", frame, "CENTER", 16, 0)
-            si:SetTexture("Interface\\RaidFrame\\Raid-Icon-SummonPending")
+            IndPoint(si, "summonAnchor", "summonOffsetX", "summonOffsetY", "CENTER", 16, 0)
+            si:SetAtlas("RaidFrame-Icon-SummonPending")
         end
 
         -- Leader icon
         if prev.leader and indSettings.showLeaderIcon ~= false then
             local li = textFrame:CreateTexture(nil, "OVERLAY")
             li:SetSize(12, 12)
-            li:SetPoint("TOP", frame, "TOP", 0, 6)
+            IndPoint(li, "leaderAnchor", "leaderOffsetX", "leaderOffsetY", "TOP", 0, 6)
             li:SetAtlas("groupfinder-icon-leader")
         end
 
@@ -356,16 +362,17 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
         if prev.raidMarker and indSettings.showTargetMarker ~= false then
             local rm = textFrame:CreateTexture(nil, "OVERLAY")
             rm:SetSize(14, 14)
-            rm:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -2, -2)
-            rm:SetAtlas("raidtargetingicon_" .. prev.raidMarker)
+            IndPoint(rm, "targetMarkerAnchor", "targetMarkerOffsetX", "targetMarkerOffsetY", "TOPRIGHT", -2, -2)
+            rm:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+            SetRaidTargetIconTexture(rm, prev.raidMarker)
         end
 
         -- Phase icon
         if prev.phaseIcon and indSettings.showPhaseIcon ~= false then
             local pi = textFrame:CreateTexture(nil, "OVERLAY")
             pi:SetSize(16, 16)
-            pi:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 2, 2)
-            pi:SetAtlas("nameplates-icon-flag-horde")
+            IndPoint(pi, "phaseAnchor", "phaseOffsetX", "phaseOffsetY", "BOTTOMLEFT", 2, 2)
+            pi:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
         end
 
         -- Threat Border — edge + tinted fill over the whole frame
@@ -427,7 +434,7 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
         end
     end
 
-    -- Defensive indicator preview
+    -- Defensive indicator preview (shows up to maxIcons)
     if prev and prev.defensiveIndicator then
         local healerSettings = db.healer
         local defSettings = healerSettings and healerSettings.defensiveIndicator
@@ -436,21 +443,37 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             local position = defSettings.position or "CENTER"
             local offsetX = defSettings.offsetX or 0
             local offsetY = defSettings.offsetY or 0
+            local spacing = defSettings.spacing or 2
+            local growDir = defSettings.growDirection or "RIGHT"
+            local maxIcons = math.min(defSettings.maxIcons or 3, prev.defensiveIndicator == true and 2 or (prev.defensiveIndicator or 2))
 
-            local defIcon = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-            defIcon:SetSize(iconSize, iconSize)
-            defIcon:SetPoint(position, frame, position, offsetX, offsetY)
-            defIcon:SetFrameLevel(baseLevel + 10)
-            defIcon:SetBackdrop({
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = px,
-            })
-            defIcon:SetBackdropBorderColor(0, 0.8, 0, 1)
+            -- Growth direction offsets
+            local stepX, stepY = 0, 0
+            if growDir == "RIGHT" then stepX = iconSize + spacing
+            elseif growDir == "LEFT" then stepX = -(iconSize + spacing)
+            elseif growDir == "UP" then stepY = iconSize + spacing
+            elseif growDir == "DOWN" then stepY = -(iconSize + spacing)
+            end
 
-            local icon = defIcon:CreateTexture(nil, "ARTWORK")
-            icon:SetAllPoints()
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            icon:SetTexture(135936) -- Spell_Holy_SealOfProtection (Ironbark-like)
+            -- Sample defensive textures for preview
+            local previewTextures = { 135936, 135987, 136120 } -- Ironbark, Shield Wall, Barkskin
+
+            for i = 1, maxIcons do
+                local defIcon = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+                defIcon:SetSize(iconSize, iconSize)
+                defIcon:SetPoint(position, frame, position, offsetX + stepX * (i - 1), offsetY + stepY * (i - 1))
+                defIcon:SetFrameLevel(baseLevel + 10)
+                defIcon:SetBackdrop({
+                    edgeFile = "Interface\\Buttons\\WHITE8x8",
+                    edgeSize = px,
+                })
+                defIcon:SetBackdropBorderColor(0, 0.8, 0, 1)
+
+                local icon = defIcon:CreateTexture(nil, "ARTWORK")
+                icon:SetAllPoints()
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                icon:SetTexture(previewTextures[i] or previewTextures[1])
+            end
         end
     end
 

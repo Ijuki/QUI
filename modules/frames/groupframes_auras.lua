@@ -442,8 +442,6 @@ end
 local BUFF_CLASSIFICATION_MAP = {
     raid             = "HELPFUL|RAID",
     cancelable       = "HELPFUL|CANCELABLE",
-    bigDefensive     = "HELPFUL|BIG_DEFENSIVE",
-    externalDefensive = "HELPFUL|EXTERNAL_DEFENSIVE",
     important        = "HELPFUL|IMPORTANT",
 }
 
@@ -459,6 +457,10 @@ local cachedDebuffFilters = {}
 local cachedFilterVersion = -1
 local cachedFilterMode = "off"
 local cachedOnlyMine = false
+local cachedBuffWhitelist = nil   -- ref to db table when mode = whitelist
+local cachedBuffBlacklist = nil   -- ref to db table when mode = blacklist
+local cachedDebuffWhitelist = nil
+local cachedDebuffBlacklist = nil
 
 local function RebuildFilterCache()
     local db = GetDB()
@@ -470,31 +472,59 @@ local function RebuildFilterCache()
 
     wipe(cachedBuffFilters)
     wipe(cachedDebuffFilters)
+    cachedBuffWhitelist = nil
+    cachedBuffBlacklist = nil
+    cachedDebuffWhitelist = nil
+    cachedDebuffBlacklist = nil
 
-    if cachedFilterMode ~= "classification" then
-        cachedFilterVersion = layoutVersion
-        return
-    end
-
-    local buffClass = auraSettings.buffClassifications
-    if buffClass then
-        for key, filterStr in pairs(BUFF_CLASSIFICATION_MAP) do
-            if buffClass[key] then
-                table.insert(cachedBuffFilters, filterStr)
+    if cachedFilterMode == "classification" then
+        local buffClass = auraSettings.buffClassifications
+        if buffClass then
+            for key, filterStr in pairs(BUFF_CLASSIFICATION_MAP) do
+                if buffClass[key] then
+                    table.insert(cachedBuffFilters, filterStr)
+                end
             end
         end
-    end
 
-    local debuffClass = auraSettings.debuffClassifications
-    if debuffClass then
-        for key, filterStr in pairs(DEBUFF_CLASSIFICATION_MAP) do
-            if debuffClass[key] then
-                table.insert(cachedDebuffFilters, filterStr)
+        local debuffClass = auraSettings.debuffClassifications
+        if debuffClass then
+            for key, filterStr in pairs(DEBUFF_CLASSIFICATION_MAP) do
+                if debuffClass[key] then
+                    table.insert(cachedDebuffFilters, filterStr)
+                end
             end
         end
+    elseif cachedFilterMode == "whitelist" then
+        local bwl = auraSettings.buffWhitelist
+        if bwl and next(bwl) then cachedBuffWhitelist = bwl end
+        local dwl = auraSettings.debuffWhitelist
+        if dwl and next(dwl) then cachedDebuffWhitelist = dwl end
+    elseif cachedFilterMode == "blacklist" then
+        local bbl = auraSettings.buffBlacklist
+        if bbl and next(bbl) then cachedBuffBlacklist = bbl end
+        local dbl = auraSettings.debuffBlacklist
+        if dbl and next(dbl) then cachedDebuffBlacklist = dbl end
     end
 
     cachedFilterVersion = layoutVersion
+end
+
+-- Check if an aura passes whitelist/blacklist filter by spellID.
+-- Returns true if aura should be shown.
+-- Fail-open: if spellID is secret, show the aura.
+local function AuraPassesSpellFilter(auraData, whitelist, blacklist)
+    local spellId = auraData and auraData.spellId
+    if not spellId or IsSecretValue(spellId) then
+        return true -- fail-open
+    end
+    if whitelist then
+        return whitelist[spellId] == true
+    end
+    if blacklist then
+        return blacklist[spellId] ~= true
+    end
+    return true
 end
 
 -- Check if an aura passes classification filter (OR logic).
@@ -592,8 +622,10 @@ local function UpdateFrameAuras(frame)
         RebuildFilterCache()
     end
 
-    local useFilter = cachedFilterMode == "classification"
-    local onlyMine = useFilter and cachedOnlyMine
+    local useClassification = cachedFilterMode == "classification"
+    local useWhitelist = cachedFilterMode == "whitelist"
+    local useBlacklist = cachedFilterMode == "blacklist"
+    local onlyMine = cachedOnlyMine
     local playerUnit = "player"
 
     -- Process debuffs
@@ -608,15 +640,29 @@ local function UpdateFrameAuras(frame)
 
         -- Collect harmful auras from shared cache (already scanned)
         wipe(sortedAuras)
-        local debuffFilters = useFilter and #cachedDebuffFilters > 0 and cachedDebuffFilters or nil
+        local debuffFilters = useClassification and #cachedDebuffFilters > 0 and cachedDebuffFilters or nil
         local cache = unitAuraCache[unit]
         if cache and cache.harmful then
             for _, auraData in ipairs(cache.harmful) do
-                -- Classification filter: skip auras that don't match any enabled classification
-                -- When no debuff classifications are enabled, fail-open (show all)
+                local dominated = false
+
+                -- Classification filter
                 if debuffFilters and not AuraPassesFilter(unit, auraData.auraInstanceID, debuffFilters) then
-                    -- filtered out
-                else
+                    dominated = true
+                end
+
+                -- Whitelist/blacklist filter
+                if not dominated and useWhitelist and cachedDebuffWhitelist then
+                    if not AuraPassesSpellFilter(auraData, cachedDebuffWhitelist, nil) then
+                        dominated = true
+                    end
+                elseif not dominated and useBlacklist and cachedDebuffBlacklist then
+                    if not AuraPassesSpellFilter(auraData, nil, cachedDebuffBlacklist) then
+                        dominated = true
+                    end
+                end
+
+                if not dominated then
                     local entry = AcquireAuraTable()
                     entry.auraData = auraData
                     entry.priority = GetAuraPriority(auraData)
@@ -689,15 +735,25 @@ local function UpdateFrameAuras(frame)
 
                 -- "Only My Buffs" filter
                 if onlyMine and not dominated then
-                    local src = SafeValue(auraData.sourceUnit, nil)
-                    if src and src ~= playerUnit and not UnitIsUnit(src, playerUnit) then
+                    if not auraData.isFromPlayerOrPlayerPet then
                         dominated = true
                     end
                 end
 
                 -- Classification filter
-                if useFilter and not dominated and #cachedBuffFilters > 0 then
+                if useClassification and not dominated and #cachedBuffFilters > 0 then
                     if not AuraPassesFilter(unit, auraData.auraInstanceID, cachedBuffFilters) then
+                        dominated = true
+                    end
+                end
+
+                -- Whitelist/blacklist filter
+                if not dominated and useWhitelist and cachedBuffWhitelist then
+                    if not AuraPassesSpellFilter(auraData, cachedBuffWhitelist, nil) then
+                        dominated = true
+                    end
+                elseif not dominated and useBlacklist and cachedBuffBlacklist then
+                    if not AuraPassesSpellFilter(auraData, nil, cachedBuffBlacklist) then
                         dominated = true
                     end
                 end

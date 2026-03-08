@@ -1,7 +1,6 @@
 --[[
-    QUI Group Frames - Visual Designer
+    QUI Group Frame Designer
     Interactive preview-based editor for group frame settings.
-    Reads/writes the same DB paths as the traditional Group Frames tab.
 ]]
 
 local ADDON_NAME, ns = ...
@@ -37,6 +36,64 @@ local function RefreshGF()
     if _G.QUI_RefreshGroupFrames then
         _G.QUI_RefreshGroupFrames()
     end
+end
+
+---------------------------------------------------------------------------
+-- DYNAMIC LAYOUT HELPER
+-- Collects rows and lays them out vertically, collapsing hidden rows.
+-- condFn: optional function returning true/false for conditional visibility.
+-- isHeader: true for section headers (no RIGHT anchor).
+-- Toggles (widgets with .track) that don't have a condFn are auto-hooked
+-- to trigger relayout on click.
+---------------------------------------------------------------------------
+local function CreateDynamicLayout(content)
+    local rows = {}
+    local L = {}
+
+    function L:Row(widget, height, condFn, isHeader)
+        rows[#rows + 1] = { widget = widget, height = height, condFn = condFn, isHeader = isHeader }
+        if not isHeader then
+            widget:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
+        end
+    end
+
+    function L:Header(widget)
+        self:Row(widget, widget.gap, nil, true)
+    end
+
+    function L:Finish()
+        local function Relayout()
+            local ly = -10
+            for _, row in ipairs(rows) do
+                local visible = true
+                if row.condFn then visible = row.condFn() end
+                if visible then
+                    row.widget:ClearAllPoints()
+                    row.widget:SetPoint("TOPLEFT", PAD, ly)
+                    if not row.isHeader then
+                        row.widget:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
+                    end
+                    row.widget:Show()
+                    ly = ly - row.height
+                else
+                    row.widget:Hide()
+                end
+            end
+            content:SetHeight(math.abs(ly) + 10)
+        end
+
+        -- Auto-hook toggles (widgets with .track and no condFn) to relayout
+        for _, row in ipairs(rows) do
+            if row.widget.track and not row.condFn then
+                row.widget.track:HookScript("OnClick", Relayout)
+            end
+        end
+
+        Relayout()
+        return Relayout
+    end
+
+    return L
 end
 
 ---------------------------------------------------------------------------
@@ -127,6 +184,159 @@ local FIVE_POINT_OPTIONS = {
     { value = "TOP", text = "Top" },
     { value = "BOTTOM", text = "Bottom" },
 }
+
+local TEXT_JUSTIFY_OPTIONS = {
+    { value = "LEFT", text = "Left" },
+    { value = "CENTER", text = "Center" },
+    { value = "RIGHT", text = "Right" },
+}
+
+local FILTER_MODE_OPTIONS = {
+    { value = "off", text = "Off (Show All)" },
+    { value = "classification", text = "Classification" },
+}
+
+---------------------------------------------------------------------------
+-- AURA FILTER PRESETS: Common healer/support spell IDs per spec
+-- Spells on Blizzard's Midnight whitelist — spellId readable in combat
+---------------------------------------------------------------------------
+local AURA_FILTER_PRESETS = {
+    {
+        name = "Restoration Druid",
+        specID = 105,
+        spells = {
+            { id = 774,    name = "Rejuvenation" },
+            { id = 8936,   name = "Regrowth" },
+            { id = 33763,  name = "Lifebloom" },
+            { id = 155777, name = "Germination" },
+            { id = 48438,  name = "Wild Growth" },
+            { id = 102342, name = "Ironbark" },
+            { id = 33786,  name = "Cyclone" },
+        },
+    },
+    {
+        name = "Restoration Shaman",
+        specID = 264,
+        spells = {
+            { id = 61295,  name = "Riptide" },
+            { id = 974,    name = "Earth Shield" },
+            { id = 383648, name = "Earth Shield (Ele)" },
+            { id = 98008,  name = "Spirit Link Totem" },
+            { id = 108271, name = "Astral Shift" },
+        },
+    },
+    {
+        name = "Holy Paladin",
+        specID = 65,
+        spells = {
+            { id = 53563,  name = "Beacon of Light" },
+            { id = 156910, name = "Beacon of Faith" },
+            { id = 200025, name = "Beacon of Virtue" },
+            { id = 156322, name = "Eternal Flame" },
+            { id = 223306, name = "Bestow Faith" },
+            { id = 1022,   name = "Blessing of Protection" },
+            { id = 6940,   name = "Blessing of Sacrifice" },
+            { id = 1044,   name = "Blessing of Freedom" },
+        },
+    },
+    {
+        name = "Discipline Priest",
+        specID = 256,
+        spells = {
+            { id = 194384, name = "Atonement" },
+            { id = 17,     name = "Power Word: Shield" },
+            { id = 41635,  name = "Prayer of Mending" },
+            { id = 47788,  name = "Guardian Spirit" },
+            { id = 33206,  name = "Pain Suppression" },
+        },
+    },
+    {
+        name = "Holy Priest",
+        specID = 257,
+        spells = {
+            { id = 139,    name = "Renew" },
+            { id = 77489,  name = "Echo of Light" },
+            { id = 41635,  name = "Prayer of Mending" },
+            { id = 47788,  name = "Guardian Spirit" },
+            { id = 64844,  name = "Divine Hymn" },
+        },
+    },
+    {
+        name = "Mistweaver Monk",
+        specID = 270,
+        spells = {
+            { id = 119611, name = "Renewing Mist" },
+            { id = 124682, name = "Enveloping Mist" },
+            { id = 115175, name = "Soothing Mist" },
+            { id = 191840, name = "Essence Font" },
+            { id = 116849, name = "Life Cocoon" },
+        },
+    },
+    {
+        name = "Preservation Evoker",
+        specID = 1468,
+        spells = {
+            { id = 364343, name = "Echo" },
+            { id = 366155, name = "Reversion" },
+            { id = 367364, name = "Echo Reversion" },
+            { id = 355941, name = "Dream Breath" },
+            { id = 376788, name = "Echo Dream Breath" },
+            { id = 363502, name = "Dream Flight" },
+            { id = 373267, name = "Lifebind" },
+        },
+    },
+    {
+        name = "Augmentation Evoker",
+        specID = 1473,
+        spells = {
+            { id = 410089, name = "Prescience" },
+            { id = 395152, name = "Ebon Might" },
+            { id = 360827, name = "Blistering Scales" },
+            { id = 413984, name = "Shifting Sands" },
+            { id = 410263, name = "Inferno's Blessing" },
+            { id = 410686, name = "Symbiotic Bloom" },
+            { id = 369459, name = "Source of Magic" },
+        },
+    },
+    {
+        name = "Common Defensives",
+        spells = {
+            { id = 31821,  name = "Aura Mastery" },
+            { id = 97463,  name = "Rallying Cry" },
+            { id = 15286,  name = "Vampiric Embrace" },
+            { id = 64843,  name = "Divine Hymn" },
+            { id = 51052,  name = "Anti-Magic Zone" },
+            { id = 196718, name = "Darkness" },
+        },
+    },
+}
+
+-- Map specID → preset for auto-detection
+local SPEC_TO_PRESET = {}
+for _, preset in ipairs(AURA_FILTER_PRESETS) do
+    if preset.specID then
+        SPEC_TO_PRESET[preset.specID] = preset
+    end
+end
+
+-- Find the "Common Defensives" preset (no specID)
+local COMMON_DEFENSIVES_PRESET
+for _, preset in ipairs(AURA_FILTER_PRESETS) do
+    if not preset.specID then
+        COMMON_DEFENSIVES_PRESET = preset
+        break
+    end
+end
+
+-- Get current player specID
+local function GetPlayerSpecID()
+    local specIndex = GetSpecialization and GetSpecialization()
+    if specIndex then
+        local specID = GetSpecializationInfo(specIndex)
+        return specID
+    end
+    return nil
+end
 
 ---------------------------------------------------------------------------
 -- FAKE DATA for preview
@@ -232,8 +442,8 @@ local function CreateDesignerPreview(container, previewType, childRefs)
     if powerDB.showPowerBar ~= false then
         local powerH = (powerDB.powerBarHeight or 4) * PREVIEW_SCALE
         local powerBar = CreateFrame("StatusBar", nil, frame)
-        powerBar:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
-        powerBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+        powerBar:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", borderSize, borderSize)
+        powerBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -borderSize, borderSize)
         powerBar:SetHeight(powerH)
         powerBar:SetStatusBarTexture(texturePath)
         powerBar:SetMinMaxValues(0, 100)
@@ -269,7 +479,8 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         nameText:SetFont(fontPath, (nameDB.nameFontSize or 12) * PREVIEW_SCALE, fontOutline)
         nameText:SetPoint(nameAnchorInfo.leftPoint, textFrame, nameAnchorInfo.leftPoint, namePadX, nameOffsetY)
         nameText:SetPoint(nameAnchorInfo.rightPoint, textFrame, nameAnchorInfo.rightPoint, -namePadX, nameOffsetY)
-        nameText:SetJustifyH(nameAnchorInfo.justify)
+        local nameJustify = nameDB.nameJustify or nameAnchorInfo.justify
+        nameText:SetJustifyH(nameJustify)
         nameText:SetJustifyV(nameAnchorInfo.justifyV)
         nameText:SetWordWrap(false)
 
@@ -310,7 +521,8 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         healthText:SetFont(fontPath, (healthDB.healthFontSize or 12) * PREVIEW_SCALE, fontOutline)
         healthText:SetPoint(healthAnchorInfo.leftPoint, textFrame, healthAnchorInfo.leftPoint, healthPadX, healthOffsetY)
         healthText:SetPoint(healthAnchorInfo.rightPoint, textFrame, healthAnchorInfo.rightPoint, -healthPadX, healthOffsetY)
-        healthText:SetJustifyH(healthAnchorInfo.justify)
+        local healthJustify = healthDB.healthJustify or healthAnchorInfo.justify
+        healthText:SetJustifyH(healthJustify)
         healthText:SetJustifyV(healthAnchorInfo.justifyV)
         healthText:SetWordWrap(false)
 
@@ -347,16 +559,83 @@ local function CreateDesignerPreview(container, previewType, childRefs)
     -- Role icon
     local indDB = db.indicators or {}
     local roleAnchor = indDB.roleIconAnchor or "TOPLEFT"
+    local roleOffX = (indDB.roleIconOffsetX or 2) * PREVIEW_SCALE
+    local roleOffY = (indDB.roleIconOffsetY or -2) * PREVIEW_SCALE
     if indDB.showRoleIcon ~= false then
         local roleSize = (indDB.roleIconSize or 12) * PREVIEW_SCALE
         local roleIcon = textFrame:CreateTexture(nil, "OVERLAY")
         roleIcon:SetSize(roleSize, roleSize)
-        roleIcon:SetPoint(roleAnchor, textFrame, roleAnchor, 2, -2)
+        roleIcon:SetPoint(roleAnchor, textFrame, roleAnchor, roleOffX, roleOffY)
         roleIcon:SetAtlas("roleicon-tiny-healer")
         childRefs.roleIcon = roleIcon
     else
         childRefs.roleIcon = nil
     end
+
+    -- Indicator icons (ready check, rez, summon, leader, target marker, phase)
+    local iconScale = PREVIEW_SCALE
+    local indicatorFrame = CreateFrame("Frame", nil, frame)
+    indicatorFrame:SetAllPoints()
+    indicatorFrame:SetFrameLevel(frame:GetFrameLevel() + 8)
+
+    -- Helper to position a designer indicator from DB
+    local function IndicatorPoint(tex, anchorKey, offXKey, offYKey, defAnchor, defX, defY)
+        local a = indDB[anchorKey] or defAnchor
+        local ox = (indDB[offXKey] or defX) * PREVIEW_SCALE
+        local oy = (indDB[offYKey] or defY) * PREVIEW_SCALE
+        tex:SetPoint(a, frame, a, ox, oy)
+    end
+
+    -- Ready check
+    local readyCheckIcon = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    readyCheckIcon:SetSize(16 * iconScale, 16 * iconScale)
+    IndicatorPoint(readyCheckIcon, "readyCheckAnchor", "readyCheckOffsetX", "readyCheckOffsetY", "CENTER", 0, 0)
+    readyCheckIcon:SetTexture("INTERFACE\\RAIDFRAME\\ReadyCheck-Ready")
+    if indDB.showReadyCheck == false then readyCheckIcon:Hide() end
+    childRefs.readyCheckIcon = readyCheckIcon
+
+    -- Resurrection icon
+    local resIcon = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    resIcon:SetSize(16 * iconScale, 16 * iconScale)
+    IndicatorPoint(resIcon, "resurrectionAnchor", "resurrectionOffsetX", "resurrectionOffsetY", "CENTER", 0, 0)
+    resIcon:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+    if indDB.showResurrection == false then resIcon:Hide() end
+    childRefs.resIcon = resIcon
+
+    -- Summon pending icon
+    local summonIcon = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    summonIcon:SetSize(16 * iconScale, 16 * iconScale)
+    IndicatorPoint(summonIcon, "summonAnchor", "summonOffsetX", "summonOffsetY", "CENTER", 16, 0)
+    summonIcon:SetAtlas("RaidFrame-Icon-SummonPending")
+    if indDB.showSummonPending == false then summonIcon:Hide() end
+    childRefs.summonIcon = summonIcon
+
+    -- Leader icon
+    local leaderIcon = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    leaderIcon:SetSize(12 * iconScale, 12 * iconScale)
+    IndicatorPoint(leaderIcon, "leaderAnchor", "leaderOffsetX", "leaderOffsetY", "TOP", 0, 6)
+    leaderIcon:SetAtlas("groupfinder-icon-leader")
+    if indDB.showLeaderIcon == false then leaderIcon:Hide() end
+    childRefs.leaderIcon = leaderIcon
+
+    -- Target marker
+    local targetMarker = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    targetMarker:SetSize(14 * iconScale, 14 * iconScale)
+    IndicatorPoint(targetMarker, "targetMarkerAnchor", "targetMarkerOffsetX", "targetMarkerOffsetY", "TOPRIGHT", -2, -2)
+    targetMarker:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+    SetRaidTargetIconTexture(targetMarker, 1)
+    if indDB.showTargetMarker == false then targetMarker:Hide() end
+    childRefs.targetMarker = targetMarker
+
+    -- Phase icon
+    local phaseIcon = indicatorFrame:CreateTexture(nil, "OVERLAY")
+    phaseIcon:SetSize(16 * iconScale, 16 * iconScale)
+    IndicatorPoint(phaseIcon, "phaseAnchor", "phaseOffsetX", "phaseOffsetY", "BOTTOMLEFT", 2, 2)
+    phaseIcon:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
+    if indDB.showPhaseIcon == false then phaseIcon:Hide() end
+    childRefs.phaseIcon = phaseIcon
+
+    childRefs.indicatorFrame = indicatorFrame
 
     -- Buff icons
     local auraDB = db.auras or {}
@@ -455,6 +734,185 @@ local function CreateDesignerPreview(container, previewType, childRefs)
         childRefs.healOverlay = nil
     end
 
+    -- Healer features preview
+    local healerDB = db.healer or {}
+
+    -- Dispel overlay (colored border indicating a dispellable debuff)
+    local dispelDB = healerDB.dispelOverlay or {}
+    local dispelFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    dispelFrame:SetAllPoints()
+    dispelFrame:SetFrameLevel(frame:GetFrameLevel() + 4)
+    dispelFrame:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px * 2,
+    })
+    local dc = dispelDB.color or { 0.26, 0.54, 1, 0.8 }
+    dispelFrame:SetBackdropBorderColor(dc[1], dc[2], dc[3], dispelDB.opacity or 0.8)
+    if dispelDB.enabled == false then
+        dispelFrame:Hide()
+    end
+    childRefs.dispelOverlay = dispelFrame
+
+    -- Target highlight (white/colored border when targeting this unit)
+    local targetDB = healerDB.targetHighlight or {}
+    local targetFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    targetFrame:SetPoint("TOPLEFT", -1, 1)
+    targetFrame:SetPoint("BOTTOMRIGHT", 1, -1)
+    targetFrame:SetFrameLevel(frame:GetFrameLevel() + 3)
+    targetFrame:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px * 3,
+    })
+    local tc = targetDB.color or { 1, 1, 1, 0.6 }
+    targetFrame:SetBackdropBorderColor(tc[1], tc[2], tc[3], tc[4] or 0.6)
+    if targetDB.enabled == false then
+        targetFrame:Hide()
+    end
+    childRefs.targetHighlight = targetFrame
+
+    -- Defensive indicator (icon on frame, e.g. external CD)
+    local defDB = healerDB.defensiveIndicator or {}
+    local defSize = (defDB.iconSize or 16) * PREVIEW_SCALE
+    local defPos = defDB.position or "CENTER"
+    local defOffX = (defDB.offsetX or 0) * PREVIEW_SCALE
+    local defOffY = (defDB.offsetY or 0) * PREVIEW_SCALE
+
+    local defFrame = CreateFrame("Frame", nil, frame)
+    defFrame:SetSize(defSize, defSize)
+    defFrame:SetPoint(defPos, frame, defPos, defOffX, defOffY)
+    defFrame:SetFrameLevel(frame:GetFrameLevel() + 5)
+    local defIcon = defFrame:CreateTexture(nil, "OVERLAY")
+    defIcon:SetAllPoints()
+    defIcon:SetTexture(136120) -- Pain Suppression icon
+    defIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if defDB.enabled == false then
+        defFrame:Hide()
+    end
+    childRefs.defIcon = defFrame
+
+    -- Private auras (boss debuff placeholders)
+    local paDB = db.privateAuras or {}
+    local paSize = (paDB.iconSize or 20) * PREVIEW_SCALE
+    local paAnchor = paDB.anchor or "RIGHT"
+    local paOffX = (paDB.anchorOffsetX or -2) * PREVIEW_SCALE
+    local paOffY = (paDB.anchorOffsetY or 0) * PREVIEW_SCALE
+    local paSpacing = (paDB.spacing or 2) * PREVIEW_SCALE
+    local paGrow = paDB.growDirection or "RIGHT"
+    local paMax = paDB.maxPerFrame or 2
+
+    local paContainer = CreateFrame("Frame", nil, frame)
+    paContainer:SetSize(1, paSize)
+    paContainer:SetPoint(paAnchor, frame, paAnchor, paOffX, paOffY)
+
+    local FAKE_PA_ICONS = { 135945, 135994 } -- Placeholder boss debuff textures
+    for i = 1, math.min(paMax, #FAKE_PA_ICONS) do
+        local icon = paContainer:CreateTexture(nil, "OVERLAY")
+        icon:SetSize(paSize, paSize)
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        icon:SetTexture(FAKE_PA_ICONS[i])
+        if i == 1 then
+            icon:SetPoint("LEFT", paContainer, "LEFT", 0, 0)
+        else
+            local offset = (i - 1) * (paSize + paSpacing)
+            if paGrow == "LEFT" then
+                icon:SetPoint("RIGHT", paContainer, "RIGHT", -offset, 0)
+            else
+                icon:SetPoint("LEFT", paContainer, "LEFT", offset, 0)
+            end
+        end
+    end
+    if paDB.enabled == false then
+        paContainer:Hide()
+    end
+    childRefs.paContainer = paContainer
+
+    -- Aura indicators (icon row, same pattern as buffs/debuffs)
+    local aiDB = db.auraIndicators or {}
+    local aiIconSize = (aiDB.iconSize or 14) * PREVIEW_SCALE
+    local aiAnchor = aiDB.anchor or "TOPLEFT"
+    local aiGrow = aiDB.growDirection or "RIGHT"
+    local aiSpacing = (aiDB.spacing or 2) * PREVIEW_SCALE
+    local aiMax = aiDB.maxIndicators or 5
+    local aiOffX = (aiDB.anchorOffsetX or 0) * PREVIEW_SCALE
+    local aiOffY = (aiDB.anchorOffsetY or 0) * PREVIEW_SCALE
+
+    local aiContainer = CreateFrame("Frame", nil, frame)
+    aiContainer:SetSize(1, aiIconSize)
+    aiContainer:SetPoint(aiAnchor, frame, aiAnchor, aiOffX, aiOffY)
+    aiContainer:SetFrameLevel(frame:GetFrameLevel() + 6)
+
+    -- Show sample indicator icons from tracked spells or spec preset spells
+    local sampleSpells = {}
+    local tracked = aiDB.trackedSpells
+    if tracked then
+        for spellID, enabled in pairs(tracked) do
+            if enabled then
+                sampleSpells[#sampleSpells + 1] = tonumber(spellID) or spellID
+            end
+        end
+    end
+
+    -- If no tracked spells configured, show placeholder icons from the spec's preset list
+    if #sampleSpells == 0 then
+        local specID = GetPlayerSpecID()
+        if specID then
+            for _, preset in ipairs(AURA_FILTER_PRESETS) do
+                if preset.specID == specID and preset.spells then
+                    for _, spell in ipairs(preset.spells) do
+                        sampleSpells[#sampleSpells + 1] = spell.id
+                        if #sampleSpells >= aiMax then break end
+                    end
+                    break
+                end
+            end
+        end
+    end
+
+    -- Fallback: generic placeholder icons
+    if #sampleSpells == 0 then
+        sampleSpells = { 136034, 135940, 136081 } -- reuse buff icon IDs as texture fallback
+    end
+
+    for i = 1, math.min(aiMax, #sampleSpells) do
+        local icon = aiContainer:CreateTexture(nil, "OVERLAY")
+        icon:SetSize(aiIconSize, aiIconSize)
+        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        -- Try to get spell texture
+        local spellTex
+        local sid = sampleSpells[i]
+        if sid and C_Spell and C_Spell.GetSpellTexture then
+            spellTex = C_Spell.GetSpellTexture(sid)
+        end
+        icon:SetTexture(spellTex or 134400)
+
+        -- Determine first-icon anchor from container anchor + grow direction
+        -- Vertical: match anchor (TOP/BOTTOM/center)
+        -- Horizontal: match grow direction (LEFT grows leftward from RIGHT, RIGHT grows rightward from LEFT)
+        local vertPart = aiAnchor:find("TOP") and "TOP" or (aiAnchor:find("BOTTOM") and "BOTTOM" or "")
+        local firstHoriz = aiGrow == "LEFT" and "RIGHT" or "LEFT"
+        local firstAnchor = vertPart .. firstHoriz
+
+        if i == 1 then
+            icon:SetPoint(firstAnchor, aiContainer, firstAnchor, 0, 0)
+        else
+            local prevIcon = aiContainer["icon" .. (i - 1)]
+            if prevIcon then
+                if aiGrow == "LEFT" then
+                    icon:SetPoint("RIGHT", prevIcon, "LEFT", -aiSpacing, 0)
+                else
+                    icon:SetPoint("LEFT", prevIcon, "RIGHT", aiSpacing, 0)
+                end
+            end
+        end
+        aiContainer["icon" .. i] = icon
+    end
+
+    if aiDB.enabled == false then
+        aiContainer:Hide()
+    end
+    childRefs.auraIndicatorContainer = aiContainer
+
     return wrapper
 end
 
@@ -495,7 +953,7 @@ end
 -- FRAME settings
 local function BuildFrameSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Frame"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Frame"})
 
     local general = gfdb.general
     if not general then gfdb.general = {} general = gfdb.general end
@@ -561,7 +1019,7 @@ end
 -- HEALTH settings
 local function BuildHealthSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Health"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Health"})
 
     local general = gfdb.general or {}
 
@@ -580,570 +1038,662 @@ end
 
 -- POWER settings
 local function BuildPowerSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Power"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Power"})
     local power = gfdb.power
     if not power then gfdb.power = {} power = gfdb.power end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Power Bar", "showPowerBar", power, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return power.showPowerBar end
 
-    local heightSlider = GUI:CreateFormSlider(content, "Height", 1, 12, 1, "powerBarHeight", power, onChange)
-    heightSlider:SetPoint("TOPLEFT", PAD, y)
-    heightSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local usePowerColor = GUI:CreateFormCheckbox(content, "Use Power Type Color", "powerBarUsePowerColor", power, onChange)
-    usePowerColor:SetPoint("TOPLEFT", PAD, y)
-    usePowerColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local barColor = GUI:CreateFormColorPicker(content, "Custom Color", "powerBarColor", power, onChange)
-    barColor:SetPoint("TOPLEFT", PAD, y)
-    barColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Power Bar", "showPowerBar", power, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Height", 1, 12, 1, "powerBarHeight", power, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Use Power Type Color", "powerBarUsePowerColor", power, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormColorPicker(content, "Custom Color", "powerBarColor", power, onChange), FORM_ROW, cond)
+    L:Finish()
 end
 
 -- NAME settings
 local function BuildNameSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Name"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Name"})
     local name = gfdb.name
     if not name then gfdb.name = {} name = gfdb.name end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Name", "showName", name, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return name.showName end
 
-    local fontSize = GUI:CreateFormSlider(content, "Font Size", 6, 24, 1, "nameFontSize", name, onChange)
-    fontSize:SetPoint("TOPLEFT", PAD, y)
-    fontSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local anchor = GUI:CreateFormDropdown(content, "Anchor", FIVE_POINT_OPTIONS, "nameAnchor", name, onChange)
-    anchor:SetPoint("TOPLEFT", PAD, y)
-    anchor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    local maxLen = GUI:CreateFormSlider(content, "Max Name Length (0 = unlimited)", 0, 20, 1, "maxNameLength", name, onChange)
-    maxLen:SetPoint("TOPLEFT", PAD, y)
-    maxLen:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local offsetX = GUI:CreateFormSlider(content, "X Offset", -20, 20, 1, "nameOffsetX", name, onChange)
-    offsetX:SetPoint("TOPLEFT", PAD, y)
-    offsetX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local offsetY = GUI:CreateFormSlider(content, "Y Offset", -20, 20, 1, "nameOffsetY", name, onChange)
-    offsetY:SetPoint("TOPLEFT", PAD, y)
-    offsetY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local classColor = GUI:CreateFormCheckbox(content, "Use Class Color", "nameTextUseClassColor", name, onChange)
-    classColor:SetPoint("TOPLEFT", PAD, y)
-    classColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local textColor = GUI:CreateFormColorPicker(content, "Text Color", "nameTextColor", name, onChange)
-    textColor:SetPoint("TOPLEFT", PAD, y)
-    textColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Name", "showName", name, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Font Size", 6, 24, 1, "nameFontSize", name, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "nameAnchor", name, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Text Justify", TEXT_JUSTIFY_OPTIONS, "nameJustify", name, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Max Name Length (0 = unlimited)", 0, 20, 1, "maxNameLength", name, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -20, 20, 1, "nameOffsetX", name, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -20, 20, 1, "nameOffsetY", name, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Use Class Color", "nameTextUseClassColor", name, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormColorPicker(content, "Text Color", "nameTextColor", name, onChange), FORM_ROW, cond)
+    L:Finish()
 end
 
 -- HEALTH TEXT settings
 local function BuildHealthTextSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "HP Text"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "HP Text"})
     local health = gfdb.health
     if not health then gfdb.health = {} health = gfdb.health end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Health Text", "showHealthText", health, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return health.showHealthText end
 
-    local styleDrop = GUI:CreateFormDropdown(content, "Display Style", HEALTH_DISPLAY_OPTIONS, "healthDisplayStyle", health, onChange)
-    styleDrop:SetPoint("TOPLEFT", PAD, y)
-    styleDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    L:Row(GUI:CreateFormCheckbox(content, "Show Health Text", "showHealthText", health, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormDropdown(content, "Display Style", HEALTH_DISPLAY_OPTIONS, "healthDisplayStyle", health, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Font Size", 6, 24, 1, "healthFontSize", health, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "healthAnchor", health, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Text Justify", TEXT_JUSTIFY_OPTIONS, "healthJustify", health, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -20, 20, 1, "healthOffsetX", health, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -20, 20, 1, "healthOffsetY", health, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormColorPicker(content, "Text Color", "healthTextColor", health, onChange), FORM_ROW, cond)
+    L:Finish()
+end
 
-    local fontSize = GUI:CreateFormSlider(content, "Font Size", 6, 24, 1, "healthFontSize", health, onChange)
-    fontSize:SetPoint("TOPLEFT", PAD, y)
-    fontSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+---------------------------------------------------------------------------
+-- SPELL LIST UI: Shared helper for whitelist/blacklist management
+---------------------------------------------------------------------------
+local function GetSpellName(spellId)
+    if C_Spell and C_Spell.GetSpellName then
+        local ok, name = pcall(C_Spell.GetSpellName, spellId)
+        if ok and name and name ~= "" then return name end
+    end
+    if GetSpellInfo then
+        local ok, name = pcall(GetSpellInfo, spellId)
+        if ok and name and name ~= "" then return name end
+    end
+    return nil
+end
 
-    local anchor = GUI:CreateFormDropdown(content, "Anchor", FIVE_POINT_OPTIONS, "healthAnchor", health, onChange)
-    anchor:SetPoint("TOPLEFT", PAD, y)
-    anchor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+-- Create a mini toggle matching QUI's pill-style toggle (reusable across rebuilds)
+local function CreateMiniToggle(parent)
+    local track = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    track:SetSize(32, 16)
+    local px = QUICore:GetPixelSize(track)
+    track:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
 
-    local offsetX = GUI:CreateFormSlider(content, "X Offset", -20, 20, 1, "healthOffsetX", health, onChange)
-    offsetX:SetPoint("TOPLEFT", PAD, y)
-    offsetX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    local thumb = CreateFrame("Frame", nil, track, "BackdropTemplate")
+    thumb:SetSize(12, 12)
+    thumb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+    thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
 
-    local offsetY = GUI:CreateFormSlider(content, "Y Offset", -20, 20, 1, "healthOffsetY", health, onChange)
-    offsetY:SetPoint("TOPLEFT", PAD, y)
-    offsetY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    track.thumb = thumb
 
-    local textColor = GUI:CreateFormColorPicker(content, "Text Color", "healthTextColor", health, onChange)
-    textColor:SetPoint("TOPLEFT", PAD, y)
-    textColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    function track:SetToggleState(on)
+        if on then
+            self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+            self:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            thumb:ClearAllPoints()
+            thumb:SetPoint("RIGHT", self, "RIGHT", -2, 0)
+        else
+            self:SetBackdropColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
+            self:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
+            thumb:ClearAllPoints()
+            thumb:SetPoint("LEFT", self, "LEFT", 2, 0)
+        end
+    end
 
-    content:SetHeight(math.abs(y) + 10)
+    return track
+end
+
+-- Rebuild toggle rows: preset spells as toggles, extra spells with × remove
+local function RebuildSpellToggleRows(container, listTable, presets, onChange)
+    if container._rows then
+        for _, row in ipairs(container._rows) do
+            row:Hide()
+        end
+    end
+    container._rows = container._rows or {}
+
+    local ROW_H = 26
+    local HEADER_H = 22
+    local y = 0
+    local rowIndex = 0
+
+    -- Track which spellIDs come from presets
+    local presetSpellIds = {}
+
+    -- Render preset sections
+    for _, preset in ipairs(presets) do
+        -- Section header
+        rowIndex = rowIndex + 1
+        local headerRow = container._rows[rowIndex]
+        if not headerRow then
+            headerRow = CreateFrame("Frame", nil, container)
+            headerRow:SetHeight(HEADER_H)
+            container._rows[rowIndex] = headerRow
+            headerRow.text = headerRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            headerRow.text:SetPoint("LEFT", 2, 0)
+            headerRow.text:SetJustifyH("LEFT")
+        end
+        -- Hide toggle/remove if this row was previously a spell row
+        if headerRow.toggle then headerRow.toggle:Hide() end
+        if headerRow.removeBtn then headerRow.removeBtn:Hide() end
+        headerRow.text:SetText("|cFF" .. "56D1FF" .. preset.name .. "|r")
+        headerRow:SetPoint("TOPLEFT", 0, y)
+        headerRow:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+        headerRow:Show()
+        y = y - HEADER_H
+
+        -- Spell toggle rows
+        for _, spell in ipairs(preset.spells) do
+            presetSpellIds[spell.id] = true
+            rowIndex = rowIndex + 1
+            local row = container._rows[rowIndex]
+            if not row then
+                row = CreateFrame("Frame", nil, container)
+                row:SetHeight(ROW_H)
+                container._rows[rowIndex] = row
+
+                row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.text:SetPoint("LEFT", 8, 0)
+                row.text:SetPoint("RIGHT", row, "RIGHT", -44, 0)
+                row.text:SetJustifyH("LEFT")
+
+                row.toggle = CreateMiniToggle(row)
+                row.toggle:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            end
+
+            row:SetPoint("TOPLEFT", 0, y)
+            row:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+
+            local displayName = spell.name or GetSpellName(spell.id) or ("Spell " .. spell.id)
+            row.text:SetText(displayName)
+
+            if row.toggle then row.toggle:Show() end
+            if row.removeBtn then row.removeBtn:Hide() end
+
+            local isOn = listTable[spell.id] == true
+            row.toggle:SetToggleState(isOn)
+
+            local spellId = spell.id
+            row.toggle:SetScript("OnClick", function()
+                local nowOn = listTable[spellId] ~= true
+                if nowOn then
+                    listTable[spellId] = true
+                else
+                    listTable[spellId] = nil
+                end
+                row.toggle:SetToggleState(nowOn)
+                if onChange then onChange() end
+            end)
+
+            row:Show()
+            y = y - ROW_H
+        end
+    end
+
+    -- Extra spells not in any preset (leftover from spec changes) — show with × remove
+    local extras = {}
+    for spellId in pairs(listTable) do
+        if not presetSpellIds[spellId] then
+            table.insert(extras, spellId)
+        end
+    end
+    table.sort(extras)
+
+    if #extras > 0 then
+        -- "Other" header
+        rowIndex = rowIndex + 1
+        local headerRow = container._rows[rowIndex]
+        if not headerRow then
+            headerRow = CreateFrame("Frame", nil, container)
+            headerRow:SetHeight(HEADER_H)
+            container._rows[rowIndex] = headerRow
+            headerRow.text = headerRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            headerRow.text:SetPoint("LEFT", 2, 0)
+            headerRow.text:SetJustifyH("LEFT")
+        end
+        if headerRow.toggle then headerRow.toggle:Hide() end
+        if headerRow.removeBtn then headerRow.removeBtn:Hide() end
+        headerRow.text:SetText("|cFF" .. "56D1FF" .. "Other" .. "|r")
+        headerRow:SetPoint("TOPLEFT", 0, y)
+        headerRow:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+        headerRow:Show()
+        y = y - HEADER_H
+
+        for _, spellId in ipairs(extras) do
+            rowIndex = rowIndex + 1
+            local row = container._rows[rowIndex]
+            if not row then
+                row = CreateFrame("Frame", nil, container)
+                row:SetHeight(ROW_H)
+                container._rows[rowIndex] = row
+
+                row.text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.text:SetPoint("LEFT", 8, 0)
+                row.text:SetJustifyH("LEFT")
+
+                row.removeBtn = CreateFrame("Button", nil, row)
+                row.removeBtn:SetSize(18, 18)
+                row.removeBtn:SetPoint("RIGHT", -2, 0)
+                row.removeBtnText = row.removeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                row.removeBtnText:SetPoint("CENTER")
+                row.removeBtnText:SetText("\195\151") -- × character
+                row.removeBtnText:SetTextColor(0.8, 0.3, 0.3)
+                row.removeBtn:SetScript("OnEnter", function() row.removeBtnText:SetTextColor(1, 0.4, 0.4) end)
+                row.removeBtn:SetScript("OnLeave", function() row.removeBtnText:SetTextColor(0.8, 0.3, 0.3) end)
+            end
+
+            row:SetPoint("TOPLEFT", 0, y)
+            row:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+            row.text:SetPoint("RIGHT", row.removeBtn, "LEFT", -4, 0)
+
+            local name = GetSpellName(spellId)
+            row.text:SetText(name or ("Spell " .. spellId))
+
+            if row.toggle then row.toggle:Hide() end
+            if row.removeBtn then row.removeBtn:Show() end
+
+            row.removeBtn:SetScript("OnClick", function()
+                listTable[spellId] = nil
+                RebuildSpellToggleRows(container, listTable, presets, onChange)
+                if onChange then onChange() end
+            end)
+
+            row:Show()
+            y = y - ROW_H
+        end
+    end
+
+    for i = rowIndex + 1, #container._rows do
+        container._rows[i]:Hide()
+    end
+
+    container:SetHeight(math.max(1, math.abs(y)))
+end
+
+-- Build the spell list section with spec-detected toggle rows
+-- getListTable: function returning the currently active spell list table
+-- Returns final y position and the spell list container frame
+local function BuildSpellListSection(parent, getListTable, onChange, y)
+    -- Spell list entries container
+    local spellListContainer = CreateFrame("Frame", nil, parent)
+    spellListContainer:SetPoint("TOPLEFT", PAD, y)
+    spellListContainer:SetPoint("RIGHT", parent, "RIGHT", -PAD, 0)
+    spellListContainer:SetHeight(1)
+
+    -- Determine which presets to show based on player spec
+    local function GetPresetsForPlayer()
+        local presets = {}
+        local specID = GetPlayerSpecID()
+        if specID and SPEC_TO_PRESET[specID] then
+            table.insert(presets, SPEC_TO_PRESET[specID])
+        end
+        -- Always include common defensives
+        if COMMON_DEFENSIVES_PRESET then
+            table.insert(presets, COMMON_DEFENSIVES_PRESET)
+        end
+        -- If no spec match, show all spec presets
+        if #presets <= 1 then
+            for _, preset in ipairs(AURA_FILTER_PRESETS) do
+                if preset.specID then
+                    table.insert(presets, preset)
+                end
+            end
+        end
+        return presets
+    end
+
+    local presets = GetPresetsForPlayer()
+    spellListContainer._presets = presets
+    RebuildSpellToggleRows(spellListContainer, getListTable(), presets, onChange)
+
+    return y, spellListContainer
 end
 
 -- BUFFS settings
 local function BuildBuffsSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Buffs"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Buffs"})
     local auras = gfdb.auras
     if not auras then gfdb.auras = {} auras = gfdb.auras end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Buffs", "showBuffs", auras, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return auras.showBuffs end
 
-    local maxCount = GUI:CreateFormSlider(content, "Max Buffs", 0, 8, 1, "maxBuffs", auras, onChange)
-    maxCount:SetPoint("TOPLEFT", PAD, y)
-    maxCount:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    L:Row(GUI:CreateFormCheckbox(content, "Show Buffs", "showBuffs", auras, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Max Buffs", 0, 8, 1, "maxBuffs", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "buffIconSize", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "buffAnchor", auras, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "buffGrowDirection", auras, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "buffSpacing", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "buffOffsetX", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "buffOffsetY", auras, onChange), SLIDER_HEIGHT, cond)
 
-    local iconSize = GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "buffIconSize", auras, onChange)
-    iconSize:SetPoint("TOPLEFT", PAD, y)
-    iconSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Filtering section
+    L:Header(GUI:CreateSectionHeader(content, "Buff Filtering"))
 
-    local anchorDrop = GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "buffAnchor", auras, onChange)
-    anchorDrop:SetPoint("TOPLEFT", PAD, y)
-    anchorDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    -- Classification container (managed separately due to dynamic height)
+    local classificationContainer = CreateFrame("Frame", nil, content)
+    classificationContainer:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
 
-    local growDrop = GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "buffGrowDirection", auras, onChange)
-    growDrop:SetPoint("TOPLEFT", PAD, y)
-    growDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    -- Forward ref for relayout so dropdown onChange can trigger it
+    local relayoutRef = {}
+    local filterDrop = GUI:CreateFormDropdown(content, "Filter Mode", FILTER_MODE_OPTIONS, "filterMode", auras, function()
+        if onChange then onChange() end
+        if relayoutRef.fn then relayoutRef.fn() end
+    end)
+    L:Row(filterDrop, DROP_ROW, cond)
 
-    local spacing = GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "buffSpacing", auras, onChange)
-    spacing:SetPoint("TOPLEFT", PAD, y)
-    spacing:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    local onlyMineCheck = GUI:CreateFormCheckbox(content, "Only My Buffs", "buffFilterOnlyMine", auras, onChange)
+    L:Row(onlyMineCheck, FORM_ROW, cond)
 
-    local offX = GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "buffOffsetX", auras, onChange)
-    offX:SetPoint("TOPLEFT", PAD, y)
-    offX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    local classCond = function() return auras.showBuffs and (auras.filterMode or "off") == "classification" end
+    L:Row(classificationContainer, FORM_ROW * 3, classCond)
 
-    local offY = GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "buffOffsetY", auras, onChange)
-    offY:SetPoint("TOPLEFT", PAD, y)
-    offY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Classification checkboxes (inside container)
+    local classY = 0
+    local buffClass = auras.buffClassifications
+    if not buffClass then auras.buffClassifications = {} buffClass = auras.buffClassifications end
 
-    content:SetHeight(math.abs(y) + 10)
+    local c1 = GUI:CreateFormCheckbox(classificationContainer, "Raid", "raid", buffClass, onChange)
+    c1:SetPoint("TOPLEFT", 0, classY)
+    c1:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    local c2 = GUI:CreateFormCheckbox(classificationContainer, "Cancelable", "cancelable", buffClass, onChange)
+    c2:SetPoint("TOPLEFT", 0, classY)
+    c2:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    local c5 = GUI:CreateFormCheckbox(classificationContainer, "Important", "important", buffClass, onChange)
+    c5:SetPoint("TOPLEFT", 0, classY)
+    c5:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    classificationContainer:SetHeight(math.abs(classY))
+
+    relayoutRef.fn = L:Finish()
 end
 
 -- DEBUFFS settings
 local function BuildDebuffsSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Debuffs"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Debuffs"})
     local auras = gfdb.auras
     if not auras then gfdb.auras = {} auras = gfdb.auras end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Debuffs", "showDebuffs", auras, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return auras.showDebuffs end
 
-    local maxCount = GUI:CreateFormSlider(content, "Max Debuffs", 0, 8, 1, "maxDebuffs", auras, onChange)
-    maxCount:SetPoint("TOPLEFT", PAD, y)
-    maxCount:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    L:Row(GUI:CreateFormCheckbox(content, "Show Debuffs", "showDebuffs", auras, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Max Debuffs", 0, 8, 1, "maxDebuffs", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "debuffIconSize", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "debuffAnchor", auras, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "debuffGrowDirection", auras, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "debuffSpacing", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "debuffOffsetX", auras, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "debuffOffsetY", auras, onChange), SLIDER_HEIGHT, cond)
 
-    local iconSize = GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "debuffIconSize", auras, onChange)
-    iconSize:SetPoint("TOPLEFT", PAD, y)
-    iconSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Filtering section
+    L:Header(GUI:CreateSectionHeader(content, "Debuff Filtering"))
 
-    local anchorDrop = GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "debuffAnchor", auras, onChange)
-    anchorDrop:SetPoint("TOPLEFT", PAD, y)
-    anchorDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    -- Classification container (managed separately due to dynamic height)
+    local classificationContainer = CreateFrame("Frame", nil, content)
+    classificationContainer:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
 
-    local growDrop = GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "debuffGrowDirection", auras, onChange)
-    growDrop:SetPoint("TOPLEFT", PAD, y)
-    growDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    local DEBUFF_FILTER_MODE_OPTIONS = {
+        { value = "off", text = "Off (Show All)" },
+        { value = "classification", text = "Classification" },
+    }
 
-    local spacing = GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "debuffSpacing", auras, onChange)
-    spacing:SetPoint("TOPLEFT", PAD, y)
-    spacing:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Forward ref for relayout so dropdown onChange can trigger it
+    local relayoutRef = {}
+    local filterDrop = GUI:CreateFormDropdown(content, "Filter Mode", DEBUFF_FILTER_MODE_OPTIONS, "filterMode", auras, function()
+        if onChange then onChange() end
+        if relayoutRef.fn then relayoutRef.fn() end
+    end)
+    L:Row(filterDrop, DROP_ROW, cond)
 
-    local offX = GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "debuffOffsetX", auras, onChange)
-    offX:SetPoint("TOPLEFT", PAD, y)
-    offX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    local classCond = function() return auras.showDebuffs and (auras.filterMode or "off") == "classification" end
+    L:Row(classificationContainer, FORM_ROW * 3, classCond)
 
-    local offY = GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "debuffOffsetY", auras, onChange)
-    offY:SetPoint("TOPLEFT", PAD, y)
-    offY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Classification checkboxes (inside container)
+    local classY = 0
+    local debuffClass = auras.debuffClassifications
+    if not debuffClass then auras.debuffClassifications = {} debuffClass = auras.debuffClassifications end
 
-    content:SetHeight(math.abs(y) + 10)
+    local d1 = GUI:CreateFormCheckbox(classificationContainer, "Raid", "raid", debuffClass, onChange)
+    d1:SetPoint("TOPLEFT", 0, classY)
+    d1:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    local d2 = GUI:CreateFormCheckbox(classificationContainer, "Crowd Control", "crowdControl", debuffClass, onChange)
+    d2:SetPoint("TOPLEFT", 0, classY)
+    d2:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    local d3 = GUI:CreateFormCheckbox(classificationContainer, "Important", "important", debuffClass, onChange)
+    d3:SetPoint("TOPLEFT", 0, classY)
+    d3:SetPoint("RIGHT", classificationContainer, "RIGHT", 0, 0)
+    classY = classY - FORM_ROW
+
+    classificationContainer:SetHeight(math.abs(classY))
+
+    relayoutRef.fn = L:Finish()
 end
 
 -- ROLE settings
 local function BuildRoleSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Role"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Role"})
     local ind = gfdb.indicators
     if not ind then gfdb.indicators = {} ind = gfdb.indicators end
 
-    local showCheck = GUI:CreateFormCheckbox(content, "Show Role Icon", "showRoleIcon", ind, onChange)
-    showCheck:SetPoint("TOPLEFT", PAD, y)
-    showCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return ind.showRoleIcon end
 
-    local sizeSlider = GUI:CreateFormSlider(content, "Icon Size", 6, 24, 1, "roleIconSize", ind, onChange)
-    sizeSlider:SetPoint("TOPLEFT", PAD, y)
-    sizeSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local anchorDrop = GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "roleIconAnchor", ind, onChange)
-    anchorDrop:SetPoint("TOPLEFT", PAD, y)
-    anchorDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Role Icon", "showRoleIcon", ind, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Tank", "showRoleTank", ind, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Healer", "showRoleHealer", ind, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Show DPS", "showRoleDPS", ind, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 6, 24, 1, "roleIconSize", ind, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "roleIconAnchor", ind, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -50, 50, 1, "roleIconOffsetX", ind, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -50, 50, 1, "roleIconOffsetY", ind, onChange), SLIDER_HEIGHT, cond)
+    L:Finish()
 end
 
 -- INDICATORS settings
 local function BuildIndicatorsSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Indicators"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Indicators"})
     local ind = gfdb.indicators
     if not ind then gfdb.indicators = {} ind = gfdb.indicators end
 
-    local readyCheck = GUI:CreateFormCheckbox(content, "Ready Check Icon", "showReadyCheck", ind, onChange)
-    readyCheck:SetPoint("TOPLEFT", PAD, y)
-    readyCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
 
-    local rezIcon = GUI:CreateFormCheckbox(content, "Resurrection Icon", "showResurrection", ind, onChange)
-    rezIcon:SetPoint("TOPLEFT", PAD, y)
-    rezIcon:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local function AddIndicator(label, showKey, anchorKey, offXKey, offYKey)
+        L:Header(GUI:CreateSectionHeader(content, label))
+        L:Row(GUI:CreateFormCheckbox(content, "Enable", showKey, ind, onChange), FORM_ROW)
+        local cond = function() return ind[showKey] end
+        L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, anchorKey, ind, onChange), DROP_ROW, cond)
+        L:Row(GUI:CreateFormSlider(content, "X Offset", -50, 50, 1, offXKey, ind, onChange), SLIDER_HEIGHT, cond)
+        L:Row(GUI:CreateFormSlider(content, "Y Offset", -50, 50, 1, offYKey, ind, onChange), SLIDER_HEIGHT, cond)
+    end
 
-    local summonIcon = GUI:CreateFormCheckbox(content, "Summon Pending Icon", "showSummonPending", ind, onChange)
-    summonIcon:SetPoint("TOPLEFT", PAD, y)
-    summonIcon:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local leaderIcon = GUI:CreateFormCheckbox(content, "Leader Icon", "showLeaderIcon", ind, onChange)
-    leaderIcon:SetPoint("TOPLEFT", PAD, y)
-    leaderIcon:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local markerIcon = GUI:CreateFormCheckbox(content, "Target Marker", "showTargetMarker", ind, onChange)
-    markerIcon:SetPoint("TOPLEFT", PAD, y)
-    markerIcon:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local phaseIcon = GUI:CreateFormCheckbox(content, "Phase Icon", "showPhaseIcon", ind, onChange)
-    phaseIcon:SetPoint("TOPLEFT", PAD, y)
-    phaseIcon:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    AddIndicator("Ready Check", "showReadyCheck", "readyCheckAnchor", "readyCheckOffsetX", "readyCheckOffsetY")
+    AddIndicator("Resurrection", "showResurrection", "resurrectionAnchor", "resurrectionOffsetX", "resurrectionOffsetY")
+    AddIndicator("Summon Pending", "showSummonPending", "summonAnchor", "summonOffsetX", "summonOffsetY")
+    AddIndicator("Leader Icon", "showLeaderIcon", "leaderAnchor", "leaderOffsetX", "leaderOffsetY")
+    AddIndicator("Raid Target Marker", "showTargetMarker", "targetMarkerAnchor", "targetMarkerOffsetX", "targetMarkerOffsetY")
+    AddIndicator("Phase Icon", "showPhaseIcon", "phaseAnchor", "phaseOffsetX", "phaseOffsetY")
 
     -- Threat section
-    local threatHeader = GUI:CreateSectionHeader(content, "Threat")
-    threatHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - threatHeader.gap
+    L:Header(GUI:CreateSectionHeader(content, "Threat"))
+    L:Row(GUI:CreateFormCheckbox(content, "Show Threat Border", "showThreatBorder", ind, onChange), FORM_ROW)
+    local threatCond = function() return ind.showThreatBorder end
+    L:Row(GUI:CreateFormColorPicker(content, "Threat Color", "threatColor", ind, onChange), FORM_ROW, threatCond)
+    L:Row(GUI:CreateFormSlider(content, "Threat Fill Opacity", 0, 0.5, 0.05, "threatFillOpacity", ind, onChange), SLIDER_HEIGHT, threatCond)
 
-    local threatCheck = GUI:CreateFormCheckbox(content, "Show Threat Border", "showThreatBorder", ind, onChange)
-    threatCheck:SetPoint("TOPLEFT", PAD, y)
-    threatCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local threatColor = GUI:CreateFormColorPicker(content, "Threat Color", "threatColor", ind, onChange)
-    threatColor:SetPoint("TOPLEFT", PAD, y)
-    threatColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local threatFill = GUI:CreateFormSlider(content, "Threat Fill Opacity", 0, 0.5, 0.05, "threatFillOpacity", ind, onChange)
-    threatFill:SetPoint("TOPLEFT", PAD, y)
-    threatFill:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Finish()
 end
 
 -- HEALER settings
 local function BuildHealerSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Healer"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Healer"})
     local healer = gfdb.healer
     if not healer then gfdb.healer = {} healer = gfdb.healer end
-
-    -- Dispel overlay
-    local dispelHeader = GUI:CreateSectionHeader(content, "Dispel Overlay")
-    dispelHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - dispelHeader.gap
 
     local dispel = healer.dispelOverlay
     if not dispel then healer.dispelOverlay = {} dispel = healer.dispelOverlay end
 
-    local dispelCheck = GUI:CreateFormCheckbox(content, "Enable Dispel Overlay", "enabled", dispel, onChange)
-    dispelCheck:SetPoint("TOPLEFT", PAD, y)
-    dispelCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local dispelOpacity = GUI:CreateFormSlider(content, "Border Opacity", 0.1, 1, 0.05, "opacity", dispel, onChange)
-    dispelOpacity:SetPoint("TOPLEFT", PAD, y)
-    dispelOpacity:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local dispelFill = GUI:CreateFormSlider(content, "Fill Opacity", 0, 0.5, 0.05, "fillOpacity", dispel, onChange)
-    dispelFill:SetPoint("TOPLEFT", PAD, y)
-    dispelFill:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    -- Target highlight
-    local targetHeader = GUI:CreateSectionHeader(content, "Target Highlight")
-    targetHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - targetHeader.gap
-
     local targetHL = healer.targetHighlight
     if not targetHL then healer.targetHighlight = {} targetHL = healer.targetHighlight end
 
-    local targetCheck = GUI:CreateFormCheckbox(content, "Enable Target Highlight", "enabled", targetHL, onChange)
-    targetCheck:SetPoint("TOPLEFT", PAD, y)
-    targetCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local dispelCond = function() return dispel.enabled end
+    local targetCond = function() return targetHL.enabled end
 
-    local targetColor = GUI:CreateFormColorPicker(content, "Highlight Color", "color", targetHL, onChange)
-    targetColor:SetPoint("TOPLEFT", PAD, y)
-    targetColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    -- Dispel overlay
+    L:Header(GUI:CreateSectionHeader(content, "Dispel Overlay"))
+    local dispelDesc = GUI:CreateLabel(content, "Colors the frame border when a dispellable debuff is active (Magic, Curse, Disease, Poison).", 11, C.textMuted)
+    dispelDesc:SetJustifyH("LEFT")
+    L:Row(dispelDesc, 26)
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Dispel Overlay", "enabled", dispel, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormColorPicker(content, "Dispel Color", "color", dispel, onChange), FORM_ROW, dispelCond)
+    L:Row(GUI:CreateFormSlider(content, "Border Opacity", 0.1, 1, 0.05, "opacity", dispel, onChange), SLIDER_HEIGHT, dispelCond)
+    L:Row(GUI:CreateFormSlider(content, "Fill Opacity", 0, 0.5, 0.05, "fillOpacity", dispel, onChange), SLIDER_HEIGHT, dispelCond)
 
-    local targetFill = GUI:CreateFormSlider(content, "Fill Opacity", 0, 0.5, 0.05, "fillOpacity", targetHL, onChange)
-    targetFill:SetPoint("TOPLEFT", PAD, y)
-    targetFill:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Target highlight
+    L:Header(GUI:CreateSectionHeader(content, "Target Highlight"))
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Target Highlight", "enabled", targetHL, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormColorPicker(content, "Highlight Color", "color", targetHL, onChange), FORM_ROW, targetCond)
+    L:Row(GUI:CreateFormSlider(content, "Fill Opacity", 0, 0.5, 0.05, "fillOpacity", targetHL, onChange), SLIDER_HEIGHT, targetCond)
 
-    -- My buff indicator
-    local myBuffHeader = GUI:CreateSectionHeader(content, "My Buff Indicator")
-    myBuffHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - myBuffHeader.gap
-
-    local myBuff = healer.myBuffIndicator
-    if not myBuff then healer.myBuffIndicator = {} myBuff = healer.myBuffIndicator end
-
-    local myBuffCheck = GUI:CreateFormCheckbox(content, "Enable My Buff Indicator", "enabled", myBuff, onChange)
-    myBuffCheck:SetPoint("TOPLEFT", PAD, y)
-    myBuffCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local myBuffColor = GUI:CreateFormColorPicker(content, "Indicator Color", "color", myBuff, onChange)
-    myBuffColor:SetPoint("TOPLEFT", PAD, y)
-    myBuffColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Finish()
 end
 
 -- DEFENSIVE settings
 local function BuildDefensiveSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Defensive"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Defensive"})
     local healer = gfdb.healer
     if not healer then gfdb.healer = {} healer = gfdb.healer end
-
     local def = healer.defensiveIndicator
     if not def then healer.defensiveIndicator = {} def = healer.defensiveIndicator end
 
-    local defCheck = GUI:CreateFormCheckbox(content, "Enable Defensive Indicator", "enabled", def, onChange)
-    defCheck:SetPoint("TOPLEFT", PAD, y)
-    defCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return def.enabled end
 
-    local iconSize = GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "iconSize", def, onChange)
-    iconSize:SetPoint("TOPLEFT", PAD, y)
-    iconSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Defensive Indicator", "enabled", def, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "iconSize", def, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Position", NINE_POINT_OPTIONS, "position", def, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "offsetX", def, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "offsetY", def, onChange), SLIDER_HEIGHT, cond)
 
-    local posDrop = GUI:CreateFormDropdown(content, "Position", NINE_POINT_OPTIONS, "position", def, onChange)
-    posDrop:SetPoint("TOPLEFT", PAD, y)
-    posDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    local offX = GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "offsetX", def, onChange)
-    offX:SetPoint("TOPLEFT", PAD, y)
-    offX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local offY = GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "offsetY", def, onChange)
-    offY:SetPoint("TOPLEFT", PAD, y)
-    offY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Finish()
 end
 
 -- PRIVATE AURAS settings
 local function BuildPrivateAurasSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Private Auras"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Private Auras"})
     local pa = gfdb.privateAuras
     if not pa then gfdb.privateAuras = {} pa = gfdb.privateAuras end
 
-    local enableCheck = GUI:CreateFormCheckbox(content, "Enable Private Auras", "enabled", pa, onChange)
-    enableCheck:SetPoint("TOPLEFT", PAD, y)
-    enableCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return pa.enabled end
 
-    local maxSlider = GUI:CreateFormSlider(content, "Max Per Frame", 1, 5, 1, "maxPerFrame", pa, onChange)
-    maxSlider:SetPoint("TOPLEFT", PAD, y)
-    maxSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local sizeSlider = GUI:CreateFormSlider(content, "Icon Size", 10, 40, 1, "iconSize", pa, onChange)
-    sizeSlider:SetPoint("TOPLEFT", PAD, y)
-    sizeSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local growDrop = GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "growDirection", pa, onChange)
-    growDrop:SetPoint("TOPLEFT", PAD, y)
-    growDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    local spacingSlider = GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "spacing", pa, onChange)
-    spacingSlider:SetPoint("TOPLEFT", PAD, y)
-    spacingSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local anchorDrop = GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "anchor", pa, onChange)
-    anchorDrop:SetPoint("TOPLEFT", PAD, y)
-    anchorDrop:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    local offX = GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "anchorOffsetX", pa, onChange)
-    offX:SetPoint("TOPLEFT", PAD, y)
-    offX:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local offY = GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "anchorOffsetY", pa, onChange)
-    offY:SetPoint("TOPLEFT", PAD, y)
-    offY:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local cdCheck = GUI:CreateFormCheckbox(content, "Show Countdown", "showCountdown", pa, onChange)
-    cdCheck:SetPoint("TOPLEFT", PAD, y)
-    cdCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local cdNumCheck = GUI:CreateFormCheckbox(content, "Show Countdown Numbers", "showCountdownNumbers", pa, onChange)
-    cdNumCheck:SetPoint("TOPLEFT", PAD, y)
-    cdNumCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    content:SetHeight(math.abs(y) + 10)
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Private Auras", "enabled", pa, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Max Per Frame", 1, 5, 1, "maxPerFrame", pa, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 10, 40, 1, "iconSize", pa, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "growDirection", pa, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "spacing", pa, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "anchor", pa, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "anchorOffsetX", pa, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "anchorOffsetY", pa, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Countdown", "showCountdown", pa, onChange), FORM_ROW, cond)
+    L:Row(GUI:CreateFormCheckbox(content, "Show Countdown Numbers", "showCountdownNumbers", pa, onChange), FORM_ROW, cond)
+    L:Finish()
 end
 
 -- AURA INDICATORS settings
 local function BuildAuraIndicatorsSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Aura Indicators"})
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Aura Indicators"})
     local ai = gfdb.auraIndicators
     if not ai then gfdb.auraIndicators = {} ai = gfdb.auraIndicators end
 
-    local enableCheck = GUI:CreateFormCheckbox(content, "Enable Aura Indicators", "enabled", ai, onChange)
-    enableCheck:SetPoint("TOPLEFT", PAD, y)
-    enableCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local cond = function() return ai.enabled end
 
-    local presetCheck = GUI:CreateFormCheckbox(content, "Use Spec Presets", "usePresets", ai, onChange)
-    presetCheck:SetPoint("TOPLEFT", PAD, y)
-    presetCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local desc = GUI:CreateLabel(content, "Track specific spells as icons on group frames. Auto-detects your spec and shows relevant HoTs, buffs, and externals.", 11, C.textMuted)
+    desc:SetJustifyH("LEFT")
+    L:Row(desc, 30)
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Aura Indicators", "enabled", ai, onChange), FORM_ROW)
 
-    local hint = GUI:CreateLabel(content, "Aura indicators show spec-specific HoTs, buffs, and externals on group frames. Use the Group Frames > Aura Indicators sub-tab for full configuration.", 11, C.textMuted)
-    hint:SetPoint("TOPLEFT", PAD, y)
-    hint:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    hint:SetJustifyH("LEFT")
-    y = y - 40
+    L:Header(GUI:CreateSectionHeader(content, "Display"))
+    L:Row(GUI:CreateFormSlider(content, "Icon Size", 8, 32, 1, "iconSize", ai, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Max Indicators", 1, 10, 1, "maxIndicators", ai, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Anchor", NINE_POINT_OPTIONS, "anchor", ai, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormDropdown(content, "Grow Direction", AURA_GROW_OPTIONS, "growDirection", ai, onChange), DROP_ROW, cond)
+    L:Row(GUI:CreateFormSlider(content, "Spacing", 0, 8, 1, "spacing", ai, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "X Offset", -30, 30, 1, "anchorOffsetX", ai, onChange), SLIDER_HEIGHT, cond)
+    L:Row(GUI:CreateFormSlider(content, "Y Offset", -30, 30, 1, "anchorOffsetY", ai, onChange), SLIDER_HEIGHT, cond)
 
-    content:SetHeight(math.abs(y) + 10)
+    -- Tracked Spells section uses manual layout (dynamic spell list)
+    local spellsHeader = GUI:CreateSectionHeader(content, "Tracked Spells")
+    L:Header(spellsHeader)
+    local spellsDesc = GUI:CreateLabel(content, "Toggle which spells are tracked as indicators for your current spec. Common defensives are always available.", 11, C.textMuted)
+    spellsDesc:SetJustifyH("LEFT")
+    L:Row(spellsDesc, 30, cond)
+
+    -- Finish layout to get current Y position, then append spell list below
+    local relayout = L:Finish()
+
+    if not ai.trackedSpells then ai.trackedSpells = {} end
+
+    -- Spell list is appended after the dynamic layout
+    -- Calculate starting Y from content height set by Finish()
+    local function GetSpellListY()
+        return -(content:GetHeight() - 10)
+    end
+
+    local spellListEndY, spellListContainer = BuildSpellListSection(
+        content,
+        function() return ai.trackedSpells end,
+        function()
+            local listH = spellListContainer:GetHeight()
+            content:SetHeight(math.abs(spellListEndY) + listH + 10)
+            if onChange then onChange() end
+        end,
+        GetSpellListY()
+    )
+
+    local listH = spellListContainer:GetHeight()
+    content:SetHeight(math.abs(spellListEndY) + listH + 10)
 end
 
 -- ABSORBS settings
 local function BuildAbsorbsSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Designer", subTabName = "Absorbs"})
-
-    -- Absorb shield
-    local absorbHeader = GUI:CreateSectionHeader(content, "Absorb Shield")
-    absorbHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - absorbHeader.gap
-
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Absorbs"})
     local absorbs = gfdb.absorbs
     if not absorbs then gfdb.absorbs = {} absorbs = gfdb.absorbs end
-
-    local absorbCheck = GUI:CreateFormCheckbox(content, "Show Absorb Shield", "enabled", absorbs, onChange)
-    absorbCheck:SetPoint("TOPLEFT", PAD, y)
-    absorbCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local absorbColor = GUI:CreateFormColorPicker(content, "Absorb Color", "color", absorbs, onChange)
-    absorbColor:SetPoint("TOPLEFT", PAD, y)
-    absorbColor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local absorbOpacity = GUI:CreateFormSlider(content, "Absorb Opacity", 0.1, 1, 0.05, "opacity", absorbs, onChange)
-    absorbOpacity:SetPoint("TOPLEFT", PAD, y)
-    absorbOpacity:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    -- Heal prediction
-    local healHeader = GUI:CreateSectionHeader(content, "Heal Prediction")
-    healHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - healHeader.gap
-
     local healPred = gfdb.healPrediction
     if not healPred then gfdb.healPrediction = {} healPred = gfdb.healPrediction end
 
-    local healCheck = GUI:CreateFormCheckbox(content, "Show Heal Prediction", "enabled", healPred, onChange)
-    healCheck:SetPoint("TOPLEFT", PAD, y)
-    healCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local absorbCond = function() return absorbs.enabled end
+    local healCond = function() return healPred.enabled end
 
-    local healOpacity = GUI:CreateFormSlider(content, "Heal Prediction Opacity", 0.1, 1, 0.05, "opacity", healPred, onChange)
-    healOpacity:SetPoint("TOPLEFT", PAD, y)
-    healOpacity:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    L:Header(GUI:CreateSectionHeader(content, "Absorb Shield"))
+    L:Row(GUI:CreateFormCheckbox(content, "Show Absorb Shield", "enabled", absorbs, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormColorPicker(content, "Absorb Color", "color", absorbs, onChange), FORM_ROW, absorbCond)
+    L:Row(GUI:CreateFormSlider(content, "Absorb Opacity", 0.1, 1, 0.05, "opacity", absorbs, onChange), SLIDER_HEIGHT, absorbCond)
 
-    content:SetHeight(math.abs(y) + 10)
+    L:Header(GUI:CreateSectionHeader(content, "Heal Prediction"))
+    L:Row(GUI:CreateFormCheckbox(content, "Show Heal Prediction", "enabled", healPred, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Heal Prediction Opacity", 0.1, 1, 0.05, "opacity", healPred, onChange), SLIDER_HEIGHT, healCond)
+
+    L:Finish()
 end
 
 ---------------------------------------------------------------------------
@@ -1188,7 +1738,7 @@ local PET_ANCHOR_OPTIONS = {
 ---------------------------------------------------------------------------
 local function BuildGeneralSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frames", subTabName = "General"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "General"})
 
     -- Enable checkbox (requires reload)
     local enableCheck = GUI:CreateFormCheckbox(content, "Enable Group Frames (Req. Reload)", "enabled", gfdb, function()
@@ -1342,7 +1892,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildLayoutSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frames", subTabName = "Layout"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Layout"})
 
     local layout = gfdb.layout
     if not layout then gfdb.layout = {} layout = gfdb.layout end
@@ -1436,7 +1986,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildDimensionsSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frames", subTabName = "Dimensions"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Dimensions"})
 
     local dims = gfdb.dimensions
     if not dims then gfdb.dimensions = {} dims = gfdb.dimensions end
@@ -1505,7 +2055,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildClickCastSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frames", subTabName = "Click-Cast"})
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Click-Cast"})
 
     local cc = gfdb.clickCast
     if not cc then gfdb.clickCast = {} cc = gfdb.clickCast end
@@ -1988,108 +2538,51 @@ end
 -- MISC SETTINGS (Range, Portrait, Pets, Spotlight)
 ---------------------------------------------------------------------------
 local function BuildMiscSettings(content, gfdb, onChange)
-    local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frames", subTabName = "Misc"})
-
-    -- Range check
-    local rangeHeader = GUI:CreateSectionHeader(content, "Range Check")
-    rangeHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - rangeHeader.gap
+    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Misc"})
 
     local range = gfdb.range
     if not range then gfdb.range = {} range = gfdb.range end
-
-    local rangeCheck = GUI:CreateFormCheckbox(content, "Enable Range Check (dim out-of-range members)", "enabled", range, onChange)
-    rangeCheck:SetPoint("TOPLEFT", PAD, y)
-    rangeCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local rangeAlpha = GUI:CreateFormSlider(content, "Out-of-Range Alpha", 0.1, 0.8, 0.05, "outOfRangeAlpha", range, onChange)
-    rangeAlpha:SetPoint("TOPLEFT", PAD, y)
-    rangeAlpha:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    -- Portrait
-    local portraitHeader = GUI:CreateSectionHeader(content, "Portrait")
-    portraitHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - portraitHeader.gap
-
     local portrait = gfdb.portrait
     if not portrait then gfdb.portrait = {} portrait = gfdb.portrait end
-
-    local portraitCheck = GUI:CreateFormCheckbox(content, "Show Portrait", "showPortrait", portrait, onChange)
-    portraitCheck:SetPoint("TOPLEFT", PAD, y)
-    portraitCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local portraitSide = GUI:CreateDropdown(content, "Portrait Side", ANCHOR_SIDE_OPTIONS, "portraitSide", portrait, onChange)
-    portraitSide:SetPoint("TOPLEFT", PAD, y)
-    portraitSide:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    local portraitSize = GUI:CreateFormSlider(content, "Portrait Size", 16, 60, 1, "portraitSize", portrait, onChange)
-    portraitSize:SetPoint("TOPLEFT", PAD, y)
-    portraitSize:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    -- Pet frames
-    local petHeader = GUI:CreateSectionHeader(content, "Pet Frames")
-    petHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - petHeader.gap
-
     local pets = gfdb.pets
     if not pets then gfdb.pets = {} pets = gfdb.pets end
-
-    local petCheck = GUI:CreateFormCheckbox(content, "Enable Pet Frames", "enabled", pets, onChange)
-    petCheck:SetPoint("TOPLEFT", PAD, y)
-    petCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
-
-    local petW = GUI:CreateFormSlider(content, "Pet Frame Width", 40, 200, 1, "width", pets, onChange)
-    petW:SetPoint("TOPLEFT", PAD, y)
-    petW:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local petH = GUI:CreateFormSlider(content, "Pet Frame Height", 10, 40, 1, "height", pets, onChange)
-    petH:SetPoint("TOPLEFT", PAD, y)
-    petH:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
-
-    local petAnchor = GUI:CreateDropdown(content, "Pet Anchor", PET_ANCHOR_OPTIONS, "anchorTo", pets, onChange)
-    petAnchor:SetPoint("TOPLEFT", PAD, y)
-    petAnchor:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
-
-    -- Spotlight
-    local spotHeader = GUI:CreateSectionHeader(content, "Spotlight")
-    spotHeader:SetPoint("TOPLEFT", PAD, y)
-    y = y - spotHeader.gap
-
-    local spotDesc = GUI:CreateLabel(content, "Pin specific raid members (by role or name) to a separate highlighted group for tank-watch or healing assignment awareness.", 11, C.textMuted)
-    spotDesc:SetPoint("TOPLEFT", PAD, y)
-    spotDesc:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    spotDesc:SetJustifyH("LEFT")
-    y = y - 30
-
     local spot = gfdb.spotlight
     if not spot then gfdb.spotlight = {} spot = gfdb.spotlight end
 
-    local spotCheck = GUI:CreateFormCheckbox(content, "Enable Spotlight", "enabled", spot, onChange)
-    spotCheck:SetPoint("TOPLEFT", PAD, y)
-    spotCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - FORM_ROW
+    local L = CreateDynamicLayout(content)
+    local rangeCond = function() return range.enabled end
+    local portraitCond = function() return portrait.showPortrait end
+    local petCond = function() return pets.enabled end
+    local spotCond = function() return spot.enabled end
 
-    local spotGrow = GUI:CreateDropdown(content, "Spotlight Grow Direction", GROW_OPTIONS, "growDirection", spot, onChange)
-    spotGrow:SetPoint("TOPLEFT", PAD, y)
-    spotGrow:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - DROP_ROW
+    -- Range check
+    L:Header(GUI:CreateSectionHeader(content, "Range Check"))
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Range Check (dim out-of-range members)", "enabled", range, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Out-of-Range Alpha", 0.1, 0.8, 0.05, "outOfRangeAlpha", range, onChange), SLIDER_HEIGHT, rangeCond)
 
-    local spotSpacing = GUI:CreateFormSlider(content, "Spotlight Spacing", 0, 10, 1, "spacing", spot, onChange)
-    spotSpacing:SetPoint("TOPLEFT", PAD, y)
-    spotSpacing:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
-    y = y - SLIDER_HEIGHT
+    -- Portrait
+    L:Header(GUI:CreateSectionHeader(content, "Portrait"))
+    L:Row(GUI:CreateFormCheckbox(content, "Show Portrait", "showPortrait", portrait, onChange), FORM_ROW)
+    L:Row(GUI:CreateDropdown(content, "Portrait Side", ANCHOR_SIDE_OPTIONS, "portraitSide", portrait, onChange), DROP_ROW, portraitCond)
+    L:Row(GUI:CreateFormSlider(content, "Portrait Size", 16, 60, 1, "portraitSize", portrait, onChange), SLIDER_HEIGHT, portraitCond)
 
-    content:SetHeight(math.abs(y) + 10)
+    -- Pet frames
+    L:Header(GUI:CreateSectionHeader(content, "Pet Frames"))
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Pet Frames", "enabled", pets, onChange), FORM_ROW)
+    L:Row(GUI:CreateFormSlider(content, "Pet Frame Width", 40, 200, 1, "width", pets, onChange), SLIDER_HEIGHT, petCond)
+    L:Row(GUI:CreateFormSlider(content, "Pet Frame Height", 10, 40, 1, "height", pets, onChange), SLIDER_HEIGHT, petCond)
+    L:Row(GUI:CreateDropdown(content, "Pet Anchor", PET_ANCHOR_OPTIONS, "anchorTo", pets, onChange), DROP_ROW, petCond)
+
+    -- Spotlight
+    L:Header(GUI:CreateSectionHeader(content, "Spotlight"))
+    local spotDesc = GUI:CreateLabel(content, "Pin specific raid members (by role or name) to a separate highlighted group for tank-watch or healing assignment awareness.", 11, C.textMuted)
+    spotDesc:SetJustifyH("LEFT")
+    L:Row(spotDesc, 30)
+    L:Row(GUI:CreateFormCheckbox(content, "Enable Spotlight", "enabled", spot, onChange), FORM_ROW)
+    L:Row(GUI:CreateDropdown(content, "Spotlight Grow Direction", GROW_OPTIONS, "growDirection", spot, onChange), DROP_ROW, spotCond)
+    L:Row(GUI:CreateFormSlider(content, "Spotlight Spacing", 0, 10, 1, "spacing", spot, onChange), SLIDER_HEIGHT, spotCond)
+
+    L:Finish()
 end
 
 ---------------------------------------------------------------------------
@@ -2286,7 +2779,12 @@ local function BuildDesignerView(tabContent, previewType)
         if childRefs.buffContainer then MakeOverlay("buffs", childRefs.buffContainer, "fill") end
         if childRefs.debuffContainer then MakeOverlay("debuffs", childRefs.debuffContainer, "fill") end
         if childRefs.roleIcon then MakeOverlay("role", childRefs.roleIcon, "fill") end
+        if childRefs.indicatorFrame then MakeOverlay("indicators", childRefs.indicatorFrame, "fill") end
         if childRefs.absorbOverlay then MakeOverlay("absorbs", childRefs.absorbOverlay, "fill") end
+        if childRefs.dispelOverlay then MakeOverlay("healer", childRefs.dispelOverlay, "fill") end
+        if childRefs.defIcon then MakeOverlay("defensive", childRefs.defIcon, "fill") end
+        if childRefs.auraIndicatorContainer then MakeOverlay("auraIndicators", childRefs.auraIndicatorContainer, "fill") end
+        if childRefs.paContainer then MakeOverlay("privateAuras", childRefs.paContainer, "fill") end
 
         -- Re-highlight selected element
         if state.selectedElement and state.hitOverlays[state.selectedElement] then
@@ -2353,15 +2851,14 @@ local function BuildDesignerView(tabContent, previewType)
         end
         panel:Show()
 
-        -- Resize settings area to fit panel
+        -- Resize scroll child to fit panel content
         local panelHeight = panel:GetHeight()
         if panelHeight and panelHeight > 0 then
             state.settingsArea:SetHeight(panelHeight)
         end
 
-        -- Resize total content
-        local totalY = math.abs(state._previewY) + previewH + 10 + (state._widgetBarHeight or 0) + 10 + (panelHeight or 300) + 20
-        tabContent:SetHeight(totalY)
+        -- Update scrollbar visibility for new content size
+        if state.refreshScrollBar then state.refreshScrollBar() end
     end
 
     state.selectElement = SelectElement
@@ -2372,18 +2869,80 @@ local function BuildDesignerView(tabContent, previewType)
     y = y - widgetBarHeight - 10
 
     ---------------------------------------------------------------------------
-    -- SETTINGS AREA
+    -- SETTINGS AREA (inner scroll — preview + widget bar stay fixed above)
     ---------------------------------------------------------------------------
-    local settingsArea = CreateFrame("Frame", nil, tabContent)
-    settingsArea:SetPoint("TOPLEFT", PAD, y)
-    settingsArea:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
-    settingsArea:SetHeight(300)
-    state.settingsArea = settingsArea
+    local outerScroll = tabContent:GetParent():GetParent():GetParent()
+
+    local settingsScroll = CreateFrame("ScrollFrame", nil, tabContent, "UIPanelScrollFrameTemplate")
+    settingsScroll:SetPoint("TOPLEFT", PAD, y)
+    settingsScroll:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+    settingsScroll:SetHeight(300) -- resized dynamically below
+
+    local settingsChild = CreateFrame("Frame", nil, settingsScroll)
+    settingsChild:SetWidth(settingsScroll:GetWidth() or 400)
+    settingsChild:SetHeight(1)
+    settingsScroll:SetScrollChild(settingsChild)
+    state.settingsArea = settingsChild
+
+    -- Style scrollbar to match the rest of the UI
+    local scrollBar = settingsScroll.ScrollBar
+    if scrollBar then
+        scrollBar:SetPoint("TOPLEFT", settingsScroll, "TOPRIGHT", 4, -16)
+        scrollBar:SetPoint("BOTTOMLEFT", settingsScroll, "BOTTOMRIGHT", 4, 16)
+        local thumb = scrollBar:GetThumbTexture()
+        if thumb then thumb:SetColorTexture(0.35, 0.45, 0.5, 0.8) end
+        local scrollUp = scrollBar.ScrollUpButton or scrollBar.Back
+        local scrollDown = scrollBar.ScrollDownButton or scrollBar.Forward
+        if scrollUp then scrollUp:Hide(); scrollUp:SetAlpha(0) end
+        if scrollDown then scrollDown:Hide(); scrollDown:SetAlpha(0) end
+
+        -- Auto-hide scrollbar when content fits without scrolling
+        scrollBar:HookScript("OnShow", function(self)
+            C_Timer.After(0.066, function()
+                local maxScroll = ns.GetSafeVerticalScrollRange(settingsScroll)
+                if maxScroll <= 1 then
+                    self:Hide()
+                end
+            end)
+        end)
+    end
+    ns.ApplyScrollWheel(settingsScroll)
+
+    -- Helper to refresh scrollbar visibility after content changes
+    local function RefreshScrollBar()
+        if scrollBar then
+            C_Timer.After(0.066, function()
+                local maxScroll = ns.GetSafeVerticalScrollRange(settingsScroll)
+                if maxScroll <= 1 then
+                    scrollBar:Hide()
+                else
+                    scrollBar:Show()
+                end
+            end)
+        end
+    end
+
+    state.refreshScrollBar = RefreshScrollBar
+
+    -- Dynamically size the inner scroll to fill remaining viewport space
+    local fixedHeaderH = math.abs(y)
+    local function ResizeSettingsScroll()
+        local viewH = outerScroll:GetHeight()
+        if viewH and viewH > 0 then
+            settingsScroll:SetHeight(math.max(viewH - fixedHeaderH - 10, 200))
+        end
+        local sw = settingsScroll:GetWidth()
+        if sw and sw > 0 then
+            settingsChild:SetWidth(sw)
+        end
+        RefreshScrollBar()
+    end
+    outerScroll:HookScript("OnSizeChanged", ResizeSettingsScroll)
+    settingsScroll:HookScript("OnShow", ResizeSettingsScroll)
+    C_Timer.After(0, ResizeSettingsScroll)
 
     -- Select first element by default
     SelectElement("frame")
-
-    tabContent:SetHeight(800)
 end
 
 ---------------------------------------------------------------------------
@@ -2500,12 +3059,35 @@ local function CreateDesignerPage(parent)
         { name = "Settings", builder = BuildSettingsView },
     })
 
-    content:SetHeight(800)
+    -- Party/Raid tabs use an inner scroll for settings, so disable outer
+    -- scrolling by matching scroll child height to viewport. Settings tab
+    -- keeps normal outer scrolling.
+    local subTabGroup = GUI._lastSubTabGroup
+    if subTabGroup then
+        local origOnSelect = subTabGroup._onSelect
+        subTabGroup._onSelect = function(index, tabInfo)
+            if origOnSelect then origOnSelect(index, tabInfo) end
+            if index <= 2 then
+                -- Designer tabs: no outer scroll (inner scroll handles settings)
+                local viewH = scroll:GetHeight()
+                content:SetHeight(viewH > 0 and viewH or 1)
+            else
+                -- Settings tab: normal outer scroll
+                content:SetHeight(800)
+            end
+        end
+    end
+
+    -- Initial state: Party tab selected, disable outer scroll
+    C_Timer.After(0, function()
+        local viewH = scroll:GetHeight()
+        content:SetHeight(viewH > 0 and viewH or 1)
+    end)
 end
 
 ---------------------------------------------------------------------------
 -- EXPORT
 ---------------------------------------------------------------------------
-ns.QUI_DesignerOptions = {
-    CreateDesignerPage = CreateDesignerPage,
+ns.QUI_GroupFramesOptions = {
+    CreateGroupFramesPage = CreateDesignerPage,
 }
