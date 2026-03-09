@@ -569,6 +569,10 @@ local function GetFontPath()
     return FONT_PATH
 end
 
+function GUI:GetFontPath()
+    return GetFontPath()
+end
+
 ---------------------------------------------------------------------------
 -- UTILITY FUNCTIONS
 ---------------------------------------------------------------------------
@@ -680,6 +684,171 @@ function GUI:CreateButton(parent, text, width, height, onClick)
     end
 
     return btn
+end
+
+---------------------------------------------------------------------------
+-- WIDGET: INLINE EDIT BOX (compact utility input)
+---------------------------------------------------------------------------
+function GUI:CreateInlineEditBox(parent, options)
+    options = options or {}
+    local UIKit = ns.UIKit
+
+    local width = options.width or 100
+    local height = options.height or 22
+    local editHeight = options.editHeight or (height - 2)
+    local textInset = options.textInset or 6
+    local fontSize = options.fontSize or 11
+    local justifyH = options.justifyH or "LEFT"
+    local commitOnFocusLost = options.commitOnFocusLost ~= false
+    local bgColor = options.bgColor or {0.08, 0.08, 0.08, 1}
+    local borderColor = options.borderColor or {0.25, 0.25, 0.25, 1}
+    local activeBorderColor = options.activeBorderColor or C.accent
+
+    local field = CreateFrame("Frame", nil, parent)
+    if UIKit and UIKit.SetSizePx then
+        UIKit.SetSizePx(field, width, height)
+    else
+        field:SetSize(width, height)
+    end
+
+    if UIKit and UIKit.CreateBackground then
+        UIKit.CreateBackground(field, bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    else
+        local bg = field:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        bg:SetVertexColor(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    end
+
+    local function ApplyFallbackBorder(r, g, b, a)
+        if not field._fallbackBorder then
+            field._fallbackBorder = {
+                top = field:CreateTexture(nil, "OVERLAY"),
+                bottom = field:CreateTexture(nil, "OVERLAY"),
+                left = field:CreateTexture(nil, "OVERLAY"),
+                right = field:CreateTexture(nil, "OVERLAY"),
+            }
+            for _, edge in pairs(field._fallbackBorder) do
+                edge:SetTexture("Interface\\Buttons\\WHITE8x8")
+            end
+        end
+
+        local px = (QUICore and QUICore.GetPixelSize and QUICore:GetPixelSize(field)) or 1
+        local border = field._fallbackBorder
+
+        border.top:ClearAllPoints()
+        border.top:SetPoint("TOPLEFT", field, "TOPLEFT", 0, 0)
+        border.top:SetPoint("TOPRIGHT", field, "TOPRIGHT", 0, 0)
+        border.top:SetHeight(px)
+
+        border.bottom:ClearAllPoints()
+        border.bottom:SetPoint("BOTTOMLEFT", field, "BOTTOMLEFT", 0, 0)
+        border.bottom:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", 0, 0)
+        border.bottom:SetHeight(px)
+
+        border.left:ClearAllPoints()
+        border.left:SetPoint("TOPLEFT", border.top, "BOTTOMLEFT", 0, 0)
+        border.left:SetPoint("BOTTOMLEFT", border.bottom, "TOPLEFT", 0, 0)
+        border.left:SetWidth(px)
+
+        border.right:ClearAllPoints()
+        border.right:SetPoint("TOPRIGHT", border.top, "BOTTOMRIGHT", 0, 0)
+        border.right:SetPoint("BOTTOMRIGHT", border.bottom, "TOPRIGHT", 0, 0)
+        border.right:SetWidth(px)
+
+        for _, edge in pairs(border) do
+            edge:SetVertexColor(r or 0.25, g or 0.25, b or 0.25, a or 1)
+        end
+    end
+
+    function field:SetFieldBorderColor(r, g, b, a)
+        if UIKit and UIKit.UpdateBorderLines then
+            if not self._pixelBorderReady and UIKit.CreateBorderLines then
+                UIKit.CreateBorderLines(self)
+                self._pixelBorderReady = true
+            end
+            UIKit.UpdateBorderLines(self, 1, r, g, b, a, false)
+        else
+            ApplyFallbackBorder(r, g, b, a)
+        end
+    end
+    field:SetFieldBorderColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
+
+    local editBox = CreateFrame("EditBox", nil, field)
+    if UIKit and UIKit.SetPointPx then
+        UIKit.SetPointPx(editBox, "LEFT", field, "LEFT", textInset, 0)
+        UIKit.SetPointPx(editBox, "RIGHT", field, "RIGHT", -textInset, 0)
+        UIKit.SetHeightPx(editBox, editHeight)
+    else
+        editBox:SetPoint("LEFT", field, "LEFT", textInset, 0)
+        editBox:SetPoint("RIGHT", field, "RIGHT", -textInset, 0)
+        editBox:SetHeight(editHeight)
+    end
+    editBox:SetAutoFocus(false)
+    editBox:SetFont(GetFontPath(), fontSize, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH(justifyH)
+
+    if options.maxLetters and options.maxLetters > 0 then
+        editBox:SetMaxLetters(options.maxLetters)
+    end
+    if options.numeric ~= nil then
+        editBox:SetNumeric(options.numeric and true or false)
+    end
+    if options.text ~= nil then
+        editBox:SetText(tostring(options.text))
+    end
+
+    editBox:SetScript("OnTextChanged", function(self, userInput)
+        if options.onTextChanged then
+            options.onTextChanged(self, userInput)
+        end
+    end)
+
+    editBox:SetScript("OnEnterPressed", function(self)
+        if options.onEnterPressed then
+            options.onEnterPressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEscapePressed", function(self)
+        if options.onEscapePressed then
+            options.onEscapePressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusGained", function(self)
+        field:SetFieldBorderColor(activeBorderColor[1], activeBorderColor[2], activeBorderColor[3], activeBorderColor[4] or 1)
+        if options.onEditFocusGained then
+            options.onEditFocusGained(self)
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusLost", function(self)
+        field:SetFieldBorderColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
+        if commitOnFocusLost and options.onCommit then
+            options.onCommit(self)
+        end
+        if options.onEditFocusLost then
+            options.onEditFocusLost(self)
+        end
+    end)
+
+    function field:SetEnabled(enabled)
+        editBox:SetEnabled(enabled)
+        editBox:EnableMouse(enabled)
+        self:SetAlpha(enabled and 1 or 0.6)
+        if not enabled then
+            editBox:ClearFocus()
+        end
+    end
+
+    field.editBox = editBox
+    return field, editBox
 end
 
 ---------------------------------------------------------------------------

@@ -216,6 +216,33 @@ local ELEMENT_LABELS = {
     misc = "Misc",
 }
 
+local SEARCH_TAB_INDEX = 6
+local SEARCH_TAB_NAME = "Group Frames"
+local SEARCH_SUBTAB_GENERAL_INDEX = 1
+local SEARCH_SUBTAB_GENERAL_NAME = "General settings"
+local SEARCH_SUBTAB_COMPOSER_INDEX = 2
+local SEARCH_SUBTAB_COMPOSER_NAME = "Frame Composer"
+
+local function SetGeneralSearchContext(sectionName)
+    GUI:SetSearchContext({
+        tabIndex = SEARCH_TAB_INDEX,
+        tabName = SEARCH_TAB_NAME,
+        subTabIndex = SEARCH_SUBTAB_GENERAL_INDEX,
+        subTabName = SEARCH_SUBTAB_GENERAL_NAME,
+        sectionName = sectionName,
+    })
+end
+
+local function SetComposerSearchContext(sectionName)
+    GUI:SetSearchContext({
+        tabIndex = SEARCH_TAB_INDEX,
+        tabName = SEARCH_TAB_NAME,
+        subTabIndex = SEARCH_SUBTAB_COMPOSER_INDEX,
+        subTabName = SEARCH_SUBTAB_COMPOSER_NAME,
+        sectionName = sectionName,
+    })
+end
+
 ---------------------------------------------------------------------------
 -- ANCHOR MAP for text placement in preview
 ---------------------------------------------------------------------------
@@ -1186,7 +1213,7 @@ local DRAG_CONFIG = {
 -- FRAME settings
 local function BuildFrameSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Frame"})
+    SetComposerSearchContext("Frame")
 
     local general = gfdb.general
     if not general then gfdb.general = {} general = gfdb.general end
@@ -1252,7 +1279,7 @@ end
 -- HEALTH settings
 local function BuildHealthSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Health"})
+    SetComposerSearchContext("Health")
 
     local general = gfdb.general or {}
 
@@ -1271,7 +1298,7 @@ end
 
 -- POWER settings
 local function BuildPowerSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Power"})
+    SetComposerSearchContext("Power")
     local power = gfdb.power
     if not power then gfdb.power = {} power = gfdb.power end
 
@@ -1289,7 +1316,7 @@ end
 
 -- NAME settings
 local function BuildNameSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Name"})
+    SetComposerSearchContext("Name")
     local name = gfdb.name
     if not name then gfdb.name = {} name = gfdb.name end
 
@@ -1310,7 +1337,7 @@ end
 
 -- HEALTH TEXT settings
 local function BuildHealthTextSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "HP Text"})
+    SetComposerSearchContext("HP Text")
     local health = gfdb.health
     if not health then gfdb.health = {} health = gfdb.health end
 
@@ -1600,7 +1627,7 @@ end
 
 -- BUFFS settings
 local function BuildBuffsSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Buffs"})
+    SetComposerSearchContext("Buffs")
     local auras = gfdb.auras
     if not auras then gfdb.auras = {} auras = gfdb.auras end
 
@@ -1666,7 +1693,7 @@ end
 
 -- DEBUFFS settings
 local function BuildDebuffsSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Debuffs"})
+    SetComposerSearchContext("Debuffs")
     local auras = gfdb.auras
     if not auras then gfdb.auras = {} auras = gfdb.auras end
 
@@ -1732,7 +1759,7 @@ end
 
 -- ROLE settings
 local function BuildRoleSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Role"})
+    SetComposerSearchContext("Role")
     local ind = gfdb.indicators
     if not ind then gfdb.indicators = {} ind = gfdb.indicators end
 
@@ -1752,7 +1779,7 @@ end
 
 -- INDICATORS settings
 local function BuildIndicatorsSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Indicators"})
+    SetComposerSearchContext("Indicators")
     local ind = gfdb.indicators
     if not ind then gfdb.indicators = {} ind = gfdb.indicators end
 
@@ -1787,7 +1814,7 @@ end
 
 -- HEALER settings
 local function BuildHealerSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Healer"})
+    SetComposerSearchContext("Healer")
     local healer = gfdb.healer
     if not healer then gfdb.healer = {} healer = gfdb.healer end
 
@@ -1836,7 +1863,7 @@ end
 
 -- DEFENSIVE settings
 local function BuildDefensiveSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Defensive"})
+    SetComposerSearchContext("Defensive")
     local healer = gfdb.healer
     if not healer then gfdb.healer = {} healer = gfdb.healer end
     local def = healer.defensiveIndicator
@@ -1856,7 +1883,7 @@ end
 
 -- PRIVATE AURAS settings
 local function BuildPrivateAurasSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Private Auras"})
+    SetComposerSearchContext("Private Auras")
     local pa = gfdb.privateAuras
     if not pa then gfdb.privateAuras = {} pa = gfdb.privateAuras end
 
@@ -1878,7 +1905,7 @@ end
 
 -- AURA INDICATORS settings
 local function BuildAuraIndicatorsSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Aura Indicators"})
+    SetComposerSearchContext("Aura Indicators")
     local ai = gfdb.auraIndicators
     if not ai then gfdb.auraIndicators = {} ai = gfdb.auraIndicators end
 
@@ -1935,7 +1962,7 @@ end
 
 -- ABSORBS settings
 local function BuildAbsorbsSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Absorbs"})
+    SetComposerSearchContext("Absorbs")
     local absorbs = gfdb.absorbs
     if not absorbs then gfdb.absorbs = {} absorbs = gfdb.absorbs end
     local healPred = gfdb.healPrediction
@@ -2002,7 +2029,7 @@ local PET_ANCHOR_OPTIONS = {
 ---------------------------------------------------------------------------
 local function BuildGeneralSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "General"})
+    SetGeneralSearchContext("General")
 
     -- Enable checkbox (requires reload)
     local enableCheck = GUI:CreateFormCheckbox(content, "Enable Group Frames (Req. Reload)", "enabled", gfdb, function()
@@ -2156,7 +2183,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildLayoutSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Layout"})
+    SetGeneralSearchContext("Layout")
 
     local layout = gfdb.layout
     if not layout then gfdb.layout = {} layout = gfdb.layout end
@@ -2250,7 +2277,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildDimensionsSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Dimensions"})
+    SetGeneralSearchContext("Dimensions")
 
     local dims = gfdb.dimensions
     if not dims then gfdb.dimensions = {} dims = gfdb.dimensions end
@@ -2319,7 +2346,7 @@ end
 ---------------------------------------------------------------------------
 local function BuildClickCastSettings(content, gfdb, onChange)
     local y = -10
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Click-Cast"})
+    SetGeneralSearchContext("Click-Cast")
 
     local cc = gfdb.clickCast
     if not cc then gfdb.clickCast = {} cc = gfdb.clickCast end
@@ -2842,7 +2869,7 @@ end
 -- MISC SETTINGS (Range, Portrait, Pets, Spotlight)
 ---------------------------------------------------------------------------
 local function BuildMiscSettings(content, gfdb, onChange)
-    GUI:SetSearchContext({tabIndex = 6, tabName = "Group Frame Designer", subTabName = "Misc"})
+    SetGeneralSearchContext("Misc")
 
     local range = gfdb.range
     if not range then gfdb.range = {} range = gfdb.range end
@@ -3461,6 +3488,25 @@ local function BuildDesignerView(tabContent, previewType)
 
     -- Select first element by default
     SelectElement("frame")
+
+    -- Build all designer setting panels once so every option is indexed by search,
+    -- even if the user never clicks each widget-bar element manually.
+    local currentGFDB = GetGFDB()
+    if currentGFDB then
+        for _, key in ipairs(VISUAL_ELEMENT_KEYS) do
+            if not state.settingsPanels[key] then
+                local builder = ELEMENT_BUILDERS[key]
+                if builder then
+                    local panel = CreateFrame("Frame", nil, state.settingsArea)
+                    panel:SetPoint("TOPLEFT", 0, 0)
+                    panel:SetPoint("RIGHT", state.settingsArea, "RIGHT", 0, 0)
+                    builder(panel, currentGFDB, RefreshGF)
+                    panel:Hide()
+                    state.settingsPanels[key] = panel
+                end
+            end
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -3562,6 +3608,25 @@ local function BuildSettingsView(tabContent)
     -- Select first config element by default
     SelectElement("general")
 
+    -- Build all general-settings panels once so their controls are searchable
+    -- without requiring users to click each category first.
+    local currentGFDB = GetGFDB()
+    if currentGFDB then
+        for _, key in ipairs(CONFIG_ELEMENT_KEYS) do
+            if not state.settingsPanels[key] then
+                local builder = ELEMENT_BUILDERS[key]
+                if builder then
+                    local panel = CreateFrame("Frame", nil, state.settingsArea)
+                    panel:SetPoint("TOPLEFT", 0, 0)
+                    panel:SetPoint("RIGHT", state.settingsArea, "RIGHT", 0, 0)
+                    builder(panel, currentGFDB, RefreshGF)
+                    panel:Hide()
+                    state.settingsPanels[key] = panel
+                end
+            end
+        end
+    end
+
     tabContent:SetHeight(800)
 end
 
@@ -3577,8 +3642,8 @@ local function BuildFrameComposerView(tabContent)
         return
     end
 
-    local GROUP_FRAMES_TAB_INDEX = 6
-    local FRAME_COMPOSER_SUBTAB_INDEX = 2
+    local GROUP_FRAMES_TAB_INDEX = SEARCH_TAB_INDEX
+    local FRAME_COMPOSER_SUBTAB_INDEX = SEARCH_SUBTAB_COMPOSER_INDEX
 
     local y = -10
 
@@ -3664,6 +3729,91 @@ local function BuildFrameComposerView(tabContent)
     end)
 end
 
+local function RegisterDesignerSearchNavigation()
+    if not GUI or not GUI.RegisterNavigationItem then return end
+
+    GUI:RegisterNavigationItem("subtab", {
+        tabIndex = SEARCH_TAB_INDEX,
+        tabName = SEARCH_TAB_NAME,
+        subTabIndex = SEARCH_SUBTAB_GENERAL_INDEX,
+        subTabName = SEARCH_SUBTAB_GENERAL_NAME,
+    })
+    GUI:RegisterNavigationItem("subtab", {
+        tabIndex = SEARCH_TAB_INDEX,
+        tabName = SEARCH_TAB_NAME,
+        subTabIndex = SEARCH_SUBTAB_COMPOSER_INDEX,
+        subTabName = SEARCH_SUBTAB_COMPOSER_NAME,
+    })
+
+    local composerBase = {
+        tabIndex = SEARCH_TAB_INDEX,
+        tabName = SEARCH_TAB_NAME,
+        subTabIndex = SEARCH_SUBTAB_COMPOSER_INDEX,
+        subTabName = SEARCH_SUBTAB_COMPOSER_NAME,
+    }
+    GUI:RegisterNavigationItem("section", {
+        tabIndex = composerBase.tabIndex,
+        tabName = composerBase.tabName,
+        subTabIndex = composerBase.subTabIndex,
+        subTabName = composerBase.subTabName,
+        sectionName = "Party",
+    })
+    GUI:RegisterNavigationItem("section", {
+        tabIndex = composerBase.tabIndex,
+        tabName = composerBase.tabName,
+        subTabIndex = composerBase.subTabIndex,
+        subTabName = composerBase.subTabName,
+        sectionName = "Raid",
+    })
+    GUI:RegisterNavigationItem("section", {
+        tabIndex = composerBase.tabIndex,
+        tabName = composerBase.tabName,
+        subTabIndex = composerBase.subTabIndex,
+        subTabName = composerBase.subTabName,
+        sectionName = "Frame Designer",
+    })
+    GUI:RegisterNavigationItem("section", {
+        tabIndex = composerBase.tabIndex,
+        tabName = composerBase.tabName,
+        subTabIndex = composerBase.subTabIndex,
+        subTabName = composerBase.subTabName,
+        sectionName = "Party Frame Designer",
+    })
+    GUI:RegisterNavigationItem("section", {
+        tabIndex = composerBase.tabIndex,
+        tabName = composerBase.tabName,
+        subTabIndex = composerBase.subTabIndex,
+        subTabName = composerBase.subTabName,
+        sectionName = "Raid Frame Designer",
+    })
+
+    for _, key in ipairs(VISUAL_ELEMENT_KEYS) do
+        local label = ELEMENT_LABELS[key]
+        if label and label ~= "" then
+            GUI:RegisterNavigationItem("section", {
+                tabIndex = composerBase.tabIndex,
+                tabName = composerBase.tabName,
+                subTabIndex = composerBase.subTabIndex,
+                subTabName = composerBase.subTabName,
+                sectionName = label,
+            })
+        end
+    end
+
+    for _, key in ipairs(CONFIG_ELEMENT_KEYS) do
+        local label = ELEMENT_LABELS[key]
+        if label and label ~= "" then
+            GUI:RegisterNavigationItem("section", {
+                tabIndex = SEARCH_TAB_INDEX,
+                tabName = SEARCH_TAB_NAME,
+                subTabIndex = SEARCH_SUBTAB_GENERAL_INDEX,
+                subTabName = SEARCH_SUBTAB_GENERAL_NAME,
+                sectionName = label,
+            })
+        end
+    end
+end
+
 ---------------------------------------------------------------------------
 -- MAIN ENTRY POINT
 ---------------------------------------------------------------------------
@@ -3674,6 +3824,7 @@ local function CreateDesignerPage(parent)
         { name = "General settings", builder = BuildSettingsView },
         { name = "Frame Composer", isDesigner = true, builder = BuildFrameComposerView },
     })
+    RegisterDesignerSearchNavigation()
 
     -- Designer tabs use an inner scroll for settings, so disable outer
     -- scrolling by matching scroll child height to viewport. General settings
