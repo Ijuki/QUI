@@ -1334,7 +1334,7 @@ local function CreateGroupFramesPage(parent)
         ay = ay - FORM_ROW
 
         -- Action Type dropdown
-        local spellInputContainer, macroInputContainer  -- forward declare for show/hide
+        local spellInputContainer, macroInputContainer, macroInput  -- forward declare for show/hide
 
         local actionDrop = GUI:CreateFormDropdown(addContainer, "Action Type", ACTION_TYPE_OPTIONS, "actionType", addState, function(val)
             addState.actionType = val
@@ -1350,94 +1350,34 @@ local function CreateGroupFramesPage(parent)
         ay = ay - FORM_ROW
 
         -- Spell Name editbox (shown for "spell" action type)
-        spellInputContainer = CreateFrame("Frame", nil, addContainer)
-        spellInputContainer:SetHeight(FORM_ROW)
+        spellInputContainer = GUI:CreateFormEditBox(addContainer, "Spell Name", nil, nil, nil, {
+            rowHeight = FORM_ROW,
+            commitOnFocusLost = false,
+            onTextChanged = function(self)
+                addState.spellName = self:GetText()
+            end,
+            onEscapePressed = function() end,
+        })
         spellInputContainer:SetPoint("TOPLEFT", 0, ay)
         spellInputContainer:SetPoint("RIGHT", addContainer, "RIGHT", 0, 0)
-
-        local spellLabel = spellInputContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        spellLabel:SetPoint("LEFT", 0, 0)
-        spellLabel:SetText("Spell Name")
-        spellLabel:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-
-        local spellInputBg = CreateFrame("Frame", nil, spellInputContainer, "BackdropTemplate")
-        spellInputBg:SetPoint("LEFT", spellInputContainer, "LEFT", 180, 0)
-        spellInputBg:SetPoint("RIGHT", spellInputContainer, "RIGHT", 0, 0)
-        spellInputBg:SetHeight(24)
-        local pxSpell = QUICore:GetPixelSize(spellInputBg)
-        spellInputBg:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = pxSpell,
-        })
-        spellInputBg:SetBackdropColor(0.08, 0.08, 0.08, 1)
-        spellInputBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-
-        spellInput = CreateFrame("EditBox", nil, spellInputBg)
-        spellInput:SetPoint("LEFT", 8, 0)
-        spellInput:SetPoint("RIGHT", -8, 0)
-        spellInput:SetHeight(22)
-        spellInput:SetAutoFocus(false)
-        spellInput:SetFont(GUI.FONT_PATH, 11, "")
-        spellInput:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
+        spellInput = spellInputContainer.editBox
         spellInput:SetText("")
-        spellInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-        spellInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        spellInput:SetScript("OnTextChanged", function(self)
-            addState.spellName = self:GetText()
-        end)
-        spellInput:SetScript("OnEditFocusGained", function()
-            spellInputBg:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
-        end)
-        spellInput:SetScript("OnEditFocusLost", function()
-            spellInputBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-        end)
         ay = ay - FORM_ROW
 
         -- Macro Text editbox (shown for "macro" action type)
-        macroInputContainer = CreateFrame("Frame", nil, addContainer)
-        macroInputContainer:SetHeight(FORM_ROW)
+        macroInputContainer = GUI:CreateFormEditBox(addContainer, "Macro Text", nil, nil, nil, {
+            rowHeight = FORM_ROW,
+            commitOnFocusLost = false,
+            onTextChanged = function(self)
+                addState.macroText = self:GetText()
+            end,
+            onEscapePressed = function() end,
+        })
         macroInputContainer:SetPoint("TOPLEFT", 0, ay)
         macroInputContainer:SetPoint("RIGHT", addContainer, "RIGHT", 0, 0)
         macroInputContainer:Hide()
-
-        local macroLabel = macroInputContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        macroLabel:SetPoint("LEFT", 0, 0)
-        macroLabel:SetText("Macro Text")
-        macroLabel:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-
-        local macroInputBg = CreateFrame("Frame", nil, macroInputContainer, "BackdropTemplate")
-        macroInputBg:SetPoint("LEFT", macroInputContainer, "LEFT", 180, 0)
-        macroInputBg:SetPoint("RIGHT", macroInputContainer, "RIGHT", 0, 0)
-        macroInputBg:SetHeight(24)
-        local pxMacro = QUICore:GetPixelSize(macroInputBg)
-        macroInputBg:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = pxMacro,
-        })
-        macroInputBg:SetBackdropColor(0.08, 0.08, 0.08, 1)
-        macroInputBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-
-        local macroInput = CreateFrame("EditBox", nil, macroInputBg)
-        macroInput:SetPoint("LEFT", 8, 0)
-        macroInput:SetPoint("RIGHT", -8, 0)
-        macroInput:SetHeight(22)
-        macroInput:SetAutoFocus(false)
-        macroInput:SetFont(GUI.FONT_PATH, 11, "")
-        macroInput:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
+        macroInput = macroInputContainer.editBox
         macroInput:SetText("")
-        macroInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-        macroInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-        macroInput:SetScript("OnTextChanged", function(self)
-            addState.macroText = self:GetText()
-        end)
-        macroInput:SetScript("OnEditFocusGained", function()
-            macroInputBg:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
-        end)
-        macroInput:SetScript("OnEditFocusLost", function()
-            macroInputBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
-        end)
         -- ay not decremented here since macro row overlaps spell row slot
 
         -- "Add Binding" button
