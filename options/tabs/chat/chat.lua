@@ -352,17 +352,21 @@ local function BuildChatTab(tabContent)
                 for _, o in ipairs(ALL_CHANNEL_OPTIONS) do
                     if not used[o.value] then return o.value end
                 end
-                return "guild_officer"
+                return nil
             end
 
-            local addBtn = GUI:CreateButton(soundEntriesContainer, "+ Add Channel + Sound", 180, 24, function()
-                table.insert(chat.newMessageSound.entries, { channel = GetFirstAvailableChannel(), sound = "None" })
-                RebuildSoundEntries()
-                RefreshChat()
-            end)
-            addBtn:SetPoint("TOPLEFT", 0, -rowY - 4)
-
-            rowY = rowY + 28
+            local nextChannel = GetFirstAvailableChannel()
+            if nextChannel then
+                local addBtn = GUI:CreateButton(soundEntriesContainer, "+ Add Channel + Sound", 180, 24, function()
+                    local channel = GetFirstAvailableChannel()
+                    if not channel then return end
+                    table.insert(chat.newMessageSound.entries, { channel = channel, sound = "None" })
+                    RebuildSoundEntries()
+                    RefreshChat()
+                end)
+                addBtn:SetPoint("TOPLEFT", 0, -rowY - 4)
+                rowY = rowY + 28
+            end
             soundEntriesContainer:SetHeight(rowY)
 
             tabContent:SetHeight(math.abs(soundSectionStartY) + rowY + 106)

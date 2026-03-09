@@ -298,6 +298,27 @@ local SOUND_CHANNEL_EVENTS = {
 local soundEventFrame = nil
 local registeredSoundEvents = {}
 
+local function EventMatchesChannel(event, channel)
+    local events = SOUND_CHANNEL_EVENTS[channel]
+    if not events then return false end
+    for _, registeredEvent in ipairs(events) do
+        if registeredEvent == event then
+            return true
+        end
+    end
+    return false
+end
+
+local function PlayConfiguredMessageSound(entry)
+    local soundName = entry.sound or "None"
+    if soundName and soundName ~= "None" and LSM then
+        local path = LSM:Fetch("sound", soundName)
+        if path and type(path) == "string" then
+            PlaySoundFile(path, "Master")
+        end
+    end
+end
+
 local function PlayNewMessageSound(event, ...)
     local settings = GetSettings()
     if not settings or not settings.newMessageSound or not settings.newMessageSound.enabled then
@@ -315,27 +336,31 @@ local function PlayNewMessageSound(event, ...)
     local author = select(2, ...)
     local playerName = UnitName("player")
     if author and playerName then
-        local authorBase = author:match("^([^%-]+)") or author
-        if authorBase == playerName then return end
+        local authorHasRealm = author:find("-", 1, true) ~= nil
+        if authorHasRealm then
+            local playerRealm = GetNormalizedRealmName and GetNormalizedRealmName()
+            if playerRealm and author == (playerName .. "-" .. playerRealm) then
+                return
+            end
+        elseif author == playerName then
+            return
+        end
     end
 
-    -- Find first entry whose channel matches this event
+    -- Prefer exact channel entries first; only fall back to "all".
     for _, entry in ipairs(entries) do
         local channel = entry.channel or "guild_officer"
-        local events = SOUND_CHANNEL_EVENTS[channel]
-        if events then
-            for _, e in ipairs(events) do
-                if e == event then
-                    local soundName = entry.sound or "None"
-                    if soundName and soundName ~= "None" and LSM then
-                        local path = LSM:Fetch("sound", soundName)
-                        if path and type(path) == "string" then
-                            PlaySoundFile(path, "Master")
-                        end
-                    end
-                    return
-                end
-            end
+        if channel ~= "all" and EventMatchesChannel(event, channel) then
+            PlayConfiguredMessageSound(entry)
+            return
+        end
+    end
+
+    for _, entry in ipairs(entries) do
+        local channel = entry.channel or "guild_officer"
+        if channel == "all" and EventMatchesChannel(event, channel) then
+            PlayConfiguredMessageSound(entry)
+            return
         end
     end
 end
