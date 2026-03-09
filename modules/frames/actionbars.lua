@@ -1201,8 +1201,12 @@ local function SkinButton(button, settings)
         icon:SetAllPoints(button)
         -- After /reload, empty slots may retain stale icon textures from the
         -- previous session. Clear them so ghost icons don't appear.
+        -- Do not apply this to stance/pet buttons: they use non-standard action
+        -- slot semantics and can return false from HasAction() while still
+        -- having a valid icon.
+        local barKey = GetBarKeyFromButton(button)
         local action = Helpers.SafeToNumber(button.action)
-        if action and not SafeHasAction(action) then
+        if action and barKey ~= "stance" and barKey ~= "pet" and not SafeHasAction(action) then
             icon:SetTexture(nil)
         end
         icon:SetAlpha(1)
