@@ -3531,6 +3531,14 @@ local function BuildDesignerView(tabContent, previewType)
                 GUI._suppressSearchRegistration = false
             end
 
+            -- Keep scroll child height in sync when panel relayouts change height
+            panel:HookScript("OnSizeChanged", function(self, w, h)
+                if self:IsShown() and h and h > 0 then
+                    state.settingsArea:SetHeight(h)
+                    if state.refreshScrollBar then state.refreshScrollBar() end
+                end
+            end)
+
             state.settingsPanels[key] = panel
         end
         panel:Show()
@@ -3824,7 +3832,14 @@ local function BuildContextView(tabContent, contextMode)
     local function EnsureSectionFrame(section)
         if sectionFrames[section] then return sectionFrames[section] end
         local frame = CreateFrame("Frame", nil, sectionHost)
-        frame:SetAllPoints(sectionHost)
+        if section == "Composer" then
+            -- Composer manages its own inner scroll — fill the host
+            frame:SetAllPoints(sectionHost)
+        else
+            -- Appearance/Settings: anchor top+right, let builder set height
+            frame:SetPoint("TOPLEFT", sectionHost, "TOPLEFT", 0, 0)
+            frame:SetPoint("RIGHT", sectionHost, "RIGHT", 0, 0)
+        end
 
         if section == "Composer" then
             BuildDesignerView(frame, contextMode)
@@ -3857,12 +3872,39 @@ local function BuildContextView(tabContent, contextMode)
         GUI.SectionRegistry[key] = reg
     end
 
+    local outerScroll = FindNearestScrollFrame(tabContent)
+
+    -- Size the host and tabContent based on the active section.
+    -- Composer has its own inner scroll so it fills the viewport.
+    -- Appearance/Settings set their own height — let the outer scroll handle overflow.
+    local function ResizeForSection(section)
+        local viewH = outerScroll and outerScroll.GetHeight and outerScroll:GetHeight() or nil
+        if section == "Composer" then
+            if viewH and viewH > 0 then
+                local targetH = math.max(420, viewH - math.abs(y) - 20)
+                sectionHost:SetHeight(targetH)
+                tabContent:SetHeight(math.abs(y) + targetH + 20)
+            else
+                sectionHost:SetHeight(820)
+                tabContent:SetHeight(900)
+            end
+        else
+            -- Use the section frame's content height
+            local frame = sectionFrames[section]
+            local contentH = frame and frame:GetHeight() or 600
+            if contentH < 100 then contentH = 600 end
+            sectionHost:SetHeight(contentH)
+            tabContent:SetHeight(math.abs(y) + contentH + 20)
+        end
+    end
+
     local function SelectSection(section)
         activeSection = section
         EnsureSectionFrame(section)
         for name, frame in pairs(sectionFrames) do
             frame:SetShown(name == section)
         end
+        ResizeForSection(section)
         if GUI.MainFrame and GUI.MainFrame.activeTab == SEARCH_TAB_INDEX then
             GUI.MainFrame._sidebarActiveSectionKey = SEARCH_TAB_INDEX .. ":" .. SUBTAB_INDEX .. ":" .. section
             GUI:RefreshSidebarTree(GUI.MainFrame)
@@ -3880,25 +3922,16 @@ local function BuildContextView(tabContent, contextMode)
         end
     end
 
-    local outerScroll = FindNearestScrollFrame(tabContent)
-    local function ResizeHost()
-        local viewH = outerScroll and outerScroll.GetHeight and outerScroll:GetHeight() or nil
-        if viewH and viewH > 0 then
-            local targetH = math.max(420, viewH - math.abs(y) - 20)
-            sectionHost:SetHeight(targetH)
-            tabContent:SetHeight(math.abs(y) + targetH + 20)
-        else
-            tabContent:SetHeight(900)
-        end
-    end
     if outerScroll and outerScroll.HookScript then
-        outerScroll:HookScript("OnSizeChanged", ResizeHost)
+        outerScroll:HookScript("OnSizeChanged", function()
+            if activeSection then ResizeForSection(activeSection) end
+        end)
     end
 
     SelectSection("Composer")
     C_Timer.After(0, function()
         EnsureSidebarEntries()
-        ResizeHost()
+        ResizeForSection(activeSection or "Composer")
         if GUI.MainFrame then
             GUI:RefreshSidebarTree(GUI.MainFrame)
         end
