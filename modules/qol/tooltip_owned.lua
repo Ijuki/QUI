@@ -43,6 +43,7 @@ local activelyHandling = {}  -- [blizzFrame] = true when PreCall/PostCall is man
 local embeddedSubTooltip = {} -- [blizzFrame] = true when frame is currently used as embedded sub-tooltip
 local ownerChanged = {}       -- [blizzFrame] = true when SetOwner was called (new tooltip target)
 local blizzAnchorCache = {}   -- [blizzFrame] = { point, relativeTo, relPoint, x, y } — last non-offscreen anchor
+local blizzOwnerCache = {}    -- [blizzFrame] = { owner, anchorType } — from SetOwner calls
 local fadeState = {}          -- [ownedFrame] = { elapsed, duration } when fading out
 
 -- Cancel any active fade-out and restore full alpha (called before showing).
@@ -1232,6 +1233,20 @@ end
 -- ANCHORING
 ---------------------------------------------------------------------------
 
+-- Map Blizzard ANCHOR_* types (from SetOwner) to SetPoint equivalents:
+-- { tooltip anchor point, owner anchor point }
+-- Blizzard aligns the tooltip edge flush with the owner edge, top/left aligned.
+local OWNER_ANCHOR_MAP = {
+    ANCHOR_TOP        = { "BOTTOMLEFT",  "TOPLEFT" },
+    ANCHOR_BOTTOM     = { "TOPLEFT",     "BOTTOMLEFT" },
+    ANCHOR_LEFT       = { "TOPRIGHT",    "TOPLEFT" },
+    ANCHOR_RIGHT      = { "TOPLEFT",     "TOPRIGHT" },
+    ANCHOR_TOPLEFT    = { "BOTTOMRIGHT", "TOPLEFT" },
+    ANCHOR_TOPRIGHT   = { "BOTTOMLEFT",  "TOPRIGHT" },
+    ANCHOR_BOTTOMLEFT = { "TOPRIGHT",    "BOTTOMLEFT" },
+    ANCHOR_BOTTOMRIGHT= { "TOPLEFT",     "BOTTOMRIGHT" },
+}
+
 local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
     if not ownedTip or not blizzTip then return end
 
@@ -1261,23 +1276,29 @@ local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
         else
             ownedTip:SetPoint(cached.point, UIParent, cached.relPoint or "BOTTOMLEFT", x, y)
         end
-    else
-        -- Fallback: try GetPoint directly (may be off-screen, last resort)
-        local okPoint, point, relativeTo, relPoint, x, y = pcall(blizzTip.GetPoint, blizzTip, 1)
-        if okPoint and point then
-            x = Helpers.SafeToNumber(x, 0)
-            y = Helpers.SafeToNumber(y, 0)
+        return
+    end
+
+    -- Fallback: use the owner + anchor type from SetOwner. Blizzard's
+    -- ANCHOR_* types position via C-side code (no Lua SetPoint fires),
+    -- so blizzAnchorCache won't have an entry. Derive the equivalent
+    -- SetPoint from the anchor type.
+    local ownerInfo = blizzOwnerCache[blizzTip]
+    if ownerInfo and ownerInfo.owner and ownerInfo.anchorType then
+        local owner = ownerInfo.owner
+        local anchorType = ownerInfo.anchorType
+        local mapping = OWNER_ANCHOR_MAP[anchorType]
+        if mapping and owner.GetCenter then
+            local oX = Helpers.SafeToNumber(ownerInfo.offsetX, 0)
+            local oY = Helpers.SafeToNumber(ownerInfo.offsetY, 0)
             ownedTip:ClearAllPoints()
-            if relativeTo then
-                ownedTip:SetPoint(point, relativeTo, relPoint or point, x, y)
-            else
-                ownedTip:SetPoint(point, UIParent, relPoint or "BOTTOMLEFT", x, y)
-            end
-        else
-            -- Last fallback: cursor position
-            Provider:PositionTooltipAtCursor(ownedTip, settings)
+            ownedTip:SetPoint(mapping[1], owner, mapping[2], oX, oY)
+            return
         end
     end
+
+    -- Last fallback: cursor position
+    Provider:PositionTooltipAtCursor(ownedTip, settings)
 end
 
 ---------------------------------------------------------------------------
@@ -1840,12 +1861,19 @@ function OwnedEngine:Initialize()
             -- which re-anchors the tooltip to the pin frame, overriding our offscreen
             -- positioning. Re-suppress immediately after Blizzard re-anchors.
             if not isShopping then
-                hooksecurefunc(blizzFrame, "SetOwner", function(self)
+                hooksecurefunc(blizzFrame, "SetOwner", function(self, owner, anchorType, offsetX, offsetY)
                     -- Signal that a new tooltip target was set. The watcher
                     -- uses this to trigger a deferred re-read even when the
                     -- tooltip stays continuously shown (e.g., moving between
                     -- adjacent buttons without a hide/show gap).
                     ownerChanged[self] = true
+                    -- Cache the owner and anchor type for positioning when
+                    -- anchorToCursor is off. SetOwner with ANCHOR_* types
+                    -- positions via C-side code (no Lua SetPoint fires), so
+                    -- blizzAnchorCache won't capture it.
+                    blizzOwnerCache[self] = { owner = owner, anchorType = anchorType, offsetX = offsetX, offsetY = offsetY }
+                    -- Clear stale SetPoint cache — SetOwner starts a new anchor
+                    blizzAnchorCache[self] = nil
                     if ShouldSuppressBlizz(self) then
                         local s = Provider and Provider:GetSettings()
                         if s and s.enabled then
@@ -1933,6 +1961,7 @@ function OwnedEngine:Initialize()
                         activelyHandling[self] = nil
                         pendingPopulate[self] = nil
                         blizzAnchorCache[self] = nil
+                        blizzOwnerCache[self] = nil
 
                         -- When main GameTooltip hides, clean up embedded state
                         -- and shopping tooltips. Clear the embedded flag so
