@@ -179,6 +179,42 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
         castBorderSlider:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
 
+        if unitKey == "player" then
+            local gcdLabel = GUI:CreateLabel(tabContent, "GCD", 12, C.accentLight)
+            gcdLabel:SetPoint("TOPLEFT", PAD, y)
+            gcdLabel:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            gcdLabel:SetJustifyH("LEFT")
+            y = y - 20
+
+            if castDB.showGCD == nil then castDB.showGCD = false end
+            if castDB.showGCDReverse == nil then castDB.showGCDReverse = false end
+            if castDB.showGCDMelee == nil then castDB.showGCDMelee = castDB.showGCDMeleeOnly == true end
+
+            local castShowGCD = GUI:CreateFormCheckbox(tabContent, "Show GCD as castbar", "showGCD", castDB, RefreshUnit)
+            castShowGCD:SetPoint("TOPLEFT", PAD, y)
+            castShowGCD:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local castShowGCDReverse = GUI:CreateFormCheckbox(tabContent, "Reverse direction", "showGCDReverse", castDB, RefreshUnit)
+            castShowGCDReverse:SetPoint("TOPLEFT", PAD, y)
+            castShowGCDReverse:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            local castShowGCDMelee = GUI:CreateFormCheckbox(tabContent, "Show melee", "showGCDMelee", castDB, RefreshUnit)
+            castShowGCDMelee:SetPoint("TOPLEFT", PAD, y)
+            castShowGCDMelee:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+
+            if castDB.gcdColor == nil then
+                local baseColor = castDB.color or {1, 1, 1, 1}
+                castDB.gcdColor = {baseColor[1], baseColor[2], baseColor[3], baseColor[4] or 1}
+            end
+            local gcdColorPicker = GUI:CreateFormColorPicker(tabContent, "GCD Bar Color", "gcdColor", castDB, RefreshUnit)
+            gcdColorPicker:SetPoint("TOPLEFT", PAD, y)
+            gcdColorPicker:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+            y = y - FORM_ROW
+        end
+
         -- ========================================
         -- POSITIONING & SIZE
         -- ========================================
@@ -527,7 +563,10 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
             -- Note: maxLength is intentionally excluded — different units have different
             -- space constraints (e.g., target defaults to 12, player defaults to 0).
             -- Copying maxLength between units causes unexpected spell name truncation.
-            local keys = {"width", "height", "offsetX", "offsetY", "fontSize", "borderSize", "texture", "showIcon", "enabled", "anchor", "iconAnchor", "iconSpacing", "spellTextAnchor", "spellTextOffsetX", "spellTextOffsetY", "timeTextAnchor", "timeTextOffsetX", "timeTextOffsetY", "showSpellText", "showTimeText", "useClassColor", "channelFillForward", "empoweredStageColors", "empoweredFillColors"}
+            -- Note: "anchor" is intentionally excluded — it is unit-context-specific
+            -- (e.g., player defaults to "none", target defaults to "unitframe").
+            -- Copying it between units causes the castbar to attach to the wrong parent.
+            local keys = {"width", "height", "offsetX", "offsetY", "fontSize", "borderSize", "texture", "showIcon", "enabled", "iconAnchor", "iconSpacing", "spellTextAnchor", "spellTextOffsetX", "spellTextOffsetY", "timeTextAnchor", "timeTextOffsetX", "timeTextOffsetY", "showSpellText", "showTimeText", "useClassColor", "channelFillForward", "empoweredStageColors", "empoweredFillColors"}
             local includesUnsupportedTickUnit = (sourceUnitKey == "boss") or (targetUnitKey == "boss")
                 or (sourceUnitKey == "pet") or (targetUnitKey == "pet")
             if not includesUnsupportedTickUnit then
@@ -546,6 +585,9 @@ local function BuildCastbarOptions(tabContent, unitKey, y, PAD, FORM_ROW, Refres
             end
             if sourceDB.bgColor then
                 targetDB.bgColor = {sourceDB.bgColor[1], sourceDB.bgColor[2], sourceDB.bgColor[3], sourceDB.bgColor[4]}
+            end
+            if sourceDB.gcdColor then
+                targetDB.gcdColor = {sourceDB.gcdColor[1], sourceDB.gcdColor[2], sourceDB.gcdColor[3], sourceDB.gcdColor[4]}
             end
             if not includesUnsupportedTickUnit and sourceDB.channelTickColor then
                 targetDB.channelTickColor = {

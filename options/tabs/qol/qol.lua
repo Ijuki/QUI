@@ -1112,6 +1112,12 @@ local function BuildGeneralTab(tabContent)
         hideGuildChatCheck:SetPoint("TOPLEFT", PADDING, y)
         hideGuildChatCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
         y = y - FORM_ROW
+
+        -- Auction House Expansion Filter
+        local ahFilterCheck = GUI:CreateFormCheckbox(tabContent, "Auto-Enable Current Expansion Filter in Auction House", "auctionHouseExpansionFilter", generalDB)
+        ahFilterCheck:SetPoint("TOPLEFT", PADDING, y)
+        ahFilterCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+        y = y - FORM_ROW
     end
 
     y = y - 10

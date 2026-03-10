@@ -74,6 +74,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.48.1 - 2026-03-09
+
+### Fixed
+- clean up group frames side menu
+## v2.48.0 - 2026-03-09
+
+### Added
+- added group frame composer
+- added option to show GCD of instant spell as a castbar
+- added option to make minimap button drawer open on mouseover
+- added chat sound alerts with LibSharedMedia support
+- added auction house expansion filter
+
+### Changed
+- made custom datatext panels lockable
+
+### Fixed
+- don't render swipes and glows no hidden actionbar buttons
+- fix stancebar and petbar icons not rendering correctly on first load
 ## v2.47.3 - 2026-03-08
 
 ### Changed

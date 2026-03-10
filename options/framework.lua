@@ -8,7 +8,6 @@ local ADDON_NAME, ns = ...
 local QUI = QUI
 local QUICore = ns.Addon
 local LSM = LibStub("LibSharedMedia-3.0")
-local UIKit = ns.UIKit
 
 -- Create GUI namespace
 QUI.GUI = QUI.GUI or {}
@@ -145,6 +144,7 @@ GUI.WidgetInstances = {}
 -- Nested format: SectionRegistry[tabIndex * 10000 + subTabIndex][sectionName] -> {frame, scrollParent}
 GUI.SectionRegistry = {}
 GUI.SectionRegistryOrder = {}
+GUI.SectionNavigateHandlers = {}
 
 -- Sidebar tree animation/layout config
 GUI._sidebarAnimDuration = 0.16
@@ -246,6 +246,25 @@ local function GetSectionRegistryKey(tabIndex, subTabIndex)
     return (tabIndex or 0) * 10000 + (subTabIndex or 0)
 end
 
+function GUI:RegisterSectionNavigateHandler(tabIndex, subTabIndex, sectionName, handler)
+    if not tabIndex or not subTabIndex or not sectionName or sectionName == "" then return end
+    if type(handler) ~= "function" then return end
+    local key = GetSectionRegistryKey(tabIndex, subTabIndex)
+    self.SectionNavigateHandlers[key] = self.SectionNavigateHandlers[key] or {}
+    self.SectionNavigateHandlers[key][sectionName] = handler
+end
+
+function GUI:RunSectionNavigateHandler(tabIndex, subTabIndex, sectionName)
+    if not tabIndex or not subTabIndex or not sectionName or sectionName == "" then return false end
+    local key = GetSectionRegistryKey(tabIndex, subTabIndex)
+    local handlers = self.SectionNavigateHandlers[key]
+    local handler = handlers and handlers[sectionName]
+    if type(handler) ~= "function" then return false end
+    local ok, handled = pcall(handler)
+    if not ok then return false end
+    return handled ~= false
+end
+
 function GUI:GetOrderedSections(tabIndex, subTabIndex)
     local key = GetSectionRegistryKey(tabIndex, subTabIndex)
     local order = self.SectionRegistryOrder[key] or {}
@@ -321,10 +340,15 @@ function GUI:NavigateTo(tabIndex, subTabIndex, sectionName)
                 page._subTabGroup.SelectTab(subTabIndex)
             end
             if sectionName and sectionName ~= "" then
-                C_Timer.After(0.05, function()
-                    self:ScrollToSection(tabIndex, subTabIndex, sectionName)
+                local handled = self:RunSectionNavigateHandler(tabIndex, subTabIndex, sectionName)
+                if handled then
                     frame._sidebarPendingSectionSelection = nil
-                end)
+                else
+                    C_Timer.After(0.05, function()
+                        self:ScrollToSection(tabIndex, subTabIndex, sectionName)
+                        frame._sidebarPendingSectionSelection = nil
+                    end)
+                end
             else
                 frame._sidebarPendingSectionSelection = nil
             end
@@ -545,6 +569,10 @@ local function GetFontPath()
     return FONT_PATH
 end
 
+function GUI:GetFontPath()
+    return GetFontPath()
+end
+
 ---------------------------------------------------------------------------
 -- UTILITY FUNCTIONS
 ---------------------------------------------------------------------------
@@ -559,316 +587,11 @@ local function CreateBackdrop(frame, bgColor, borderColor)
     frame:SetBackdropBorderColor(unpack(borderColor or C.border))
 end
 
-local function PixelValue(value, frame)
-    return (UIKit and UIKit.Pixels and UIKit.Pixels(value, frame)) or value
-end
-
-local CHEVRON_ZONE_WIDTH = 28
-local CHEVRON_BG_ALPHA = 0.15
-local CHEVRON_BG_ALPHA_HOVER = 0.25
-local CHEVRON_TEXT_ALPHA = 0.7
-
-local function ApplyTextureColor(texture, r, g, b, a)
-    if not texture then return end
-    texture:SetColorTexture(r, g, b, a or 1)
-    if UIKit and UIKit.DisablePixelSnap then
-        UIKit.DisablePixelSnap(texture)
-    end
-end
-
-local function SetFont(fontString, size, flags, color, frameContext)
-    local fontPath = GetFontPath()
-    if QUICore and QUICore.ApplyFont then
-        QUICore:ApplyFont(fontString, frameContext or fontString, size or 12, fontPath, flags or "")
-    else
-        fontString:SetFont(fontPath, size or 12, flags or "")
-    end
+local function SetFont(fontString, size, flags, color)
+    fontString:SetFont(GetFontPath(), size or 12, flags or "")
     if color then
         fontString:SetTextColor(unpack(color))
     end
-end
-
-local function ApplyFieldSurface(field, bgColor, borderColor)
-    if not field then return nil end
-
-    if not field.bg then
-        field.bg = field:CreateTexture(nil, "BACKGROUND")
-        field.bg:SetAllPoints()
-        field.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
-        if UIKit and UIKit.DisablePixelSnap then
-            UIKit.DisablePixelSnap(field.bg)
-        end
-    end
-
-    function field:SetFieldBackgroundColor(r, g, b, a)
-        self.bg:SetVertexColor(r or 0.08, g or 0.08, b or 0.08, a or 1)
-        if UIKit and UIKit.DisablePixelSnap then
-            UIKit.DisablePixelSnap(self.bg)
-        end
-    end
-
-    function field:SetFieldBorderColor(r, g, b, a)
-        if self.Border and UIKit and UIKit.UpdateBorderLines then
-            UIKit.UpdateBorderLines(self.Border, 1, r or 0.35, g or 0.35, b or 0.35, a or 1)
-        elseif self.SetBackdropBorderColor then
-            self:SetBackdropBorderColor(r or 0.35, g or 0.35, b or 0.35, a or 1)
-        end
-    end
-
-    if UIKit and UIKit.CreateBackdropBorder then
-        field.Border = UIKit.CreateBackdropBorder(
-            field,
-            1,
-            (borderColor or C.border)[1],
-            (borderColor or C.border)[2],
-            (borderColor or C.border)[3],
-            (borderColor or C.border)[4] or 1
-        )
-        field.Border:SetFrameLevel(field:GetFrameLevel() + 1)
-    else
-        CreateBackdrop(field, bgColor or {0.08, 0.08, 0.08, 1}, borderColor or {0.35, 0.35, 0.35, 1})
-    end
-
-    field:SetFieldBackgroundColor(unpack(bgColor or {0.08, 0.08, 0.08, 1}))
-    field:SetFieldBorderColor(unpack(borderColor or {0.35, 0.35, 0.35, 1}))
-    return field
-end
-
-local function CreateFieldSurface(parent, frameType, bgColor, borderColor)
-    local field = CreateFrame(frameType or "Frame", nil, parent)
-    return ApplyFieldSurface(field, bgColor, borderColor)
-end
-
-local function CreateColorSwatch(parent, width, height, bgColor, borderColor)
-    local swatch = CreateFieldSurface(parent, "Button", bgColor or {1, 1, 1, 1}, borderColor or {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(swatch, width or 16, height or 16)
-    else
-        swatch:SetSize(width or 16, height or 16)
-    end
-
-    function swatch:SetSwatchColor(r, g, b, a)
-        self:SetFieldBackgroundColor(r or 1, g or 1, b or 1, a or 1)
-    end
-
-    swatch:SetScript("OnEnter", function(self)
-        self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-    end)
-    swatch:SetScript("OnLeave", function(self)
-        self:SetFieldBorderColor(unpack(borderColor or {0.4, 0.4, 0.4, 1}))
-    end)
-
-    return swatch
-end
-
-local function ShowManagedColorPicker(options)
-    ColorPickerFrame:SetupColorPickerAndShow({
-        r = options.r,
-        g = options.g,
-        b = options.b,
-        opacity = options.a or 1,
-        hasOpacity = not options.noAlpha,
-        swatchFunc = function()
-            local r, g, b = ColorPickerFrame:GetColorRGB()
-            local a = options.noAlpha and 1 or ColorPickerFrame:GetColorAlpha()
-            options.onChange(r, g, b, a)
-        end,
-        opacityFunc = function()
-            local r, g, b = ColorPickerFrame:GetColorRGB()
-            local a = options.noAlpha and 1 or ColorPickerFrame:GetColorAlpha()
-            options.onChange(r, g, b, a)
-        end,
-        cancelFunc = function(prev)
-            options.onChange(prev.r, prev.g, prev.b, options.noAlpha and 1 or (options.a or 1))
-        end,
-    })
-end
-
-local function CreateDropdownChevron(parent)
-    local zone = CreateFrame("Frame", nil, parent)
-    zone:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-    zone:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-
-    zone.bg = zone:CreateTexture(nil, "BACKGROUND")
-    zone.bg:SetAllPoints()
-    zone.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
-    zone.bg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
-    if UIKit and UIKit.DisablePixelSnap then
-        UIKit.DisablePixelSnap(zone.bg)
-    end
-
-    local separator = zone:CreateTexture(nil, "ARTWORK")
-    separator:SetPoint("TOPLEFT", zone, "TOPLEFT", 0, 0)
-    separator:SetPoint("BOTTOMLEFT", zone, "BOTTOMLEFT", 0, 0)
-    ApplyTextureColor(separator, C.accent[1], C.accent[2], C.accent[3], 0.3)
-
-    local chevronLeft = zone:CreateTexture(nil, "OVERLAY")
-    ApplyTextureColor(chevronLeft, C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
-    chevronLeft:SetRotation(math.rad(-45))
-
-    local chevronRight = zone:CreateTexture(nil, "OVERLAY")
-    ApplyTextureColor(chevronRight, C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
-    chevronRight:SetRotation(math.rad(45))
-
-    local function RefreshChevronGeometry(owner)
-        owner:SetWidth(PixelValue(CHEVRON_ZONE_WIDTH, owner))
-        separator:SetWidth(PixelValue(1, owner))
-        chevronLeft:SetSize(PixelValue(7, owner), PixelValue(2, owner))
-        chevronRight:SetSize(PixelValue(7, owner), PixelValue(2, owner))
-        if UIKit and UIKit.SetPointPx then
-            UIKit.SetPointPx(chevronLeft, "CENTER", owner, "CENTER", -2, -1)
-            UIKit.SetPointPx(chevronRight, "CENTER", owner, "CENTER", 2, -1)
-        else
-            chevronLeft:SetPoint("CENTER", owner, "CENTER", -2, -1)
-            chevronRight:SetPoint("CENTER", owner, "CENTER", 2, -1)
-        end
-    end
-
-    local function SetHoverState(hovered)
-        zone.bg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], hovered and CHEVRON_BG_ALPHA_HOVER or CHEVRON_BG_ALPHA)
-        ApplyTextureColor(separator, C.accent[1], C.accent[2], C.accent[3], hovered and 0.5 or 0.3)
-        ApplyTextureColor(chevronLeft, C.accent[1], C.accent[2], C.accent[3], hovered and 1 or CHEVRON_TEXT_ALPHA)
-        ApplyTextureColor(chevronRight, C.accent[1], C.accent[2], C.accent[3], hovered and 1 or CHEVRON_TEXT_ALPHA)
-    end
-
-    zone.SetHoverState = SetHoverState
-    if UIKit and UIKit.RegisterScaleRefresh then
-        UIKit.RegisterScaleRefresh(zone, "frameworkChevron", RefreshChevronGeometry)
-    end
-    RefreshChevronGeometry(zone)
-    SetHoverState(false)
-    return zone, separator, chevronLeft, chevronRight
-end
-
-local function CreateDropdownFieldCore(parent, justifyH)
-    local dropdown = CreateFieldSurface(parent, "Button", {0.08, 0.08, 0.08, 1}, {0.35, 0.35, 0.35, 1})
-
-    local chevronZone, separator, chevronLeft, chevronRight = CreateDropdownChevron(dropdown)
-    dropdown.chevronZone = chevronZone
-    dropdown.separator = separator
-    dropdown.chevronLeft = chevronLeft
-    dropdown.chevronRight = chevronRight
-
-    dropdown.selected = dropdown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    SetFont(dropdown.selected, 11, "", C.text, dropdown)
-    dropdown.selected:SetJustifyH(justifyH or "CENTER")
-
-    local function RefreshDropdownGeometry(owner)
-        if UIKit and UIKit.SetHeightPx then
-            UIKit.SetHeightPx(owner, 24)
-        else
-            owner:SetHeight(24)
-        end
-        owner.selected:ClearAllPoints()
-        owner.selected:SetPoint("LEFT", PixelValue(8, owner), 0)
-        owner.selected:SetPoint("RIGHT", owner.chevronZone, "LEFT", -PixelValue(5, owner), 0)
-    end
-
-    function dropdown:SetChromeHovered(hovered)
-        if hovered then
-            self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-        else
-            self:SetFieldBorderColor(0.35, 0.35, 0.35, 1)
-        end
-        chevronZone:SetHoverState(hovered)
-    end
-
-    if UIKit and UIKit.RegisterScaleRefresh then
-        UIKit.RegisterScaleRefresh(dropdown, "frameworkDropdown", RefreshDropdownGeometry)
-    end
-    RefreshDropdownGeometry(dropdown)
-    dropdown:SetChromeHovered(false)
-    return dropdown
-end
-
-local function CreateDropdownMenuSurface(parent, borderColor)
-    local menu = CreateFieldSurface(parent, "Frame", {0.1, 0.1, 0.1, 0.98}, borderColor or {0.3, 0.3, 0.3, 1})
-    menu:SetFrameStrata("TOOLTIP")
-    menu:SetClipsChildren(true)
-    menu:Hide()
-    return menu
-end
-
-local function CreateMenuRowButton(parent, text, onClick, options)
-    options = options or {}
-
-    local btn = CreateFrame("Button", nil, parent)
-    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
-    btn.bg:SetAllPoints()
-    btn.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
-    btn.bg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], 0)
-    if UIKit and UIKit.DisablePixelSnap then
-        UIKit.DisablePixelSnap(btn.bg)
-    end
-
-    btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    SetFont(btn.text, options.fontSize or 11, "", options.textColor or C.text, btn)
-    btn.text:SetText(text or "")
-    btn.text:SetPoint("LEFT", options.textInset or 8, 0)
-    if options.justifyH then
-        btn.text:SetJustifyH(options.justifyH)
-    end
-
-    local normalColor = options.textColor or C.text
-    local hoverColor = options.hoverTextColor or normalColor
-
-    btn:SetScript("OnEnter", function(self)
-        self.bg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], options.hoverBgAlpha or 0.25)
-        self.text:SetTextColor(unpack(hoverColor))
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self.bg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], 0)
-        self.text:SetTextColor(unpack(normalColor))
-    end)
-    if onClick then
-        btn:SetScript("OnClick", onClick)
-    end
-
-    return btn
-end
-
-local function CreateSliderTrackSurface(parent)
-    local trackBg = CreateFieldSurface(parent, "Frame", C.sliderTrack, {0.1, 0.12, 0.15, 1})
-    trackBg:SetAllPoints()
-
-    local inset = PixelValue(1, trackBg)
-    local trackFill = trackBg:CreateTexture(nil, "ARTWORK")
-    trackFill:SetTexture("Interface\\Buttons\\WHITE8x8")
-    trackFill:SetPoint("TOPLEFT", inset, -inset)
-    trackFill:SetPoint("BOTTOMLEFT", inset, inset)
-    trackFill:SetWidth(math.max(1, inset))
-    ApplyTextureColor(trackFill, C.accent[1], C.accent[2], C.accent[3], 1)
-
-    return trackBg, trackFill
-end
-
-local function CreateSliderThumbSurface(parent)
-    local thumb = CreateFieldSurface(parent, "Frame", C.sliderThumb, C.sliderThumbBorder)
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(thumb, 14, 14)
-    else
-        thumb:SetSize(14, 14)
-    end
-    return thumb
-end
-
-local function CreateToggleSurface(parent)
-    local track = CreateFieldSurface(parent, "Button", C.toggleOff, {0.12, 0.14, 0.18, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(track, 40, 20)
-    else
-        track:SetSize(40, 20)
-    end
-
-    local thumb = CreateFieldSurface(track, "Frame", C.toggleThumb, {0.85, 0.85, 0.85, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(thumb, 16, 16)
-    else
-        thumb:SetSize(16, 16)
-    end
-    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
-
-    return track, thumb
 end
 
 -- Ensure all text in a frame subtree uses the shared QUI font.
@@ -920,27 +643,34 @@ end
 -- WIDGET: THEMED BUTTON (Neutral style - accent border on hover only)
 ---------------------------------------------------------------------------
 function GUI:CreateButton(parent, text, width, height, onClick)
-    local btn = CreateFieldSurface(parent, "Button", {0.15, 0.15, 0.15, 1}, C.border)
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(btn, width or 120, height or 26)
-    else
-        btn:SetSize(width or 120, height or 26)
-    end
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn:SetSize(width or 120, height or 26)
+
+    -- Normal state: dark background with grey border (neutral)
+    local px = QUICore:GetPixelSize(btn)
+    btn:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
+    btn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
 
     -- Button text (off-white, not accent)
     local btnText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    SetFont(btnText, 12, "", C.text, btn)
+    btnText:SetFont(GetFontPath(), 12, "")
+    btnText:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
     btnText:SetPoint("CENTER", 0, 0)
     btnText:SetText(text or "Button")
     btn.text = btnText
 
     -- Hover effect: accent border only (no background change)
     btn:SetScript("OnEnter", function(self)
-        self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        pcall(self.SetBackdropBorderColor, self, C.accent[1], C.accent[2], C.accent[3], 1)
     end)
 
     btn:SetScript("OnLeave", function(self)
-        self:SetFieldBorderColor(C.border[1], C.border[2], C.border[3], 1)
+        pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
     end)
 
     -- Click handler
@@ -954,6 +684,171 @@ function GUI:CreateButton(parent, text, width, height, onClick)
     end
 
     return btn
+end
+
+---------------------------------------------------------------------------
+-- WIDGET: INLINE EDIT BOX (compact utility input)
+---------------------------------------------------------------------------
+function GUI:CreateInlineEditBox(parent, options)
+    options = options or {}
+    local UIKit = ns.UIKit
+
+    local width = options.width or 100
+    local height = options.height or 22
+    local editHeight = options.editHeight or (height - 2)
+    local textInset = options.textInset or 6
+    local fontSize = options.fontSize or 11
+    local justifyH = options.justifyH or "LEFT"
+    local commitOnFocusLost = options.commitOnFocusLost ~= false
+    local bgColor = options.bgColor or {0.08, 0.08, 0.08, 1}
+    local borderColor = options.borderColor or {0.25, 0.25, 0.25, 1}
+    local activeBorderColor = options.activeBorderColor or C.accent
+
+    local field = CreateFrame("Frame", nil, parent)
+    if UIKit and UIKit.SetSizePx then
+        UIKit.SetSizePx(field, width, height)
+    else
+        field:SetSize(width, height)
+    end
+
+    if UIKit and UIKit.CreateBackground then
+        UIKit.CreateBackground(field, bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    else
+        local bg = field:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        bg:SetVertexColor(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    end
+
+    local function ApplyFallbackBorder(r, g, b, a)
+        if not field._fallbackBorder then
+            field._fallbackBorder = {
+                top = field:CreateTexture(nil, "OVERLAY"),
+                bottom = field:CreateTexture(nil, "OVERLAY"),
+                left = field:CreateTexture(nil, "OVERLAY"),
+                right = field:CreateTexture(nil, "OVERLAY"),
+            }
+            for _, edge in pairs(field._fallbackBorder) do
+                edge:SetTexture("Interface\\Buttons\\WHITE8x8")
+            end
+        end
+
+        local px = (QUICore and QUICore.GetPixelSize and QUICore:GetPixelSize(field)) or 1
+        local border = field._fallbackBorder
+
+        border.top:ClearAllPoints()
+        border.top:SetPoint("TOPLEFT", field, "TOPLEFT", 0, 0)
+        border.top:SetPoint("TOPRIGHT", field, "TOPRIGHT", 0, 0)
+        border.top:SetHeight(px)
+
+        border.bottom:ClearAllPoints()
+        border.bottom:SetPoint("BOTTOMLEFT", field, "BOTTOMLEFT", 0, 0)
+        border.bottom:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", 0, 0)
+        border.bottom:SetHeight(px)
+
+        border.left:ClearAllPoints()
+        border.left:SetPoint("TOPLEFT", border.top, "BOTTOMLEFT", 0, 0)
+        border.left:SetPoint("BOTTOMLEFT", border.bottom, "TOPLEFT", 0, 0)
+        border.left:SetWidth(px)
+
+        border.right:ClearAllPoints()
+        border.right:SetPoint("TOPRIGHT", border.top, "BOTTOMRIGHT", 0, 0)
+        border.right:SetPoint("BOTTOMRIGHT", border.bottom, "TOPRIGHT", 0, 0)
+        border.right:SetWidth(px)
+
+        for _, edge in pairs(border) do
+            edge:SetVertexColor(r or 0.25, g or 0.25, b or 0.25, a or 1)
+        end
+    end
+
+    function field:SetFieldBorderColor(r, g, b, a)
+        if UIKit and UIKit.UpdateBorderLines then
+            if not self._pixelBorderReady and UIKit.CreateBorderLines then
+                UIKit.CreateBorderLines(self)
+                self._pixelBorderReady = true
+            end
+            UIKit.UpdateBorderLines(self, 1, r, g, b, a, false)
+        else
+            ApplyFallbackBorder(r, g, b, a)
+        end
+    end
+    field:SetFieldBorderColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
+
+    local editBox = CreateFrame("EditBox", nil, field)
+    if UIKit and UIKit.SetPointPx then
+        UIKit.SetPointPx(editBox, "LEFT", field, "LEFT", textInset, 0)
+        UIKit.SetPointPx(editBox, "RIGHT", field, "RIGHT", -textInset, 0)
+        UIKit.SetHeightPx(editBox, editHeight)
+    else
+        editBox:SetPoint("LEFT", field, "LEFT", textInset, 0)
+        editBox:SetPoint("RIGHT", field, "RIGHT", -textInset, 0)
+        editBox:SetHeight(editHeight)
+    end
+    editBox:SetAutoFocus(false)
+    editBox:SetFont(GetFontPath(), fontSize, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH(justifyH)
+
+    if options.maxLetters and options.maxLetters > 0 then
+        editBox:SetMaxLetters(options.maxLetters)
+    end
+    if options.numeric ~= nil then
+        editBox:SetNumeric(options.numeric and true or false)
+    end
+    if options.text ~= nil then
+        editBox:SetText(tostring(options.text))
+    end
+
+    editBox:SetScript("OnTextChanged", function(self, userInput)
+        if options.onTextChanged then
+            options.onTextChanged(self, userInput)
+        end
+    end)
+
+    editBox:SetScript("OnEnterPressed", function(self)
+        if options.onEnterPressed then
+            options.onEnterPressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEscapePressed", function(self)
+        if options.onEscapePressed then
+            options.onEscapePressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusGained", function(self)
+        field:SetFieldBorderColor(activeBorderColor[1], activeBorderColor[2], activeBorderColor[3], activeBorderColor[4] or 1)
+        if options.onEditFocusGained then
+            options.onEditFocusGained(self)
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusLost", function(self)
+        field:SetFieldBorderColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
+        if commitOnFocusLost and options.onCommit then
+            options.onCommit(self)
+        end
+        if options.onEditFocusLost then
+            options.onEditFocusLost(self)
+        end
+    end)
+
+    function field:SetEnabled(enabled)
+        editBox:SetEnabled(enabled)
+        editBox:EnableMouse(enabled)
+        self:SetAlpha(enabled and 1 or 0.6)
+        if not enabled then
+            editBox:ClearFocus()
+        end
+    end
+
+    field.editBox = editBox
+    return field, editBox
 end
 
 ---------------------------------------------------------------------------
@@ -976,13 +871,8 @@ function GUI:ShowConfirmation(options)
 
     if not confirmDialog then
         -- Create singleton dialog frame
-        confirmDialog = CreateFrame("Frame", "QUI_ConfirmDialog", UIParent)
-        ApplyFieldSurface(confirmDialog, {C.bg[1], C.bg[2], C.bg[3], 0.98}, C.border)
-        if UIKit and UIKit.SetSizePx then
-            UIKit.SetSizePx(confirmDialog, 320, 160)
-        else
-            confirmDialog:SetSize(320, 160)
-        end
+        confirmDialog = CreateFrame("Frame", "QUI_ConfirmDialog", UIParent, "BackdropTemplate")
+        confirmDialog:SetSize(320, 160)
         confirmDialog:SetPoint("CENTER")
         confirmDialog:SetFrameStrata("FULLSCREEN_DIALOG")
         confirmDialog:SetFrameLevel(500)
@@ -993,6 +883,16 @@ function GUI:ShowConfirmation(options)
         confirmDialog:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
         confirmDialog:SetClampedToScreen(true)
         confirmDialog:Hide()
+
+        -- Backdrop
+        local px = QUICore:GetPixelSize(confirmDialog)
+        confirmDialog:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        confirmDialog:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], 0.98)
+        confirmDialog:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
 
         -- Title
         confirmDialog.title = confirmDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1012,13 +912,51 @@ function GUI:ShowConfirmation(options)
         confirmDialog.warning:SetPoint("TOP", confirmDialog.message, "BOTTOM", 0, -8)
 
         -- Accept button (left)
-        confirmDialog.acceptBtn = GUI:CreateButton(confirmDialog, "", 100, 28)
+        confirmDialog.acceptBtn = CreateFrame("Button", nil, confirmDialog, "BackdropTemplate")
+        confirmDialog.acceptBtn:SetSize(100, 28)
         confirmDialog.acceptBtn:SetPoint("BOTTOMLEFT", 40, 20)
+        confirmDialog.acceptBtn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        confirmDialog.acceptBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
+        confirmDialog.acceptBtn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+
+        confirmDialog.acceptBtn.text = confirmDialog.acceptBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        confirmDialog.acceptBtn.text:SetFont(GetFontPath(), 12, "")
+        confirmDialog.acceptBtn.text:SetPoint("CENTER", 0, 0)
+
+        confirmDialog.acceptBtn:SetScript("OnEnter", function(self)
+            pcall(self.SetBackdropBorderColor, self, C.accent[1], C.accent[2], C.accent[3], 1)
+        end)
+        confirmDialog.acceptBtn:SetScript("OnLeave", function(self)
+            pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
+        end)
 
         -- Cancel button (right)
-        confirmDialog.cancelBtn = GUI:CreateButton(confirmDialog, "", 100, 28)
+        confirmDialog.cancelBtn = CreateFrame("Button", nil, confirmDialog, "BackdropTemplate")
+        confirmDialog.cancelBtn:SetSize(100, 28)
         confirmDialog.cancelBtn:SetPoint("BOTTOMRIGHT", -40, 20)
+        confirmDialog.cancelBtn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        confirmDialog.cancelBtn:SetBackdropColor(0.15, 0.15, 0.15, 1)
+        confirmDialog.cancelBtn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+
+        confirmDialog.cancelBtn.text = confirmDialog.cancelBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        confirmDialog.cancelBtn.text:SetFont(GetFontPath(), 12, "")
         confirmDialog.cancelBtn.text:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
+        confirmDialog.cancelBtn.text:SetPoint("CENTER", 0, 0)
+
+        confirmDialog.cancelBtn:SetScript("OnEnter", function(self)
+            pcall(self.SetBackdropBorderColor, self, C.accent[1], C.accent[2], C.accent[3], 1)
+        end)
+        confirmDialog.cancelBtn:SetScript("OnLeave", function(self)
+            pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
+        end)
 
         -- ESC to close
         confirmDialog:SetScript("OnKeyDown", function(self, key)
@@ -1176,7 +1114,15 @@ end
 -- Auto-calculates height based on content added via box:AddElement()
 ---------------------------------------------------------------------------
 function GUI:CreateSectionBox(parent, title)
-    local box = CreateFieldSurface(parent, "Frame", {0.05, 0.05, 0.08, 0.8}, {0.3, 0.3, 0.35, 1})
+    local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local px = QUICore:GetPixelSize(box)
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    box:SetBackdropColor(0.05, 0.05, 0.08, 0.8)
+    box:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
     
     -- Title (mint colored, positioned at top-left inside border)
     if title and title ~= "" then
@@ -1223,10 +1169,18 @@ function GUI:CreateCollapsibleSection(parent, title, isExpandedByDefault, badgeC
     local isExpanded = isExpandedByDefault ~= false  -- Default true
 
     -- Header (clickable, full width)
-    local header = CreateFieldSurface(container, "Button", {C.bgLight[1], C.bgLight[2], C.bgLight[3], 0.6}, {C.border[1], C.border[2], C.border[3], 0.5})
+    local header = CreateFrame("Button", nil, container, "BackdropTemplate")
     header:SetHeight(28)
     header:SetPoint("TOPLEFT", 0, 0)
     header:SetPoint("TOPRIGHT", 0, 0)
+    local px = QUICore:GetPixelSize(header)
+    header:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    header:SetBackdropColor(C.bgLight[1], C.bgLight[2], C.bgLight[3], 0.6)
+    header:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 0.5)
 
     -- Chevron indicator
     local chevron = header:CreateFontString(nil, "OVERLAY")
@@ -1243,8 +1197,15 @@ function GUI:CreateCollapsibleSection(parent, title, isExpandedByDefault, badgeC
     -- Optional badge (e.g., "Override" indicator)
     local badge = nil
     if badgeConfig and badgeConfig.text then
-        badge = CreateFieldSurface(header, "Frame", {C.accent[1], C.accent[2], C.accent[3], 0.2}, {C.accent[1], C.accent[2], C.accent[3], 0.5})
+        badge = CreateFrame("Frame", nil, header, "BackdropTemplate")
         badge:SetHeight(18)
+        badge:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        badge:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.2)
+        badge:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
 
         local badgeText = badge:CreateFontString(nil, "OVERLAY")
         badgeText:SetFont(GetFontPath(), 10, "")
@@ -1293,10 +1254,10 @@ function GUI:CreateCollapsibleSection(parent, title, isExpandedByDefault, badgeC
 
     -- Hover effects
     header:SetScript("OnEnter", function(self)
-        self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.8)
+        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.8)
     end)
     header:SetScript("OnLeave", function(self)
-        self:SetFieldBorderColor(C.border[1], C.border[2], C.border[3], 0.5)
+        self:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 0.5)
     end)
 
     -- API methods
@@ -1340,8 +1301,16 @@ function GUI:CreateColorPicker(parent, label, dbKey, dbTable, onChange)
     container:SetSize(200, 20)
     
     -- Color swatch button (same size as checkbox: 16x16)
-    local swatch = CreateColorSwatch(container, 16, 16)
+    local swatch = CreateFrame("Button", nil, container, "BackdropTemplate")
+    swatch:SetSize(16, 16)
     swatch:SetPoint("LEFT", 0, 0)
+    local px = QUICore:GetPixelSize(swatch)
+    swatch:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    swatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     -- Label (same font size as checkbox: 12)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1361,7 +1330,7 @@ function GUI:CreateColorPicker(parent, label, dbKey, dbTable, onChange)
     end
     
     local function SetColor(r, g, b, a)
-        swatch:SetSwatchColor(r, g, b, a or 1)
+        swatch:SetBackdropColor(r, g, b, a or 1)
         if dbTable and dbKey then
             dbTable[dbKey] = {r, g, b, a or 1}
         end
@@ -1370,7 +1339,7 @@ function GUI:CreateColorPicker(parent, label, dbKey, dbTable, onChange)
     
     -- Initialize color
     local r, g, b, a = GetColor()
-    swatch:SetSwatchColor(r, g, b, a)
+    swatch:SetBackdropColor(r, g, b, a)
     
     container.GetColor = GetColor
     container.SetColor = SetColor
@@ -1378,13 +1347,38 @@ function GUI:CreateColorPicker(parent, label, dbKey, dbTable, onChange)
     -- Open color picker on click
     swatch:SetScript("OnClick", function()
         local r, g, b, a = GetColor()
-        ShowManagedColorPicker({
+        local originalA = a or 1
+        
+        local info = {
             r = r,
             g = g,
             b = b,
-            a = a or 1,
-            onChange = SetColor,
-        })
+            opacity = originalA,
+            hasOpacity = true,
+            swatchFunc = function()
+                local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+                local newA = ColorPickerFrame:GetColorAlpha()
+                SetColor(newR, newG, newB, newA)
+            end,
+            opacityFunc = function()
+                local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+                local newA = ColorPickerFrame:GetColorAlpha()
+                SetColor(newR, newG, newB, newA)
+            end,
+            cancelFunc = function(prev)
+                SetColor(prev.r, prev.g, prev.b, originalA)
+            end,
+        }
+        
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+    end)
+    
+    -- Hover effect
+    swatch:SetScript("OnEnter", function(self)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+    end)
+    swatch:SetScript("OnLeave", function(self)
+        pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1)
     end)
     
     return container
@@ -1394,11 +1388,38 @@ end
 -- WIDGET: SUB-TABS (Buttons in sticky bar, content frames in page)
 ---------------------------------------------------------------------------
 function GUI:CreateSubTabs(parent, tabs)
+    local UIKit = ns.UIKit
+    local function RoundVirtual(value, frame)
+        if QUICore and QUICore.PixelRound then
+            return QUICore:PixelRound(value or 0, frame)
+        end
+        return value or 0
+    end
+    local function SetSnappedPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        if QUICore and QUICore.SetSnappedPoint then
+            QUICore:SetSnappedPoint(frame, point, relativeTo, relativePoint, xOffset, yOffset)
+        else
+            frame:SetPoint(point, relativeTo, relativePoint, xOffset or 0, yOffset or 0)
+        end
+    end
+    local function ApplyPixelBackdrop(frame)
+        if QUICore and QUICore.SetPixelPerfectBackdrop then
+            QUICore:SetPixelPerfectBackdrop(frame, 1, "Interface\\Buttons\\WHITE8x8")
+            return
+        end
+        local px = QUICore:GetPixelSize(frame)
+        frame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+    end
+
     -- Content container stays in the page (parent = scroll content)
     local container = CreateFrame("Frame", nil, parent)
     container:SetPoint("TOPLEFT", 0, 0)
     container:SetPoint("TOPRIGHT", 0, 0)
-    container:SetHeight(28)  -- Minimal height - content frames anchor below
+    container:SetHeight(RoundVirtual(28, container))  -- Minimal height - content frames anchor below
 
     -- Button group goes in the sticky sub-tab bar
     local mainFrame = self.MainFrame
@@ -1419,13 +1440,18 @@ function GUI:CreateSubTabs(parent, tabs)
         }
 
         -- Tab button (parented to buttonGroup in sticky bar)
-        local btn = CreateFieldSurface(buttonGroup, "Button", {0.15, 0.15, 0.15, 1}, {0.3, 0.3, 0.3, 1})
-        if UIKit and UIKit.SetSizePx then
-            UIKit.SetSizePx(btn, 90, 24)
-        else
-            btn:SetSize(90, 24)
+        local btn = CreateFrame("Button", nil, buttonGroup, "BackdropTemplate")
+        btn:SetSize(RoundVirtual(90, btn), RoundVirtual(24, btn))
+        SetSnappedPoint(btn, "TOPLEFT", buttonGroup, "TOPLEFT", 10 + (i-1) * (90 + spacing), -3)
+        ApplyPixelBackdrop(btn)
+        btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
+        btn:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+        if UIKit and UIKit.RegisterScaleRefresh then
+            UIKit.RegisterScaleRefresh(btn, "subTabPixelBackdrop", function(owner)
+                owner:SetHeight(RoundVirtual(24, owner))
+                ApplyPixelBackdrop(owner)
+            end)
         end
-        btn:SetPoint("TOPLEFT", 10 + (i-1) * (90 + spacing), -3)
 
         btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         SetFont(btn.text, 10, "", C.text)
@@ -1537,6 +1563,7 @@ function GUI:CreateSubTabs(parent, tabs)
             local totalRowSpacing = math.max(0, #rowBtnIndices - 1) * spacing + rowSepCount * separatorSpacing
             local rowBtnWidth = math.floor((availableWidth - totalRowSpacing) / #rowBtnIndices)
             rowBtnWidth = math.max(rowBtnWidth, 50)
+            rowBtnWidth = RoundVirtual(rowBtnWidth, buttonGroup)
 
             local xOffset = 10
             local yOffset = -(topPad + (rowIdx - 1) * (rowHeight + rowGap))
@@ -1544,12 +1571,13 @@ function GUI:CreateSubTabs(parent, tabs)
             for j, btnIdx in ipairs(rowBtnIndices) do
                 local btn = tabButtons[btnIdx]
                 btn:SetWidth(rowBtnWidth)
+                btn:SetHeight(RoundVirtual(rowHeight, btn))
                 btn:ClearAllPoints()
-                btn:SetPoint("TOPLEFT", xOffset, yOffset)
-                xOffset = xOffset + rowBtnWidth + spacing
+                SetSnappedPoint(btn, "TOPLEFT", buttonGroup, "TOPLEFT", xOffset, yOffset)
+                xOffset = RoundVirtual(xOffset + rowBtnWidth + spacing, buttonGroup)
 
                 if tabs[btnIdx] and tabs[btnIdx].isSeparator and j < #rowBtnIndices then
-                    xOffset = xOffset + separatorSpacing
+                    xOffset = RoundVirtual(xOffset + separatorSpacing, buttonGroup)
                 end
             end
         end
@@ -1557,24 +1585,29 @@ function GUI:CreateSubTabs(parent, tabs)
         -- Adjust the sub-tab bar height to fit all rows
         local totalBarHeight = topPad + numRows * rowHeight + math.max(0, numRows - 1) * rowGap + 3
         if mainFrame.subTabBar then
-            mainFrame.subTabBar:SetHeight(totalBarHeight)
+            mainFrame.subTabBar:SetHeight(RoundVirtual(totalBarHeight, mainFrame.subTabBar))
         end
     end
 
     buttonGroup:SetScript("OnSizeChanged", RelayoutSubTabs)
+    if UIKit and UIKit.RegisterScaleRefresh then
+        UIKit.RegisterScaleRefresh(buttonGroup, "subTabLayout", function()
+            RelayoutSubTabs()
+        end)
+    end
 
     -- Tab selection function
     local function SelectSubTab(index)
         for i, btn in ipairs(tabButtons) do
             if i == index then
-                btn:SetFieldBackgroundColor(0.12, 0.18, 0.18, 1)
-                btn:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+                pcall(btn.SetBackdropColor, btn, 0.12, 0.18, 0.18, 1)
+                pcall(btn.SetBackdropBorderColor, btn, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
                 btn.text:SetFont(GetFontPath(), 10, "")
                 btn.text:SetTextColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
                 tabContents[i]:Show()
             else
-                btn:SetFieldBackgroundColor(0.15, 0.15, 0.15, 1)
-                btn:SetFieldBorderColor(0.3, 0.3, 0.3, 1)
+                pcall(btn.SetBackdropColor, btn, 0.15, 0.15, 0.15, 1)
+                pcall(btn.SetBackdropBorderColor, btn, 0.3, 0.3, 0.3, 1)
                 btn.text:SetFont(GetFontPath(), 10, "")
                 btn.text:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
                 tabContents[i]:Hide()
@@ -1592,12 +1625,12 @@ function GUI:CreateSubTabs(parent, tabs)
         btn:SetScript("OnClick", function() SelectSubTab(i) end)
         btn:SetScript("OnEnter", function(self)
             if buttonGroup.selectedTab ~= i then
-                self:SetFieldBorderColor(C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a)
+                pcall(self.SetBackdropBorderColor, self, C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a)
             end
         end)
         btn:SetScript("OnLeave", function(self)
             if buttonGroup.selectedTab ~= i then
-                self:SetFieldBorderColor(0.3, 0.3, 0.3, 1)
+                pcall(self.SetBackdropBorderColor, self, 0.3, 0.3, 0.3, 1)
             end
         end)
     end
@@ -1659,13 +1692,17 @@ function GUI:CreateCheckbox(parent, label, dbKey, dbTable, onChange)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(300, 20)
 
-    local box = CreateFieldSurface(container, "Button", {0.1, 0.1, 0.1, 1}, {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(box, 16, 16)
-    else
-        box:SetSize(16, 16)
-    end
+    local box = CreateFrame("Button", nil, container, "BackdropTemplate")
+    box:SetSize(16, 16)
     box:SetPoint("LEFT", 0, 0)
+    local px = QUICore:GetPixelSize(box)
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    box:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    box:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
     
     -- Checkmark (mint-colored using standard check but tinted)
     box.check = box:CreateTexture(nil, "OVERLAY")
@@ -1693,12 +1730,12 @@ function GUI:CreateCheckbox(parent, label, dbKey, dbTable, onChange)
         container.checked = val
         if val then
             box.check:Show()
-            box:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)  -- Mint when checked
-            box:SetFieldBackgroundColor(0.1, 0.2, 0.15, 1)
+            box:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)  -- Mint when checked
+            box:SetBackdropColor(0.1, 0.2, 0.15, 1)
         else
             box.check:Hide()
-            box:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
-            box:SetFieldBackgroundColor(0.1, 0.1, 0.1, 1)
+            box:SetBackdropBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            box:SetBackdropColor(0.1, 0.1, 0.1, 1)
         end
         if dbTable and dbKey then dbTable[dbKey] = val end
         if onChange then onChange(val) end
@@ -1709,12 +1746,12 @@ function GUI:CreateCheckbox(parent, label, dbKey, dbTable, onChange)
     SetValue(GetValue())
     
     box:SetScript("OnClick", function() SetValue(not GetValue()) end)
-    box:SetScript("OnEnter", function(self) self:SetFieldBorderColor(C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
+    box:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
     box:SetScript("OnLeave", function(self)
         if GetValue() then
-            self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
         else
-            self:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            pcall(self.SetBackdropBorderColor, self, C_border_r, C_border_g, C_border_b, C_border_a)
         end
     end)
     
@@ -1735,13 +1772,17 @@ function GUI:CreateCheckboxCentered(parent, label, dbKey, dbTable, onChange)
     text:SetPoint("TOP", container, "TOP", 0, 0)
     
     -- Checkbox box below label, centered
-    local box = CreateFieldSurface(container, "Button", {0.1, 0.1, 0.1, 1}, {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(box, 16, 16)
-    else
-        box:SetSize(16, 16)
-    end
+    local box = CreateFrame("Button", nil, container, "BackdropTemplate")
+    box:SetSize(16, 16)
     box:SetPoint("TOP", text, "BOTTOM", 0, -4)
+    local px = QUICore:GetPixelSize(box)
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    box:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    box:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
     
     -- Checkmark
     box.check = box:CreateTexture(nil, "OVERLAY")
@@ -1764,12 +1805,12 @@ function GUI:CreateCheckboxCentered(parent, label, dbKey, dbTable, onChange)
         container.checked = val
         if val then
             box.check:Show()
-            box:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-            box:SetFieldBackgroundColor(0.1, 0.2, 0.15, 1)
+            box:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            box:SetBackdropColor(0.1, 0.2, 0.15, 1)
         else
             box.check:Hide()
-            box:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
-            box:SetFieldBackgroundColor(0.1, 0.1, 0.1, 1)
+            box:SetBackdropBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            box:SetBackdropColor(0.1, 0.1, 0.1, 1)
         end
         if dbTable and dbKey then dbTable[dbKey] = val end
         if onChange then onChange(val) end
@@ -1780,12 +1821,12 @@ function GUI:CreateCheckboxCentered(parent, label, dbKey, dbTable, onChange)
     SetValue(GetValue())
     
     box:SetScript("OnClick", function() SetValue(not GetValue()) end)
-    box:SetScript("OnEnter", function(self) self:SetFieldBorderColor(C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
+    box:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
     box:SetScript("OnLeave", function(self)
         if GetValue() then
-            self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
         else
-            self:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            pcall(self.SetBackdropBorderColor, self, C_border_r, C_border_g, C_border_b, C_border_a)
         end
     end)
     
@@ -1806,8 +1847,16 @@ function GUI:CreateColorPickerCentered(parent, label, dbKey, dbTable, onChange)
     text:SetPoint("TOP", container, "TOP", 0, 0)
     
     -- Color swatch below label, centered
-    local swatch = CreateColorSwatch(container, 16, 16)
+    local swatch = CreateFrame("Button", nil, container, "BackdropTemplate")
+    swatch:SetSize(16, 16)
     swatch:SetPoint("TOP", text, "BOTTOM", 0, -4)
+    local px = QUICore:GetPixelSize(swatch)
+    swatch:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    swatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
     
     container.swatch = swatch
     container.label = text
@@ -1821,7 +1870,7 @@ function GUI:CreateColorPickerCentered(parent, label, dbKey, dbTable, onChange)
     end
     
     local function SetColor(r, g, b, a)
-        swatch:SetSwatchColor(r, g, b, a or 1)
+        swatch:SetBackdropColor(r, g, b, a or 1)
         if dbTable and dbKey then
             dbTable[dbKey] = {r, g, b, a or 1}
         end
@@ -1830,7 +1879,7 @@ function GUI:CreateColorPickerCentered(parent, label, dbKey, dbTable, onChange)
     
     -- Initialize color
     local r, g, b, a = GetColor()
-    swatch:SetSwatchColor(r, g, b, a)
+    swatch:SetBackdropColor(r, g, b, a)
     
     container.GetColor = GetColor
     container.SetColor = SetColor
@@ -1838,13 +1887,33 @@ function GUI:CreateColorPickerCentered(parent, label, dbKey, dbTable, onChange)
     -- Open color picker on click
     swatch:SetScript("OnClick", function()
         local r, g, b, a = GetColor()
-        ShowManagedColorPicker({
-            r = r,
-            g = g,
-            b = b,
-            a = a or 1,
-            onChange = SetColor,
-        })
+        local originalA = a or 1
+        local info = {
+            hasOpacity = true,
+            opacity = originalA,
+            r = r, g = g, b = b,
+            swatchFunc = function()
+                local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+                local newA = ColorPickerFrame:GetColorAlpha()
+                SetColor(newR, newG, newB, newA)
+            end,
+            opacityFunc = function()
+                local newR, newG, newB = ColorPickerFrame:GetColorRGB()
+                local newA = ColorPickerFrame:GetColorAlpha()
+                SetColor(newR, newG, newB, newA)
+            end,
+            cancelFunc = function(prev)
+                SetColor(prev.r, prev.g, prev.b, originalA)
+            end,
+        }
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+    end)
+    
+    swatch:SetScript("OnEnter", function(self)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+    end)
+    swatch:SetScript("OnLeave", function(self)
+        pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1)
     end)
     
     return container
@@ -1858,13 +1927,17 @@ function GUI:CreateCheckboxInverted(parent, label, dbKey, dbTable, onChange)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(300, 20)
 
-    local box = CreateFieldSurface(container, "Button", {0.1, 0.1, 0.1, 1}, {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(box, 16, 16)
-    else
-        box:SetSize(16, 16)
-    end
+    local box = CreateFrame("Button", nil, container, "BackdropTemplate")
+    box:SetSize(16, 16)
     box:SetPoint("LEFT", 0, 0)
+    local px = QUICore:GetPixelSize(box)
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    box:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    box:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
     
     box.check = box:CreateTexture(nil, "OVERLAY")
     box.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -1897,12 +1970,12 @@ function GUI:CreateCheckboxInverted(parent, label, dbKey, dbTable, onChange)
         local dbVal = not checked  -- Invert for storage
         if checked then
             box.check:Show()
-            box:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-            box:SetFieldBackgroundColor(0.1, 0.2, 0.15, 1)
+            box:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            box:SetBackdropColor(0.1, 0.2, 0.15, 1)
         else
             box.check:Hide()
-            box:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
-            box:SetFieldBackgroundColor(0.1, 0.1, 0.1, 1)
+            box:SetBackdropBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            box:SetBackdropColor(0.1, 0.1, 0.1, 1)
         end
         if dbTable and dbKey then dbTable[dbKey] = dbVal end
         if onChange then onChange(dbVal) end
@@ -1913,12 +1986,12 @@ function GUI:CreateCheckboxInverted(parent, label, dbKey, dbTable, onChange)
     SetChecked(IsChecked())
     
     box:SetScript("OnClick", function() SetChecked(not IsChecked()) end)
-    box:SetScript("OnEnter", function(self) self:SetFieldBorderColor(C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
+    box:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
     box:SetScript("OnLeave", function(self)
         if IsChecked() then
-            self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
         else
-            self:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            pcall(self.SetBackdropBorderColor, self, C_border_r, C_border_g, C_border_b, C_border_a)
         end
     end)
     
@@ -1952,8 +2025,27 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
     trackContainer:SetPoint("TOPLEFT", 35, -18)
     trackContainer:SetPoint("TOPRIGHT", -35, -18)
 
-    -- Unfilled and filled track
-    local trackBg, trackFill = CreateSliderTrackSurface(trackContainer)
+    -- Unfilled track (background)
+    local trackBg = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    trackBg:SetAllPoints()
+    local px = QUICore:GetPixelSize(trackBg)
+    trackBg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    trackBg:SetBackdropColor(C.sliderTrack[1], C.sliderTrack[2], C.sliderTrack[3], 1)
+    trackBg:SetBackdropBorderColor(0.1, 0.12, 0.15, 1)
+
+    -- Filled track (mint portion from left to thumb)
+    local trackFill = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    trackFill:SetPoint("TOPLEFT", px, -px)
+    trackFill:SetPoint("BOTTOMLEFT", px, px)
+    trackFill:SetWidth(1)
+    trackFill:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    trackFill:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
 
     -- Actual slider (invisible, just for interaction)
     local slider = CreateFrame("Slider", nil, trackContainer)
@@ -1963,7 +2055,15 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
     slider:SetHitRectInsets(0, 0, -10, -10)  -- Expand hit area 10px above/below for reliable hover detection
 
     -- Thumb frame (white circle with border)
-    local thumbFrame = CreateSliderThumbSurface(slider)
+    local thumbFrame = CreateFrame("Frame", nil, slider, "BackdropTemplate")
+    thumbFrame:SetSize(14, 14)
+    thumbFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    thumbFrame:SetBackdropColor(C.sliderThumb[1], C.sliderThumb[2], C.sliderThumb[3], 1)
+    thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
     thumbFrame:SetFrameLevel(slider:GetFrameLevel() + 2)
     thumbFrame:EnableMouse(false)  -- Let clicks pass through to slider
 
@@ -1986,15 +2086,20 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
     maxText:SetPoint("LEFT", trackContainer, "RIGHT", 5, 0)
 
     -- Editbox for value (center, below slider)
-    local editField, editBox = GUI:CreateInlineEditBox(container, {
-        width = 70,
-        height = 22,
-        justifyH = "CENTER",
-        borderColor = {0.25, 0.25, 0.25, 1},
-        activeBorderColor = C.accent,
-        commitOnFocusLost = false,
+    local editBox = CreateFrame("EditBox", nil, container, "BackdropTemplate")
+    editBox:SetSize(70, 22)
+    editBox:SetPoint("TOP", trackContainer, "BOTTOM", 0, -6)
+    editBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
     })
-    editField:SetPoint("TOP", trackContainer, "BOTTOM", 0, -6)
+    editBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    editBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    editBox:SetFont(GetFontPath(), 11, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH("CENTER")
+    editBox:SetAutoFocus(false)
 
     -- Configure slider
     slider:SetMinMaxValues(min or 0, max or 100)
@@ -2003,7 +2108,6 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
 
     container.slider = slider
     container.editBox = editBox
-    container.editField = editField
     container.trackFill = trackFill
     container.thumbFrame = thumbFrame
     container.trackContainer = trackContainer
@@ -2111,10 +2215,10 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
 
     -- Hover effects
     slider:SetScript("OnEnter", function()
-        thumbFrame:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        thumbFrame:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     slider:SetScript("OnLeave", function()
-        thumbFrame:SetFieldBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
+        thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
     end)
 
     editBox:SetScript("OnEnterPressed", function(self)
@@ -2129,12 +2233,18 @@ function GUI:CreateSlider(parent, label, min, max, step, dbKey, dbTable, onChang
     end)
 
     -- Hover effect on editbox
-    editBox:HookScript("OnEnter", function(self)
-        editField:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    editBox:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
-    editBox:HookScript("OnLeave", function(self)
+    editBox:SetScript("OnEditFocusGained", function(self)
+        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    end)
+    editBox:SetScript("OnEditFocusLost", function(self)
+        self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    end)
+    editBox:SetScript("OnLeave", function(self)
         if not self:HasFocus() then
-            editField:SetFieldBorderColor(0.25, 0.25, 0.25, 1)
+            self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
     end)
 
@@ -2149,6 +2259,117 @@ end
 ---------------------------------------------------------------------------
 -- WIDGET: DROPDOWN (Matches slider width with same 35px inset, same height for alignment)
 ---------------------------------------------------------------------------
+local CHEVRON_ZONE_WIDTH = 28
+local CHEVRON_BG_ALPHA = 0.15
+local CHEVRON_BG_ALPHA_HOVER = 0.25
+local CHEVRON_TEXT_ALPHA = 0.7
+
+---------------------------------------------------------------------------
+-- DROPDOWN SHARED: Position menu above or below dropdown based on screen space,
+-- add scroll frame + scrollbar when content exceeds max visible height.
+---------------------------------------------------------------------------
+local DROPDOWN_MAX_VISIBLE_ITEMS = 10
+local DROPDOWN_ITEM_HEIGHT = 22
+local DROPDOWN_SCROLLBAR_WIDTH = 6
+
+-- Position the menu frame above or below the dropdown button.
+-- Uses GetCursorPosition() as a reliable screen-space reference (the cursor
+-- is always on the dropdown button when clicked). Compares cursor Y against
+-- screen height to decide whether to open up or down.
+local function PositionDropdownMenu(menuFrame, dropdown, menuHeight)
+    menuFrame:ClearAllPoints()
+    local uiScale = UIParent:GetEffectiveScale()
+    -- GetCursorPosition returns raw screen pixels; divide by UIParent scale
+    -- to get UIParent-space coordinates (which menuFrame uses as its parent).
+    local _, cursorY = GetCursorPosition()
+    cursorY = cursorY / uiScale
+    -- Check against the QUI options panel bottom, not the screen bottom,
+    -- since the menu is parented to UIParent but should stay within the panel.
+    local panelBottom = 0
+    if GUI.MainFrame and GUI.MainFrame:IsShown() then
+        local pb = GUI.MainFrame:GetBottom()
+        if pb then
+            local panelScale = GUI.MainFrame:GetEffectiveScale()
+            panelBottom = pb * panelScale / uiScale
+        end
+    end
+    -- Open upward if the menu would extend below the options panel
+    if cursorY - menuHeight < panelBottom + 10 then
+        menuFrame:SetPoint("BOTTOMLEFT", dropdown, "TOPLEFT", 0, 2)
+        menuFrame:SetPoint("BOTTOMRIGHT", dropdown, "TOPRIGHT", 0, 2)
+    else
+        menuFrame:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
+        menuFrame:SetPoint("TOPRIGHT", dropdown, "BOTTOMRIGHT", 0, -2)
+    end
+end
+
+-- Create a scrollable menu body inside a menuFrame.
+-- Returns scrollFrame, scrollContent, scrollBar (thumb-only, styled), UpdateThumb.
+-- Uses a custom mouse-wheel handler that also updates the scrollbar thumb,
+-- since bare ScrollFrames don't fire OnVerticalScroll/OnScrollRangeChanged reliably.
+local function CreateDropdownScrollBody(menuFrame)
+    local scrollFrame = CreateFrame("ScrollFrame", nil, menuFrame)
+    scrollFrame:SetPoint("TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+
+    local scrollContent = CreateFrame("Frame", nil, scrollFrame)
+    scrollContent:SetWidth(200)
+    scrollFrame:SetScrollChild(scrollContent)
+
+    -- Minimal styled scrollbar (thin thumb, no arrows)
+    local scrollBar = CreateFrame("Frame", nil, menuFrame)
+    scrollBar:SetWidth(DROPDOWN_SCROLLBAR_WIDTH)
+    scrollBar:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, -2)
+    scrollBar:SetPoint("BOTTOMRIGHT", menuFrame, "BOTTOMRIGHT", -1, 2)
+    scrollBar:Hide()
+
+    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
+    thumb:SetWidth(DROPDOWN_SCROLLBAR_WIDTH)
+    thumb:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.5)
+    scrollBar.thumb = thumb
+
+    -- Update thumb position/size based on current scroll state
+    local function UpdateThumb()
+        local contentH = scrollContent:GetHeight()
+        local frameH = scrollFrame:GetHeight()
+        if contentH <= frameH or frameH <= 0 then
+            scrollBar:Hide()
+            return
+        end
+        scrollBar:Show()
+        local trackH = scrollBar:GetHeight()
+        if trackH <= 0 then return end
+        local thumbH = math.max(20, (frameH / contentH) * trackH)
+        thumb:SetHeight(thumbH)
+        local scrollMax = contentH - frameH
+        local okScroll, scrollCur = pcall(scrollFrame.GetVerticalScroll, scrollFrame)
+        scrollCur = (okScroll and scrollCur) or 0
+        local ratio = (scrollMax > 0) and (scrollCur / scrollMax) or 0
+        local yOff = -ratio * (trackH - thumbH)
+        thumb:ClearAllPoints()
+        thumb:SetPoint("TOP", scrollBar, "TOP", 0, yOff)
+    end
+
+    -- Custom mouse wheel handler that scrolls AND updates thumb
+    local SCROLL_STEP = 22  -- one item per scroll tick
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local okCur, currentScroll = pcall(self.GetVerticalScroll, self)
+        if not okCur then return end
+        local contentH = scrollContent:GetHeight()
+        local frameH = self:GetHeight()
+        local maxScroll = math.max(0, contentH - frameH)
+        local newScroll = math.max(0, math.min(currentScroll - (delta * SCROLL_STEP), maxScroll))
+        pcall(self.SetVerticalScroll, self, newScroll)
+        UpdateThumb()
+    end)
+
+    -- Also try to catch scroll range changes (works on some WoW versions)
+    scrollFrame:SetScript("OnScrollRangeChanged", function() UpdateThumb() end)
+
+    return scrollFrame, scrollContent, scrollBar, UpdateThumb
+end
+
 function GUI:CreateDropdown(parent, label, options, dbKey, dbTable, onChange)
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(60)  -- Match slider height for vertical alignment
@@ -2163,21 +2384,77 @@ function GUI:CreateDropdown(parent, label, options, dbKey, dbTable, onChange)
     end
 
     -- Dropdown button (same width as slider track - inset 35px on each side)
-    local dropdown = CreateDropdownFieldCore(container, "CENTER")
+    local dropdown = CreateFrame("Button", nil, container, "BackdropTemplate")
+    dropdown:SetHeight(24)  -- Increased from 20 for better tap target
     dropdown:SetPoint("TOPLEFT", container, "TOPLEFT", 35, -16)
     dropdown:SetPoint("RIGHT", container, "RIGHT", -35, 0)
-    local chevronZone = dropdown.chevronZone
-    local separator = dropdown.separator
-    local chevronLeft = dropdown.chevronLeft
-    local chevronRight = dropdown.chevronRight
-    
+    local px = QUICore:GetPixelSize(dropdown)
+    dropdown:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    dropdown:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    dropdown:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)  -- Increased from 0.25 for better visibility
+
+    -- Chevron zone (right side with accent tint)
+    local chevronZone = CreateFrame("Frame", nil, dropdown, "BackdropTemplate")
+    chevronZone:SetWidth(CHEVRON_ZONE_WIDTH)
+    chevronZone:SetPoint("TOPRIGHT", dropdown, "TOPRIGHT", -1, -1)
+    chevronZone:SetPoint("BOTTOMRIGHT", dropdown, "BOTTOMRIGHT", -1, 1)
+    chevronZone:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+
+    -- Separator line (left edge of chevron zone)
+    local separator = chevronZone:CreateTexture(nil, "ARTWORK")
+    separator:SetWidth(1)
+    separator:SetPoint("TOPLEFT", chevronZone, "TOPLEFT", 0, 0)
+    separator:SetPoint("BOTTOMLEFT", chevronZone, "BOTTOMLEFT", 0, 0)
+    separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+
+    -- Line chevron (two angled lines forming a V pointing DOWN)
+    local chevronLeft = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronLeft:SetSize(7, 2)
+    chevronLeft:SetPoint("CENTER", chevronZone, "CENTER", -2, -1)
+    chevronLeft:SetRotation(math.rad(-45))
+
+    local chevronRight = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronRight:SetSize(7, 2)
+    chevronRight:SetPoint("CENTER", chevronZone, "CENTER", 2, -1)
+    chevronRight:SetRotation(math.rad(45))
+
+    dropdown.chevronLeft = chevronLeft
+    dropdown.chevronRight = chevronRight
+    dropdown.chevronZone = chevronZone
+    dropdown.separator = separator
+
+    -- Selected text - centered, accounting for chevron zone
+    dropdown.selected = dropdown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    SetFont(dropdown.selected, 11, "", C.text)
+    dropdown.selected:SetPoint("LEFT", 8, 0)
+    dropdown.selected:SetPoint("RIGHT", chevronZone, "LEFT", -5, 0)
+    dropdown.selected:SetJustifyH("CENTER")
+
+    -- Hover effect
     dropdown:SetScript("OnEnter", function(self)
-        self:SetChromeHovered(true)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA_HOVER)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.5)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     dropdown:SetScript("OnLeave", function(self)
-        self:SetChromeHovered(false)
+        pcall(self.SetBackdropBorderColor, self, 0.35, 0.35, 0.35, 1)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
     end)
-
+    
     container.dropdown = dropdown
     
     -- Normalize options to {value, text} format
@@ -2223,93 +2500,112 @@ function GUI:CreateDropdown(parent, label, options, dbKey, dbTable, onChange)
     -- Initialize with current value
     SetValue(GetValue(), true)
     
-    -- Dropdown menu frame (created once, reused)
-    local menuFrame = CreateDropdownMenuSurface(dropdown, {C_accent_r, C_accent_g, C_accent_b, C_accent_a})
-    menuFrame:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
-    menuFrame:SetPoint("TOPRIGHT", dropdown, "BOTTOMRIGHT", 0, -2)
+    -- Dropdown menu frame (parented to UIParent to avoid scroll frame clipping)
+    local menuFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    menuFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    menuFrame:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
+    menuFrame:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+    menuFrame:SetFrameStrata("TOOLTIP")
+    menuFrame:SetClipsChildren(true)
     menuFrame:Hide()
-    
+
+    -- Hide menu when dropdown becomes hidden (tab switch, panel close, etc.)
+    dropdown:HookScript("OnHide", function() menuFrame:Hide() end)
+
+    -- Scroll body for long option lists
+    local scrollFrame, scrollContent, scrollBar, updateThumb = CreateDropdownScrollBody(menuFrame)
+
     local menuButtons = {}
-    local buttonHeight = 22
-    
+    local buttonHeight = DROPDOWN_ITEM_HEIGHT
+
     for i, opt in ipairs(container.options) do
-        local btn = CreateMenuRowButton(menuFrame, opt.text, function()
-            SetValue(opt.value)
-            menuFrame:Hide()
-        end)
+        local btn = CreateFrame("Button", nil, scrollContent, "BackdropTemplate")
         btn:SetHeight(buttonHeight)
         btn:SetPoint("TOPLEFT", 2, -2 - (i-1) * buttonHeight)
         btn:SetPoint("TOPRIGHT", -2, -2 - (i-1) * buttonHeight)
-        
+
+        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        SetFont(btn.text, 11, "", C.text)
+        btn.text:SetText(opt.text)
+        btn.text:SetPoint("LEFT", 8, 0)
+
+        btn:SetScript("OnEnter", function(self)
+            pcall(function()
+                self:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
+                self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.25)
+            end)
+        end)
+        btn:SetScript("OnLeave", function(self)
+            pcall(function()
+                self:SetBackdrop(nil)
+            end)
+        end)
+        btn:SetScript("OnClick", function()
+            SetValue(opt.value)
+            menuFrame:Hide()
+        end)
+
         menuButtons[i] = btn
     end
-    
-    menuFrame:SetHeight(4 + #container.options * buttonHeight)
-    
+
+    local totalHeight = 4 + #container.options * buttonHeight
+    local maxHeight = 4 + DROPDOWN_MAX_VISIBLE_ITEMS * buttonHeight
+    scrollContent:SetHeight(totalHeight)
+    menuFrame:SetHeight(math.min(totalHeight, maxHeight))
+
+    -- Adjust scroll content right edge when scrollbar is visible
+    local function UpdateScrollInset()
+        if scrollBar:IsShown() then
+            scrollFrame:SetPoint("BOTTOMRIGHT", -(DROPDOWN_SCROLLBAR_WIDTH + 2), 0)
+        else
+            scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+        end
+    end
+
     -- Toggle menu on click
     dropdown:SetScript("OnClick", function()
         if menuFrame:IsShown() then
             menuFrame:Hide()
         else
+            PositionDropdownMenu(menuFrame, dropdown, menuFrame:GetHeight())
+            scrollContent:SetWidth(dropdown:GetWidth() - 4)
             menuFrame:Show()
+            C_Timer.After(0, function() updateThumb(); UpdateScrollInset() end)
         end
     end)
-    
+
     -- Close menu when clicking elsewhere (with delay to handle gap)
     local closeTimer = 0
     local CLOSE_DELAY = 0.15  -- 150ms grace period
-    
-    menuFrame:SetScript("OnShow", function()
+
+    menuFrame:HookScript("OnShow", function()
         closeTimer = 0
         menuFrame.__checkElapsed = 0
         menuFrame:SetScript("OnUpdate", function(self, elapsed)
-            -- Throttle checks to ~15 FPS (66ms) for CPU efficiency
-            self.__checkElapsed = self.__checkElapsed + elapsed
+            self.__checkElapsed = (self.__checkElapsed or 0) + elapsed
             if self.__checkElapsed < 0.066 then return end
             local deltaTime = self.__checkElapsed
             self.__checkElapsed = 0
 
-            -- Check if mouse is over dropdown button OR menu (with tolerance)
             local isOverDropdown = dropdown:IsMouseOver()
             local isOverMenu = self:IsMouseOver()
 
-            -- Also check if mouse is in the gap between them
-            local scale = dropdown:GetEffectiveScale()
-            local mouseX, mouseY = GetCursorPosition()
-            mouseX, mouseY = mouseX / scale, mouseY / scale
-
-            local dLeft, dBottom, dWidth, dHeight = dropdown:GetRect()
-            local mLeft, mBottom, mWidth, mHeight = self:GetRect()
-
-            if dLeft and mLeft then
-                -- Check if mouse X is within the dropdown/menu horizontal bounds
-                local inHorizontalBounds = mouseX >= dLeft and mouseX <= (dLeft + dWidth)
-                -- Check if mouse Y is between the bottom of dropdown and top of menu (the gap)
-                local inGap = mouseY >= mBottom and mouseY <= (dBottom + dHeight) and inHorizontalBounds
-
-                if isOverDropdown or isOverMenu or inGap then
-                    closeTimer = 0
-                else
-                    closeTimer = closeTimer + deltaTime
-                    if closeTimer > CLOSE_DELAY then
-                        self:Hide()
-                    end
+            if not isOverDropdown and not isOverMenu then
+                closeTimer = closeTimer + deltaTime
+                if closeTimer > CLOSE_DELAY then
+                    self:Hide()
                 end
             else
-                -- Fallback if GetRect fails
-                if not isOverDropdown and not isOverMenu then
-                    closeTimer = closeTimer + deltaTime
-                    if closeTimer > CLOSE_DELAY then
-                        self:Hide()
-                    end
-                else
-                    closeTimer = 0
-                end
+                closeTimer = 0
             end
         end)
     end)
-    
-    menuFrame:SetScript("OnHide", function()
+
+    menuFrame:HookScript("OnHide", function()
         menuFrame:SetScript("OnUpdate", nil)
         closeTimer = 0
     end)
@@ -2334,14 +2630,75 @@ function GUI:CreateDropdownFullWidth(parent, label, options, dbKey, dbTable, onC
     end
 
     -- Dropdown button (full width, no inset)
-    local dropdown = CreateDropdownFieldCore(container, "CENTER")
+    local dropdown = CreateFrame("Button", nil, container, "BackdropTemplate")
+    dropdown:SetHeight(24)
     dropdown:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -18)
     dropdown:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+    local px = QUICore:GetPixelSize(dropdown)
+    dropdown:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    dropdown:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    dropdown:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)  -- Increased from 0.25
+
+    -- Chevron zone (right side with accent tint)
+    local chevronZone = CreateFrame("Frame", nil, dropdown, "BackdropTemplate")
+    chevronZone:SetWidth(CHEVRON_ZONE_WIDTH)
+    chevronZone:SetPoint("TOPRIGHT", dropdown, "TOPRIGHT", -1, -1)
+    chevronZone:SetPoint("BOTTOMRIGHT", dropdown, "BOTTOMRIGHT", -1, 1)
+    chevronZone:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+
+    -- Separator line (left edge of chevron zone)
+    local separator = chevronZone:CreateTexture(nil, "ARTWORK")
+    separator:SetWidth(1)
+    separator:SetPoint("TOPLEFT", chevronZone, "TOPLEFT", 0, 0)
+    separator:SetPoint("BOTTOMLEFT", chevronZone, "BOTTOMLEFT", 0, 0)
+    separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+
+    -- Line chevron (two angled lines forming a V pointing DOWN)
+    local chevronLeft = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronLeft:SetSize(7, 2)
+    chevronLeft:SetPoint("CENTER", chevronZone, "CENTER", -2, -1)
+    chevronLeft:SetRotation(math.rad(-45))
+
+    local chevronRight = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronRight:SetSize(7, 2)
+    chevronRight:SetPoint("CENTER", chevronZone, "CENTER", 2, -1)
+    chevronRight:SetRotation(math.rad(45))
+
+    dropdown.chevronLeft = chevronLeft
+    dropdown.chevronRight = chevronRight
+    dropdown.chevronZone = chevronZone
+    dropdown.separator = separator
+
+    -- Selected text - centered, accounting for chevron zone
+    dropdown.selected = dropdown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    SetFont(dropdown.selected, 11, "", C.text)
+    dropdown.selected:SetPoint("LEFT", 10, 0)
+    dropdown.selected:SetPoint("RIGHT", chevronZone, "LEFT", -5, 0)
+    dropdown.selected:SetJustifyH("CENTER")
+
+    -- Hover effect
     dropdown:SetScript("OnEnter", function(self)
-        self:SetChromeHovered(true)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA_HOVER)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.5)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     dropdown:SetScript("OnLeave", function(self)
-        self:SetChromeHovered(false)
+        pcall(self.SetBackdropBorderColor, self, 0.35, 0.35, 0.35, 1)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
     end)
 
     container.dropdown = dropdown
@@ -2385,41 +2742,83 @@ function GUI:CreateDropdownFullWidth(parent, label, options, dbKey, dbTable, onC
     container.SetValue = SetValue
     SetValue(GetValue(), true)
     
-    -- Dropdown menu
-    local menuFrame = CreateDropdownMenuSurface(dropdown, {C_accent_r, C_accent_g, C_accent_b, C_accent_a})
-    menuFrame:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
-    menuFrame:SetPoint("TOPRIGHT", dropdown, "BOTTOMRIGHT", 0, -2)
+    -- Dropdown menu (parented to UIParent to avoid scroll frame clipping)
+    local menuFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    menuFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    menuFrame:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
+    menuFrame:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+    menuFrame:SetFrameStrata("TOOLTIP")
+    menuFrame:SetClipsChildren(true)
     menuFrame:Hide()
-    
-    local buttonHeight = 22
+
+    -- Hide menu when dropdown becomes hidden (tab switch, panel close, etc.)
+    dropdown:HookScript("OnHide", function() menuFrame:Hide() end)
+
+    -- Scroll body for long option lists
+    local scrollFrame, scrollContent, scrollBar, updateThumb = CreateDropdownScrollBody(menuFrame)
+
+    local buttonHeight = DROPDOWN_ITEM_HEIGHT
     for i, opt in ipairs(container.options) do
-        local btn = CreateMenuRowButton(menuFrame, opt.text, function()
-            SetValue(opt.value)
-            menuFrame:Hide()
-        end)
+        local btn = CreateFrame("Button", nil, scrollContent, "BackdropTemplate")
         btn:SetHeight(buttonHeight)
         btn:SetPoint("TOPLEFT", 2, -2 - (i-1) * buttonHeight)
         btn:SetPoint("TOPRIGHT", -2, -2 - (i-1) * buttonHeight)
+
+        btn.text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        SetFont(btn.text, 11, "", C.text)
+        btn.text:SetText(opt.text)
+        btn.text:SetPoint("LEFT", 8, 0)
+
+        btn:SetScript("OnEnter", function(self)
+            pcall(function()
+                self:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
+                self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.25)
+            end)
+        end)
+        btn:SetScript("OnLeave", function(self)
+            pcall(function() self:SetBackdrop(nil) end)
+        end)
+        btn:SetScript("OnClick", function()
+            SetValue(opt.value)
+            menuFrame:Hide()
+        end)
     end
-    
-    menuFrame:SetHeight(4 + #container.options * buttonHeight)
-    
+
+    local totalHeight = 4 + #container.options * buttonHeight
+    local maxHeight = 4 + DROPDOWN_MAX_VISIBLE_ITEMS * buttonHeight
+    scrollContent:SetHeight(totalHeight)
+    menuFrame:SetHeight(math.min(totalHeight, maxHeight))
+
+    local function UpdateScrollInset()
+        if scrollBar:IsShown() then
+            scrollFrame:SetPoint("BOTTOMRIGHT", -(DROPDOWN_SCROLLBAR_WIDTH + 2), 0)
+        else
+            scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+        end
+    end
+
     dropdown:SetScript("OnClick", function()
         if menuFrame:IsShown() then
             menuFrame:Hide()
         else
+            PositionDropdownMenu(menuFrame, dropdown, menuFrame:GetHeight())
+            scrollContent:SetWidth(dropdown:GetWidth() - 4)
             menuFrame:Show()
+            C_Timer.After(0, function() updateThumb(); UpdateScrollInset() end)
         end
     end)
-    
+
     -- Close menu when clicking elsewhere
     local closeTimer = 0
-    menuFrame:SetScript("OnShow", function()
+    menuFrame:HookScript("OnShow", function()
         closeTimer = 0
         menuFrame.__checkElapsed = 0
         menuFrame:SetScript("OnUpdate", function(self, elapsed)
-            -- Throttle checks to ~15 FPS (66ms) for CPU efficiency
-            self.__checkElapsed = self.__checkElapsed + elapsed
+            self.__checkElapsed = (self.__checkElapsed or 0) + elapsed
             if self.__checkElapsed < 0.066 then return end
             local deltaTime = self.__checkElapsed
             self.__checkElapsed = 0
@@ -2437,7 +2836,7 @@ function GUI:CreateDropdownFullWidth(parent, label, options, dbKey, dbTable, onC
         end)
     end)
 
-    menuFrame:SetScript("OnHide", function()
+    menuFrame:HookScript("OnHide", function()
         menuFrame:SetScript("OnUpdate", nil)
         closeTimer = 0
     end)
@@ -2472,8 +2871,27 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     text:SetJustifyH("LEFT")
 
     -- Toggle track (the pill-shaped background)
-    local track, thumb = CreateToggleSurface(container)
+    local track = CreateFrame("Button", nil, container, "BackdropTemplate")
+    track:SetSize(40, 20)
     track:SetPoint("LEFT", container, "LEFT", 180, 0)
+    local px = QUICore:GetPixelSize(track)
+    track:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+
+    -- Thumb (the sliding circle)
+    local thumb = CreateFrame("Frame", nil, track, "BackdropTemplate")
+    thumb:SetSize(16, 16)
+    thumb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+    thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
 
     container.track = track
     container.thumb = thumb
@@ -2487,14 +2905,14 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     local function UpdateVisual(val)
         if val then
             -- ON state: Mint track, thumb on right
-            track:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 1)
-            track:SetFieldBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            track:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+            track:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
             thumb:ClearAllPoints()
             thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
         else
             -- OFF state: Dark grey track, thumb on left
-            track:SetFieldBackgroundColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
-            track:SetFieldBorderColor(0.12, 0.14, 0.18, 1)
+            track:SetBackdropColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
+            track:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
             thumb:ClearAllPoints()
             thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
         end
@@ -2523,16 +2941,16 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     -- Hover effects
     track:SetScript("OnEnter", function(self)
         if GetValue() then
-            self:SetFieldBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            self:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
         else
-            self:SetFieldBorderColor(0.25, 0.28, 0.35, 1)
+            self:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
         end
     end)
     track:SetScript("OnLeave", function(self)
         if GetValue() then
-            self:SetFieldBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            self:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
         else
-            self:SetFieldBorderColor(0.12, 0.14, 0.18, 1)
+            self:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
         end
     end)
 
@@ -2587,8 +3005,27 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
     text:SetJustifyH("LEFT")
 
     -- Toggle track
-    local track, thumb = CreateToggleSurface(container)
+    local track = CreateFrame("Button", nil, container, "BackdropTemplate")
+    track:SetSize(40, 20)
     track:SetPoint("LEFT", container, "LEFT", 180, 0)
+    local px = QUICore:GetPixelSize(track)
+    track:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+
+    -- Thumb
+    local thumb = CreateFrame("Frame", nil, track, "BackdropTemplate")
+    thumb:SetSize(16, 16)
+    thumb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+    thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    thumb:SetFrameLevel(track:GetFrameLevel() + 1)
 
     container.track = track
     container.thumb = thumb
@@ -2606,13 +3043,13 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
 
     local function UpdateVisual(isOn)
         if isOn then
-            track:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 1)
-            track:SetFieldBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            track:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+            track:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
             thumb:ClearAllPoints()
             thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
         else
-            track:SetFieldBackgroundColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
-            track:SetFieldBorderColor(0.12, 0.14, 0.18, 1)
+            track:SetBackdropColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
+            track:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
             thumb:ClearAllPoints()
             thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
         end
@@ -2640,16 +3077,16 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
 
     track:SetScript("OnEnter", function(self)
         if IsOn() then
-            self:SetFieldBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            self:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
         else
-            self:SetFieldBorderColor(0.25, 0.28, 0.35, 1)
+            self:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
         end
     end)
     track:SetScript("OnLeave", function(self)
         if IsOn() then
-            self:SetFieldBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            self:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
         else
-            self:SetFieldBorderColor(0.12, 0.14, 0.18, 1)
+            self:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
         end
     end)
 
@@ -2687,13 +3124,17 @@ function GUI:CreateFormCheckboxOriginal(parent, label, dbKey, dbTable, onChange)
     text:SetJustifyH("LEFT")
 
     -- Checkbox aligned with other widgets (starts at 180px from left)
-    local box = CreateFieldSurface(container, "Button", {0.1, 0.1, 0.1, 1}, {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(box, 18, 18)
-    else
-        box:SetSize(18, 18)
-    end
+    local box = CreateFrame("Button", nil, container, "BackdropTemplate")
+    box:SetSize(18, 18)
     box:SetPoint("LEFT", container, "LEFT", 180, 0)
+    local px = QUICore:GetPixelSize(box)
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    box:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    box:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     -- Checkmark
     box.check = box:CreateTexture(nil, "OVERLAY")
@@ -2715,12 +3156,12 @@ function GUI:CreateFormCheckboxOriginal(parent, label, dbKey, dbTable, onChange)
     local function UpdateVisual(val)
         if val then
             box.check:Show()
-            box:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-            box:SetFieldBackgroundColor(0.1, 0.2, 0.15, 1)
+            box:SetBackdropBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            box:SetBackdropColor(0.1, 0.2, 0.15, 1)
         else
             box.check:Hide()
-            box:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
-            box:SetFieldBackgroundColor(0.1, 0.1, 0.1, 1)
+            box:SetBackdropBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            box:SetBackdropColor(0.1, 0.1, 0.1, 1)
         end
     end
 
@@ -2742,12 +3183,12 @@ function GUI:CreateFormCheckboxOriginal(parent, label, dbKey, dbTable, onChange)
     SetValue(GetValue(), true)
 
     box:SetScript("OnClick", function() SetValue(not GetValue()) end)
-    box:SetScript("OnEnter", function(self) self:SetFieldBorderColor(C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
+    box:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accentHover_r, C_accentHover_g, C_accentHover_b, C_accentHover_a) end)
     box:SetScript("OnLeave", function(self)
         if GetValue() then
-            self:SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+            pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
         else
-            self:SetFieldBorderColor(C_border_r, C_border_g, C_border_b, C_border_a)
+            pcall(self.SetBackdropBorderColor, self, C_border_r, C_border_g, C_border_b, C_border_a)
         end
     end)
 
@@ -2758,6 +3199,248 @@ end
 function GUI:CreateFormCheckboxInverted(parent, label, dbKey, dbTable, onChange)
     -- Redirect to toggle inverted for the premium look
     return GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
+end
+
+function GUI:CreateFormEditBox(parent, label, dbKey, dbTable, onChange, options, registryInfo)
+    if parent._hasContent ~= nil then parent._hasContent = true end
+    options = options or {}
+    local UIKit = ns.UIKit
+
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetHeight(FORM_ROW_HEIGHT)
+
+    local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    SetFont(text, 12, "", C.text)
+    text:SetText(label or "Text")
+    text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
+
+    local field = CreateFrame("Frame", nil, container)
+    field:SetHeight(24)
+    field:SetPoint("LEFT", container, "LEFT", 180, 0)
+    if options.width and options.width > 0 then
+        field:SetWidth(options.width)
+    else
+        field:SetPoint("RIGHT", container, "RIGHT", 0, 0)
+    end
+
+    local fieldBg
+    if UIKit and UIKit.CreateBackground then
+        fieldBg = UIKit.CreateBackground(field, 0.08, 0.08, 0.08, 1)
+    else
+        fieldBg = field:CreateTexture(nil, "BACKGROUND")
+        fieldBg:SetAllPoints()
+        fieldBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+        fieldBg:SetVertexColor(0.08, 0.08, 0.08, 1)
+    end
+
+    local function UpdateFallbackBorder(r, g, b, a)
+        if not field._fallbackBorder then
+            field._fallbackBorder = {
+                top = field:CreateTexture(nil, "OVERLAY"),
+                bottom = field:CreateTexture(nil, "OVERLAY"),
+                left = field:CreateTexture(nil, "OVERLAY"),
+                right = field:CreateTexture(nil, "OVERLAY"),
+            }
+            for _, edge in pairs(field._fallbackBorder) do
+                edge:SetTexture("Interface\\Buttons\\WHITE8x8")
+            end
+        end
+
+        local px = (QUICore and QUICore.GetPixelSize and QUICore:GetPixelSize(field)) or 1
+        local border = field._fallbackBorder
+        border.top:ClearAllPoints()
+        border.top:SetPoint("TOPLEFT", field, "TOPLEFT", 0, 0)
+        border.top:SetPoint("TOPRIGHT", field, "TOPRIGHT", 0, 0)
+        border.top:SetHeight(px)
+
+        border.bottom:ClearAllPoints()
+        border.bottom:SetPoint("BOTTOMLEFT", field, "BOTTOMLEFT", 0, 0)
+        border.bottom:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", 0, 0)
+        border.bottom:SetHeight(px)
+
+        border.left:ClearAllPoints()
+        border.left:SetPoint("TOPLEFT", border.top, "BOTTOMLEFT", 0, 0)
+        border.left:SetPoint("BOTTOMLEFT", border.bottom, "TOPLEFT", 0, 0)
+        border.left:SetWidth(px)
+
+        border.right:ClearAllPoints()
+        border.right:SetPoint("TOPRIGHT", border.top, "BOTTOMRIGHT", 0, 0)
+        border.right:SetPoint("BOTTOMRIGHT", border.bottom, "TOPRIGHT", 0, 0)
+        border.right:SetWidth(px)
+
+        for _, edge in pairs(border) do
+            edge:SetVertexColor(r or 0.35, g or 0.35, b or 0.35, a or 1)
+        end
+    end
+
+    local function SetFieldBorderColor(r, g, b, a)
+        if UIKit and UIKit.UpdateBorderLines then
+            if not field._pixelBorderReady and UIKit.CreateBorderLines then
+                UIKit.CreateBorderLines(field)
+                field._pixelBorderReady = true
+            end
+            UIKit.UpdateBorderLines(field, 1, r, g, b, a, false)
+        else
+            UpdateFallbackBorder(r, g, b, a)
+        end
+    end
+    SetFieldBorderColor(0.35, 0.35, 0.35, 1)
+
+    local editBox = CreateFrame("EditBox", nil, field)
+    editBox:SetPoint("TOPLEFT", field, "TOPLEFT", 6, -2)
+    editBox:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -6, 2)
+    editBox:SetAutoFocus(false)
+    editBox:SetFont(GetFontPath(), 11, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH("LEFT")
+
+    if options.maxLetters and options.maxLetters > 0 then
+        editBox:SetMaxLetters(options.maxLetters)
+    end
+
+    container.label = text
+    container.field = field
+    container.editBox = editBox
+
+    local commitOnEnter = options.commitOnEnter ~= false
+    local commitOnFocusLost = options.commitOnFocusLost ~= false
+    local liveUpdate = options.live == true
+    local initialValue = options.value
+    local isSyncingVisual = false
+
+    local function GetValue()
+        if dbTable and dbKey then
+            local v = dbTable[dbKey]
+            if v == nil then
+                return initialValue or ""
+            end
+            return tostring(v)
+        end
+        if container.value == nil then
+            return initialValue or ""
+        end
+        return tostring(container.value)
+    end
+
+    local function UpdateVisual(val)
+        isSyncingVisual = true
+        editBox:SetText(val or "")
+        isSyncingVisual = false
+    end
+
+    local function SetValue(val, skipOnChange, source)
+        local nextVal = val or ""
+        if type(nextVal) ~= "string" then
+            nextVal = tostring(nextVal)
+        end
+
+        container.value = nextVal
+        if dbTable and dbKey then
+            dbTable[dbKey] = nextVal
+        end
+
+        if source ~= editBox then
+            UpdateVisual(nextVal)
+        end
+
+        BroadcastToSiblings(container, nextVal)
+        if onChange and not skipOnChange then
+            onChange(nextVal)
+        end
+    end
+
+    container.GetValue = GetValue
+    container.SetValue = SetValue
+    container.UpdateVisual = UpdateVisual
+
+    RegisterWidgetInstance(container, dbTable, dbKey)
+    SetValue(GetValue(), true)
+
+    editBox:SetScript("OnTextChanged", function(self, userInput)
+        if isSyncingVisual then return end
+        if options.onTextChanged then
+            options.onTextChanged(self, userInput)
+        end
+        if liveUpdate and userInput then
+            SetValue(self:GetText(), false, self)
+        end
+    end)
+
+    editBox:SetScript("OnEnterPressed", function(self)
+        if commitOnEnter then
+            SetValue(self:GetText(), false, self)
+        end
+        if options.onEnterPressed then
+            options.onEnterPressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEscapePressed", function(self)
+        if options.onEscapePressed then
+            options.onEscapePressed(self)
+        else
+            self:ClearFocus()
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusGained", function(self)
+        SetFieldBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+        if options.onEditFocusGained then
+            options.onEditFocusGained(self)
+        end
+    end)
+
+    editBox:SetScript("OnEditFocusLost", function(self)
+        SetFieldBorderColor(0.35, 0.35, 0.35, 1)
+        if commitOnFocusLost then
+            SetValue(self:GetText(), false, self)
+        end
+        if options.onEditFocusLost then
+            options.onEditFocusLost(self)
+        end
+    end)
+
+    container.SetEnabled = function(self, enabled)
+        self.isEnabled = enabled and true or false
+        editBox:SetEnabled(enabled)
+        editBox:EnableMouse(enabled)
+        field:SetAlpha(enabled and 1 or 0.6)
+        self:SetAlpha(enabled and 1 or 0.6)
+        if not enabled then
+            editBox:ClearFocus()
+        end
+    end
+    container.isEnabled = true
+
+    if GUI._searchContext.tabIndex and label and not GUI._suppressSearchRegistration then
+        local regKey = label .. "_" .. (GUI._searchContext.tabIndex or 0) .. "_" .. (GUI._searchContext.subTabIndex or 0) .. "_" .. (GUI._searchContext.sectionName or "")
+        if not GUI.SettingsRegistryKeys[regKey] then
+            GUI.SettingsRegistryKeys[regKey] = true
+            local entry = {
+                label = label,
+                widgetType = "editbox",
+                tabIndex = GUI._searchContext.tabIndex,
+                tabName = GUI._searchContext.tabName,
+                subTabIndex = GUI._searchContext.subTabIndex,
+                subTabName = GUI._searchContext.subTabName,
+                sectionName = GUI._searchContext.sectionName,
+                widgetBuilder = function(p)
+                    return GUI:CreateFormEditBox(p, label, dbKey, dbTable, onChange, options)
+                end,
+            }
+            if registryInfo and registryInfo.keywords then
+                entry.keywords = registryInfo.keywords
+            end
+            table.insert(GUI.SettingsRegistry, entry)
+        end
+    end
+
+    return container
 end
 
 function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onChange, options, registryInfo)
@@ -2787,8 +3470,28 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     trackContainer:SetPoint("LEFT", container, "LEFT", 180, 0)
     trackContainer:SetPoint("RIGHT", container, "RIGHT", -70, 0)
 
-    -- Unfilled and filled track
-    local trackBg, trackFill = CreateSliderTrackSurface(trackContainer)
+    -- Unfilled track (background) - rounded appearance via backdrop
+    local trackBg = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    trackBg:SetAllPoints()
+    local px = QUICore:GetPixelSize(trackBg)
+    trackBg:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+        insets = {left = 0, right = 0, top = 0, bottom = 0},
+    })
+    trackBg:SetBackdropColor(C.sliderTrack[1], C.sliderTrack[2], C.sliderTrack[3], 1)
+    trackBg:SetBackdropBorderColor(0.1, 0.12, 0.15, 1)
+
+    -- Filled track (mint portion from left to thumb)
+    local trackFill = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    trackFill:SetPoint("TOPLEFT", px, -px)
+    trackFill:SetPoint("BOTTOMLEFT", px, px)
+    trackFill:SetWidth(1)  -- Will be updated dynamically
+    trackFill:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    trackFill:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
 
     -- Actual slider (invisible, just for interaction)
     local slider = CreateFrame("Slider", nil, trackContainer)
@@ -2797,7 +3500,15 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     slider:SetHitRectInsets(0, 0, -10, -10)  -- Expand hit area 10px above/below for reliable hover detection
 
     -- Thumb frame (white circle with border)
-    local thumbFrame = CreateSliderThumbSurface(slider)
+    local thumbFrame = CreateFrame("Frame", nil, slider, "BackdropTemplate")
+    thumbFrame:SetSize(14, 14)
+    thumbFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    thumbFrame:SetBackdropColor(C.sliderThumb[1], C.sliderThumb[2], C.sliderThumb[3], 1)
+    thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
     thumbFrame:SetFrameLevel(slider:GetFrameLevel() + 2)
     thumbFrame:EnableMouse(false)  -- Let clicks pass through to slider
 
@@ -2816,15 +3527,20 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     thumb:SetAlpha(0)  -- Hide the actual thumb, we use thumbFrame instead
 
     -- Editbox for value (far right)
-    local editField, editBox = GUI:CreateInlineEditBox(container, {
-        width = 60,
-        height = 22,
-        justifyH = "CENTER",
-        borderColor = {0.25, 0.25, 0.25, 1},
-        activeBorderColor = C.accent,
-        commitOnFocusLost = false,
+    local editBox = CreateFrame("EditBox", nil, container, "BackdropTemplate")
+    editBox:SetSize(60, 22)
+    editBox:SetPoint("RIGHT", 0, 0)
+    editBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
     })
-    editField:SetPoint("RIGHT", 0, 0)
+    editBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    editBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    editBox:SetFont(GetFontPath(), 11, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH("CENTER")
+    editBox:SetAutoFocus(false)
 
     -- Configure slider
     slider:SetMinMaxValues(min or 0, max or 100)
@@ -2834,7 +3550,6 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
 
     container.slider = slider
     container.editBox = editBox
-    container.editField = editField
     container.trackFill = trackFill
     container.thumbFrame = thumbFrame
     container.trackContainer = trackContainer
@@ -2856,7 +3571,6 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
 
         -- Position the thumb frame
         local thumbX = pct * (trackWidth - 14) + 7  -- Center thumb on fill edge
-        thumbFrame:ClearAllPoints()
         thumbFrame:SetPoint("CENTER", trackContainer, "LEFT", thumbX + 1, 0)
     end
 
@@ -2923,10 +3637,10 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
 
     -- Hover effects on thumb
     slider:SetScript("OnEnter", function()
-        thumbFrame:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        thumbFrame:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     slider:SetScript("OnLeave", function()
-        thumbFrame:SetFieldBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
+        thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
     end)
 
     editBox:SetScript("OnEnterPressed", function(self)
@@ -2940,12 +3654,18 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     end)
 
     -- Hover effect on editbox
-    editBox:HookScript("OnEnter", function(self)
-        editField:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    editBox:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
-    editBox:HookScript("OnLeave", function(self)
+    editBox:SetScript("OnEditFocusGained", function(self)
+        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    end)
+    editBox:SetScript("OnEditFocusLost", function(self)
+        self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    end)
+    editBox:SetScript("OnLeave", function(self)
         if not self:HasFocus() then
-            editField:SetFieldBorderColor(0.25, 0.25, 0.25, 1)
+            self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         end
     end)
 
@@ -3011,43 +3731,96 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
     text:SetPoint("LEFT", 0, 0)
 
     -- Dropdown button (right side)
-    local dropdown = CreateDropdownFieldCore(container, "LEFT")
+    local dropdown = CreateFrame("Button", nil, container, "BackdropTemplate")
+    dropdown:SetHeight(24)  -- Increased from 22
     dropdown:SetPoint("LEFT", container, "LEFT", 180, 0)
     dropdown:SetPoint("RIGHT", container, "RIGHT", 0, 0)
-    local chevronZone = dropdown.chevronZone
-    local separator = dropdown.separator
-    local chevronLeft = dropdown.chevronLeft
-    local chevronRight = dropdown.chevronRight
+    local px = QUICore:GetPixelSize(dropdown)
+    dropdown:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    dropdown:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    dropdown:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)  -- Increased from 0.25
 
+    -- Chevron zone (right side with accent tint)
+    local chevronZone = CreateFrame("Frame", nil, dropdown, "BackdropTemplate")
+    chevronZone:SetWidth(CHEVRON_ZONE_WIDTH)
+    chevronZone:SetPoint("TOPRIGHT", dropdown, "TOPRIGHT", -1, -1)
+    chevronZone:SetPoint("BOTTOMRIGHT", dropdown, "BOTTOMRIGHT", -1, 1)
+    chevronZone:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+    })
+    chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+
+    -- Separator line (left edge of chevron zone)
+    local separator = chevronZone:CreateTexture(nil, "ARTWORK")
+    separator:SetWidth(1)
+    separator:SetPoint("TOPLEFT", chevronZone, "TOPLEFT", 0, 0)
+    separator:SetPoint("BOTTOMLEFT", chevronZone, "BOTTOMLEFT", 0, 0)
+    separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+
+    -- Line chevron (two angled lines forming a V pointing DOWN)
+    local chevronLeft = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronLeft:SetSize(7, 2)
+    chevronLeft:SetPoint("CENTER", chevronZone, "CENTER", -2, -1)
+    chevronLeft:SetRotation(math.rad(-45))
+
+    local chevronRight = chevronZone:CreateTexture(nil, "OVERLAY")
+    chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+    chevronRight:SetSize(7, 2)
+    chevronRight:SetPoint("CENTER", chevronZone, "CENTER", 2, -1)
+    chevronRight:SetRotation(math.rad(45))
+
+    dropdown.chevronLeft = chevronLeft
+    dropdown.chevronRight = chevronRight
+    dropdown.chevronZone = chevronZone
+    dropdown.separator = separator
+
+    -- Selected text, accounting for chevron zone
+    dropdown.selected = dropdown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    SetFont(dropdown.selected, 11, "", C.text)
+    dropdown.selected:SetPoint("LEFT", 8, 0)
+    dropdown.selected:SetPoint("RIGHT", chevronZone, "LEFT", -5, 0)
+    dropdown.selected:SetJustifyH("LEFT")
+
+    -- Hover effect
     dropdown:SetScript("OnEnter", function(self)
-        self:SetChromeHovered(true)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA_HOVER)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.5)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     dropdown:SetScript("OnLeave", function(self)
-        self:SetChromeHovered(false)
+        pcall(self.SetBackdropBorderColor, self, 0.35, 0.35, 0.35, 1)
+        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+        separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
+        chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
+        chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
     end)
 
-    -- Menu frame
-    local menuFrame = CreateDropdownMenuSurface(dropdown, {0.3, 0.3, 0.3, 1})
-    menuFrame:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -2)
-    menuFrame:SetPoint("TOPRIGHT", dropdown, "BOTTOMRIGHT", 0, -2)
+    -- Menu frame (parented to UIParent to avoid scroll frame clipping)
+    local menuFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    menuFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    menuFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
+    menuFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    menuFrame:SetFrameStrata("TOOLTIP")
+    menuFrame:SetClipsChildren(true)
     menuFrame:Hide()
 
-    -- Scroll frame for long option lists
-    local scrollFrame = CreateFrame("ScrollFrame", nil, menuFrame)
-    scrollFrame:SetPoint("TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
-    -- Scroll content (child frame)
-    local scrollContent = CreateFrame("Frame", nil, scrollFrame)
-    scrollContent:SetWidth(menuFrame:GetWidth() or 200)
-    scrollFrame:SetScrollChild(scrollContent)
+    -- Hide menu when dropdown becomes hidden (tab switch, panel close, etc.)
+    dropdown:HookScript("OnHide", function() menuFrame:Hide() end)
+
+    -- Scroll body with scrollbar
+    local scrollFrame, scrollContent, scrollBar, updateThumb = CreateDropdownScrollBody(menuFrame)
     menuFrame.scrollContent = scrollContent
-
-    ns.ApplyScrollWheel(scrollFrame)
-
-    -- Update scroll content width when menu opens
-    menuFrame:SetScript("OnShow", function(self)
-        scrollContent:SetWidth(self:GetWidth() - 2)
-    end)
 
     container.dropdown = dropdown
     container.menuFrame = menuFrame
@@ -3076,24 +3849,26 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
         if not skipOnChange and onChange then onChange(val) end
     end
 
+    local function UpdateScrollInset()
+        if scrollBar:IsShown() then
+            scrollFrame:SetPoint("BOTTOMRIGHT", -(DROPDOWN_SCROLLBAR_WIDTH + 2), 0)
+        else
+            scrollFrame:SetPoint("BOTTOMRIGHT", 0, 0)
+        end
+    end
+
     local function BuildMenu()
         -- Clear existing children from scroll content
-        local scrollContent = menuFrame.scrollContent
-        if scrollContent then
-            for _, child in ipairs({scrollContent:GetChildren()}) do child:Hide() end
-        end
+        for _, child in ipairs({scrollContent:GetChildren()}) do child:Hide() end
 
         local yOff = -4
         local itemHeight = 20
         local headerHeight = 18
-        local maxVisibleItems = 8
-        local numItems = #container.options
+        local maxVisibleItems = DROPDOWN_MAX_VISIBLE_ITEMS
 
         for i, opt in ipairs(container.options) do
             if opt.isHeader then
-                -- Non-clickable category header
-                local header = CreateFrame("Frame", nil, scrollContent or menuFrame)
-                -- Add top spacing before headers (except the first item)
+                local header = CreateFrame("Frame", nil, scrollContent)
                 if i > 1 then yOff = yOff - 4 end
                 header:SetHeight(headerHeight)
                 header:SetPoint("TOPLEFT", 4, yOff)
@@ -3104,16 +3879,20 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
                 headerText:SetPoint("LEFT", 4, 0)
                 yOff = yOff - headerHeight
             else
-                local btn = CreateMenuRowButton(scrollContent or menuFrame, opt.text, function()
-                    SetValue(opt.value)
-                    menuFrame:Hide()
-                end, {
-                    textInset = 4,
-                    hoverTextColor = {C_accent_r, C_accent_g, C_accent_b, C_accent_a},
-                })
+                local btn = CreateFrame("Button", nil, scrollContent)
                 btn:SetHeight(itemHeight)
                 btn:SetPoint("TOPLEFT", 4, yOff)
                 btn:SetPoint("TOPRIGHT", -4, yOff)
+                local btnText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                SetFont(btnText, 11, "", C.text)
+                btnText:SetText(opt.text)
+                btnText:SetPoint("LEFT", 4, 0)
+                btn:SetScript("OnClick", function()
+                    SetValue(opt.value)
+                    menuFrame:Hide()
+                end)
+                btn:SetScript("OnEnter", function() btnText:SetTextColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a) end)
+                btn:SetScript("OnLeave", function() btnText:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a) end)
                 yOff = yOff - itemHeight
             end
         end
@@ -3121,12 +3900,8 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
         local totalHeight = math.abs(yOff) + 4
         local maxHeight = (maxVisibleItems * itemHeight) + 8
 
-        -- Update scroll content height
-        if scrollContent then
-            scrollContent:SetHeight(totalHeight)
-        end
-
-        -- Set menu height (capped at maxHeight)
+        scrollContent:SetHeight(totalHeight)
+        scrollContent:SetWidth(dropdown:GetWidth() - 4)
         menuFrame:SetHeight(math.min(totalHeight, maxHeight))
     end
 
@@ -3135,8 +3910,39 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
             menuFrame:Hide()
         else
             BuildMenu()
+            PositionDropdownMenu(menuFrame, dropdown, menuFrame:GetHeight())
             menuFrame:Show()
+            C_Timer.After(0, function() updateThumb(); UpdateScrollInset() end)
         end
+    end)
+
+    -- Close menu when clicking elsewhere
+    local closeTimer = 0
+    menuFrame:HookScript("OnShow", function()
+        closeTimer = 0
+        menuFrame.__checkElapsed = 0
+        menuFrame:SetScript("OnUpdate", function(self, elapsed)
+            self.__checkElapsed = (self.__checkElapsed or 0) + elapsed
+            if self.__checkElapsed < 0.066 then return end
+            local deltaTime = self.__checkElapsed
+            self.__checkElapsed = 0
+
+            local isOverDropdown = dropdown:IsMouseOver()
+            local isOverMenu = self:IsMouseOver()
+            if not isOverDropdown and not isOverMenu then
+                closeTimer = closeTimer + deltaTime
+                if closeTimer > 0.15 then
+                    self:Hide()
+                end
+            else
+                closeTimer = 0
+            end
+        end)
+    end)
+
+    menuFrame:HookScript("OnHide", function()
+        menuFrame:SetScript("OnUpdate", nil)
+        closeTimer = 0
     end)
 
     local function SetOptions(newOptions)
@@ -3203,298 +4009,6 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
     return container
 end
 
-function GUI:CreateFormEditBox(parent, label, dbKey, dbTable, onChange, options, registryInfo)
-    options = options or {}
-    if parent._hasContent ~= nil then parent._hasContent = true end
-
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetHeight(options.rowHeight or FORM_ROW_HEIGHT)
-
-    local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    SetFont(text, options.labelSize or 12, "", C.text, container)
-    text:SetText(label or "Setting")
-    text:SetPoint("LEFT", 0, 0)
-
-    local field = CreateFieldSurface(container, "Frame", {0.08, 0.08, 0.08, 1}, {0.35, 0.35, 0.35, 1})
-    if UIKit and UIKit.SetHeightPx then
-        UIKit.SetHeightPx(field, options.fieldHeight or 24)
-    else
-        field:SetHeight(options.fieldHeight or 24)
-    end
-    field:SetPoint("LEFT", container, "LEFT", options.fieldLeft or 180, 0)
-    if options.width then
-        if UIKit and UIKit.SetWidthPx then
-            UIKit.SetWidthPx(field, options.width)
-        else
-            field:SetWidth(options.width)
-        end
-    else
-        field:SetPoint("RIGHT", container, "RIGHT", -(options.fieldRight or 0), 0)
-    end
-
-    local editBox = CreateFrame("EditBox", nil, field)
-    editBox:SetPoint("LEFT", PixelValue(options.textInset or 8, field), 0)
-    editBox:SetPoint("RIGHT", -PixelValue(options.textInset or 8, field), 0)
-    editBox:SetHeight(options.editHeight or 22)
-    editBox:SetAutoFocus(false)
-    editBox:SetJustifyH(options.justifyH or "LEFT")
-    editBox:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-    SetFont(editBox, options.fontSize or 11, options.fontFlags or "", C.text, field)
-
-    if options.maxLetters then editBox:SetMaxLetters(options.maxLetters) end
-    if options.numeric then editBox:SetNumeric(true) end
-
-    local function UpdateVisual(val)
-        local textVal = val == nil and "" or tostring(val)
-        if editBox:GetText() ~= textVal then
-            editBox:SetText(textVal)
-        end
-    end
-
-    local function GetCommittedValue()
-        local textVal = editBox:GetText()
-        if options.numeric then
-            if textVal == nil or textVal == "" then
-                return nil
-            end
-            return tonumber(textVal)
-        end
-        return textVal
-    end
-
-    local function GetValue()
-        if options.getValue then return options.getValue() end
-        if dbTable and dbKey then return dbTable[dbKey] end
-        return container.value
-    end
-
-    local function SetValue(val, skipCallback, skipBroadcast)
-        if options.setValue then
-            options.setValue(val)
-        elseif dbTable and dbKey then
-            dbTable[dbKey] = val
-        else
-            container.value = val
-        end
-
-        UpdateVisual(val)
-
-        if not skipBroadcast then
-            BroadcastToSiblings(container, val)
-        end
-
-        if not skipCallback and onChange then
-            onChange(val, editBox)
-        end
-    end
-
-    local function CommitValue(skipCallback)
-        SetValue(GetCommittedValue(), skipCallback)
-    end
-
-    local initialValue = options.value
-    if initialValue == nil then initialValue = GetValue() end
-    UpdateVisual(initialValue)
-
-    editBox:SetScript("OnEnterPressed", function(self)
-        if options.commitOnEnter ~= false then
-            CommitValue()
-        end
-        if options.onEnterPressed then
-            options.onEnterPressed(self)
-        end
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEscapePressed", function(self)
-        if options.onEscapePressed then
-            options.onEscapePressed(self)
-        else
-            UpdateVisual(GetValue())
-        end
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEditFocusGained", function(self)
-        field:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
-        if options.onEditFocusGained then
-            options.onEditFocusGained(self)
-        end
-    end)
-    editBox:SetScript("OnEditFocusLost", function(self)
-        field:SetFieldBorderColor(0.35, 0.35, 0.35, 1)
-        if options.commitOnFocusLost then
-            CommitValue()
-        end
-        if options.onEditFocusLost then
-            options.onEditFocusLost(self)
-        end
-    end)
-    editBox:SetScript("OnTextChanged", function(self, userInput)
-        if options.live and userInput then
-            CommitValue()
-        end
-        if options.onTextChanged then
-            options.onTextChanged(self, userInput)
-        end
-    end)
-
-    container.label = text
-    container.field = field
-    container.editBox = editBox
-    container.GetValue = GetValue
-    container.SetValue = SetValue
-    container.UpdateVisual = UpdateVisual
-    container.SetEnabled = function(self, enabled)
-        editBox:SetEnabled(enabled)
-        editBox:EnableMouse(enabled)
-        self:SetAlpha(enabled and 1 or 0.4)
-    end
-    container.isEnabled = true
-
-    RegisterWidgetInstance(container, dbTable, dbKey)
-
-    if GUI._searchContext.tabIndex and label and not GUI._suppressSearchRegistration then
-        local regKey = label .. "_" .. (GUI._searchContext.tabIndex or 0) .. "_" .. (GUI._searchContext.subTabIndex or 0) .. "_" .. (GUI._searchContext.sectionName or "")
-        if not GUI.SettingsRegistryKeys[regKey] then
-            GUI.SettingsRegistryKeys[regKey] = true
-            table.insert(GUI.SettingsRegistry, {
-                label = label,
-                widgetType = "input",
-                tabIndex = GUI._searchContext.tabIndex,
-                tabName = GUI._searchContext.tabName,
-                subTabIndex = GUI._searchContext.subTabIndex,
-                subTabName = GUI._searchContext.subTabName,
-                sectionName = GUI._searchContext.sectionName,
-                widgetBuilder = function(p)
-                    return GUI:CreateFormEditBox(p, label, dbKey, dbTable, onChange, options, registryInfo)
-                end,
-            })
-        end
-    end
-
-    return container
-end
-
-function GUI:CreateInlineEditBox(parent, options)
-    options = options or {}
-
-    local field = CreateFieldSurface(
-        parent,
-        "Frame",
-        options.bgColor or {0.08, 0.08, 0.08, 1},
-        options.borderColor or {0.35, 0.35, 0.35, 1}
-    )
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(field, options.width or 200, options.height or 24)
-    else
-        field:SetSize(options.width or 200, options.height or 24)
-    end
-
-    local editBox = CreateFrame("EditBox", nil, field)
-    editBox:SetPoint("LEFT", PixelValue(options.textInset or 8, field), 0)
-    editBox:SetPoint("RIGHT", -PixelValue(options.textInset or 8, field), 0)
-    editBox:SetHeight(options.editHeight or ((options.height or 24) - 2))
-    editBox:SetAutoFocus(false)
-    editBox:SetJustifyH(options.justifyH or "LEFT")
-    editBox:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-    SetFont(editBox, options.fontSize or 11, options.fontFlags or "", C.text, field)
-    editBox:SetText(options.text or "")
-    editBox:SetCursorPosition(0)
-    if options.maxLetters then editBox:SetMaxLetters(options.maxLetters) end
-    if options.numeric then editBox:SetNumeric(true) end
-
-    local function Commit()
-        if options.onCommit then
-            options.onCommit(editBox)
-        end
-    end
-
-    editBox:SetScript("OnEnterPressed", function(self)
-        Commit()
-        if options.onEnterPressed then options.onEnterPressed(self) end
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEscapePressed", function(self)
-        if options.onEscapePressed then
-            options.onEscapePressed(self)
-        end
-        self:ClearFocus()
-    end)
-    editBox:SetScript("OnEditFocusGained", function(self)
-        field:SetFieldBorderColor(unpack(options.activeBorderColor or C.accent))
-        if options.onEditFocusGained then options.onEditFocusGained(self) end
-    end)
-    editBox:SetScript("OnEditFocusLost", function(self)
-        field:SetFieldBorderColor(unpack(options.borderColor or {0.35, 0.35, 0.35, 1}))
-        if options.commitOnFocusLost ~= false then
-            Commit()
-        end
-        if options.onEditFocusLost then options.onEditFocusLost(self) end
-    end)
-    editBox:SetScript("OnTextChanged", function(self, userInput)
-        if options.live and userInput and options.onTextChanged then
-            options.onTextChanged(self, userInput)
-        elseif options.onTextChanged then
-            options.onTextChanged(self, userInput)
-        end
-    end)
-
-    field.editBox = editBox
-    return field, editBox
-end
-
-function GUI:CreateScrollableTextBox(parent, height, text, options)
-    options = options or {}
-
-    local container = CreateFieldSurface(parent, "Frame", options.bgColor or {0.1, 0.1, 0.1, 1}, options.borderColor or {0.3, 0.3, 0.3, 1})
-    container:SetHeight(height)
-
-    local scrollFrame = CreateFrame("ScrollFrame", nil, container, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", PixelValue(6, container), -PixelValue(6, container))
-    scrollFrame:SetPoint("BOTTOMRIGHT", -PixelValue(26, container), PixelValue(6, container))
-
-    local scrollBar = scrollFrame.ScrollBar or _G[scrollFrame:GetName().."ScrollBar"]
-    if scrollBar then
-        scrollBar:ClearAllPoints()
-        scrollBar:SetPoint("TOPRIGHT", container, "TOPRIGHT", -4, -18)
-        scrollBar:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -4, 18)
-
-        local thumb = scrollBar:GetThumbTexture()
-        if thumb then
-            ApplyTextureColor(thumb, 0.35, 0.45, 0.5, 0.8)
-        end
-
-        local scrollUp = scrollBar.ScrollUpButton or scrollBar.Back
-        local scrollDown = scrollBar.ScrollDownButton or scrollBar.Forward
-        if scrollUp then scrollUp:Hide(); scrollUp:SetAlpha(0) end
-        if scrollDown then scrollDown:Hide(); scrollDown:SetAlpha(0) end
-    end
-
-    local editBox = CreateFrame("EditBox", nil, scrollFrame)
-    editBox:SetMultiLine(true)
-    editBox:SetAutoFocus(false)
-    editBox:SetWidth(scrollFrame:GetWidth() or 400)
-    editBox:SetText(text or "")
-    editBox:SetCursorPosition(0)
-    editBox:SetTextColor(C.text[1], C.text[2], C.text[3], 1)
-    SetFont(editBox, options.fontSize or 11, options.fontFlags or "", C.text, container)
-    editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-    container:SetScript("OnSizeChanged", function(self)
-        editBox:SetWidth(self:GetWidth() - 36)
-    end)
-
-    scrollFrame:SetScrollChild(editBox)
-    ns.ApplyScrollWheel(scrollFrame)
-
-    container.editBox = editBox
-    container.scrollFrame = scrollFrame
-    container.SetText = function(_, newText)
-        editBox:SetText(newText or "")
-        editBox:SetCursorPosition(0)
-    end
-    return container
-end
-
 function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, options)
     options = options or {}
     local noAlpha = options.noAlpha or false
@@ -3510,8 +4024,16 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
     text:SetPoint("LEFT", 0, 0)
 
     -- Color swatch aligned with other widgets (starts at 180px from left)
-    local swatch = CreateColorSwatch(container, 50, 18)
+    local swatch = CreateFrame("Button", nil, container, "BackdropTemplate")
+    swatch:SetSize(50, 18)
     swatch:SetPoint("LEFT", container, "LEFT", 180, 0)
+    local px = QUICore:GetPixelSize(swatch)
+    swatch:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    swatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     container.swatch = swatch
     container.label = text
@@ -3526,7 +4048,7 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
 
     local function SetColor(r, g, b, a)
         local finalAlpha = noAlpha and 1 or (a or 1)
-        swatch:SetSwatchColor(r, g, b, finalAlpha)
+        swatch:SetBackdropColor(r, g, b, finalAlpha)
         if dbTable and dbKey then
             dbTable[dbKey] = {r, g, b, finalAlpha}
         end
@@ -3537,19 +4059,27 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
     container.SetColor = SetColor
 
     local r, g, b, a = GetColor()
-    swatch:SetSwatchColor(r, g, b, a)
+    swatch:SetBackdropColor(r, g, b, a)
 
     swatch:SetScript("OnClick", function()
         local currentR, currentG, currentB, currentA = GetColor()
-        ShowManagedColorPicker({
-            r = currentR,
-            g = currentG,
-            b = currentB,
-            a = currentA,
-            noAlpha = noAlpha,
-            onChange = SetColor,
+        local originalA = currentA
+        ColorPickerFrame:SetupColorPickerAndShow({
+            r = currentR, g = currentG, b = currentB, opacity = currentA,
+            hasOpacity = not noAlpha,
+            swatchFunc = function()
+                local r, g, b = ColorPickerFrame:GetColorRGB()
+                local a = noAlpha and 1 or ColorPickerFrame:GetColorAlpha()
+                SetColor(r, g, b, a)
+            end,
+            cancelFunc = function(prev)
+                SetColor(prev.r, prev.g, prev.b, noAlpha and 1 or originalA)
+            end,
         })
     end)
+
+    swatch:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a) end)
+    swatch:SetScript("OnLeave", function(self) pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1) end)
 
     -- Enable/disable (for conditional UI)
     container.SetEnabled = function(self, enabled)
@@ -3583,6 +4113,62 @@ end
 ---------------------------------------------------------------------------
 -- SEARCH FUNCTIONALITY
 ---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+-- Scrollable read-only text box (used by Welcome and Import tabs)
+---------------------------------------------------------------------------
+function GUI:CreateScrollableTextBox(parent, height, text, options)
+    options = options or {}
+    local bgColor = options.bgColor or {0.05, 0.07, 0.1, 0.9}
+    local borderColor = options.borderColor or C.border
+    local fontSize = options.fontSize or 11
+
+    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    container:SetHeight(height)
+
+    local px = QUICore.GetPixelSize and QUICore:GetPixelSize(container) or 1
+    container:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    container:SetBackdropColor(bgColor[1], bgColor[2], bgColor[3], bgColor[4] or 1)
+    container:SetBackdropBorderColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
+
+    -- ScrollFrame to hold the EditBox
+    local scrollFrame = CreateFrame("ScrollFrame", nil, container)
+    scrollFrame:SetPoint("TOPLEFT", 6, -4)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -6, 4)
+
+    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    editBox:SetMultiLine(true)
+    editBox:SetAutoFocus(false)
+    editBox:SetFont(GetFontPath(), fontSize, "")
+    editBox:SetTextColor(0.7, 0.75, 0.8, 1)
+    editBox:SetWidth(scrollFrame:GetWidth() or 400)
+    editBox:SetText(text or "")
+    editBox:SetCursorPosition(0)
+
+    scrollFrame:SetScrollChild(editBox)
+
+    -- Keep editBox width in sync with scrollFrame
+    scrollFrame:SetScript("OnSizeChanged", function(self, w)
+        editBox:SetWidth(w)
+    end)
+
+    -- Mouse wheel scrolling
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local maxScroll = math.max(0, editBox:GetHeight() - self:GetHeight())
+        local newScroll = math.min(maxScroll, math.max(0, current - delta * 20))
+        self:SetVerticalScroll(newScroll)
+    end)
+
+    container.editBox = editBox
+    container.scrollFrame = scrollFrame
+    return container
+end
+
 local SEARCH_DEBOUNCE = 0.15  -- 150ms debounce
 local SEARCH_MIN_CHARS = 2    -- Minimum characters before searching
 local SEARCH_MAX_RESULTS = 30 -- Cap results to prevent UI overload
@@ -3592,12 +4178,16 @@ GUI._searchTimer = nil
 
 -- Create the search box widget for the top bar
 function GUI:CreateSearchBox(parent)
-    local container = CreateFieldSurface(parent, "Frame", {0.08, 0.10, 0.14, 1}, {0.25, 0.28, 0.32, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(container, 160, 20)
-    else
-        container:SetSize(160, 20)
-    end
+    local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    container:SetSize(160, 20)
+    local px = QUICore:GetPixelSize(container)
+    container:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    container:SetBackdropColor(0.08, 0.10, 0.14, 1)
+    container:SetBackdropBorderColor(0.25, 0.28, 0.32, 1)
 
     -- Search icon (magnifying glass character)
     local icon = container:CreateFontString(nil, "OVERLAY")
@@ -3676,10 +4266,10 @@ function GUI:CreateSearchBox(parent)
 
     -- Focus effects
     editBox:SetScript("OnEditFocusGained", function()
-        container:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        container:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     editBox:SetScript("OnEditFocusLost", function()
-        container:SetFieldBorderColor(0.25, 0.28, 0.32, 1)
+        container:SetBackdropBorderColor(0.25, 0.28, 0.32, 1)
     end)
 
     -- ESC clears search
@@ -3897,9 +4487,17 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             local entry = navResult.data
 
             -- Create navigation row container
-            local navRow = CreateFieldSurface(content, "Button", {0.12, 0.14, 0.17, 0.8}, {0.2, 0.22, 0.25, 0.6})
+            local navRow = CreateFrame("Button", nil, content, "BackdropTemplate")
             navRow:SetSize(content:GetWidth() - (PADDING * 2), 26)
             navRow:SetPoint("TOPLEFT", PADDING, y)
+            local navPx = QUICore:GetPixelSize(navRow)
+            navRow:SetBackdrop({
+                bgFile = "Interface\\BUTTONS\\WHITE8X8",
+                edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+                edgeSize = navPx,
+            })
+            navRow:SetBackdropColor(0.12, 0.14, 0.17, 0.8)
+            navRow:SetBackdropBorderColor(0.2, 0.22, 0.25, 0.6)
 
             -- Type icon/badge
             local typeBadge = navRow:CreateFontString(nil, "OVERLAY")
@@ -3925,12 +4523,12 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
 
             -- Hover effects
             navRow:SetScript("OnEnter", function(self)
-                self:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
-                self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
+                self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
+                self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
             end)
             navRow:SetScript("OnLeave", function(self)
-                self:SetFieldBackgroundColor(0.12, 0.14, 0.17, 0.8)
-                self:SetFieldBorderColor(0.2, 0.22, 0.25, 0.6)
+                self:SetBackdropColor(0.12, 0.14, 0.17, 0.8)
+                self:SetBackdropBorderColor(0.2, 0.22, 0.25, 0.6)
             end)
 
             -- Click to navigate
@@ -4006,13 +4604,17 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
 
         -- "Go >" navigation button
         if groupData.tabIndex then
-            local goBtn = CreateFieldSurface(content, "Button", {C.accent[1], C.accent[2], C.accent[3], 0.15}, {C.accent[1], C.accent[2], C.accent[3], 0.5})
-            if UIKit and UIKit.SetSizePx then
-                UIKit.SetSizePx(goBtn, 36, 16)
-            else
-                goBtn:SetSize(36, 16)
-            end
+            local goBtn = CreateFrame("Button", nil, content, "BackdropTemplate")
+            goBtn:SetSize(36, 16)
             goBtn:SetPoint("LEFT", header, "RIGHT", 8, 0)
+            local goPx = QUICore:GetPixelSize(goBtn)
+            goBtn:SetBackdrop({
+                bgFile = "Interface\\BUTTONS\\WHITE8X8",
+                edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+                edgeSize = goPx,
+            })
+            goBtn:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
+            goBtn:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
 
             local btnText = goBtn:CreateFontString(nil, "OVERLAY")
             SetFont(btnText, 9, "", C.accent)
@@ -4020,12 +4622,12 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             btnText:SetPoint("CENTER", 0, 0)
 
             goBtn:SetScript("OnEnter", function(self)
-                self:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 0.3)
-                self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.8)
+                self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.3)
+                self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.8)
             end)
             goBtn:SetScript("OnLeave", function(self)
-                self:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
-                self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
+                self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
+                self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
             end)
 
             local targetTabIndex = groupData.tabIndex
@@ -4102,6 +4704,22 @@ function GUI:GetSidebarSubTabs(frame, tabIndex)
         return page._subTabDefs
     end
     return {}
+end
+
+function GUI:IsSidebarSubTabSectionsHidden(frame, tabIndex, subTabIndex)
+    if not frame or not tabIndex or not subTabIndex then return false end
+    return frame._sidebarHiddenSections
+        and frame._sidebarHiddenSections[tabIndex]
+        and frame._sidebarHiddenSections[tabIndex][subTabIndex]
+        and true or false
+end
+
+function GUI:SetSidebarSubTabSectionsHidden(frame, tabIndex, subTabIndex, hidden)
+    if not frame or not tabIndex or not subTabIndex then return end
+    frame._sidebarHiddenSections = frame._sidebarHiddenSections or {}
+    frame._sidebarHiddenSections[tabIndex] = frame._sidebarHiddenSections[tabIndex] or {}
+    frame._sidebarHiddenSections[tabIndex][subTabIndex] = hidden and true or nil
+    self:RefreshSidebarTree(frame)
 end
 
 function GUI:RelayoutSidebarBottomItems(frame)
@@ -4513,8 +5131,9 @@ function GUI:RefreshSidebarTree(frame)
                     subRow.activeBg:Hide()
                 end
 
-                local sectionNames = self:GetOrderedSections(tab.index, subDef.index)
-                local hasSections = #sectionNames > 0
+                local sectionsHidden = self:IsSidebarSubTabSectionsHidden(frame, tab.index, subDef.index)
+                local sectionNames = sectionsHidden and {} or self:GetOrderedSections(tab.index, subDef.index)
+                local hasSections = (not sectionsHidden) and (#sectionNames > 0)
                 if hasSections then
                     local isExpanded = expandedSubs[subDef.index] and true or false
                     if subRow._lastCaretExpanded ~= isExpanded then
@@ -4615,6 +5234,7 @@ function GUI:CreateMainFrame()
     -- from leaking into the current options tree.
     self.SectionRegistry = {}
     self.SectionRegistryOrder = {}
+    self.SectionNavigateHandlers = {}
     self:ClearSearchContext()
 
     -- Initialize accent colors from saved DB before creating any widgets
@@ -4636,7 +5256,7 @@ function GUI:CreateMainFrame()
     local savedWidth = QUI.QUICore and QUI.QUICore.db and QUI.QUICore.db.profile.configPanelWidth or FRAME_WIDTH
     if savedWidth < 750 then savedWidth = 750 end  -- Migration: clamp old narrow panels
 
-    local frame = CreateFrame("Frame", "QUI_Options", UIParent)
+    local frame = CreateFrame("Frame", "QUI_Options", UIParent, "BackdropTemplate")
     frame:SetSize(savedWidth, FRAME_HEIGHT)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
@@ -4645,11 +5265,11 @@ function GUI:CreateMainFrame()
     frame:SetClampedToScreen(true)
     frame:SetToplevel(true)
     frame:EnableMouse(true)
-    ApplyFieldSurface(frame, C.bg, C.border)
+    CreateBackdrop(frame, C.bg, C.border)
 
     -- Apply saved panel alpha
     local savedAlpha = QUI.QUICore and QUI.QUICore.db and QUI.QUICore.db.profile.configPanelAlpha or 0.97
-    frame:SetFieldBackgroundColor(C.bg[1], C.bg[2], C.bg[3], savedAlpha)
+    frame:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], savedAlpha)
 
     self.MainFrame = frame
 
@@ -4688,8 +5308,16 @@ function GUI:CreateMainFrame()
     local thumb
 
     -- Accent Color swatch (parented to titleBar so it receives clicks above the drag region)
-    local accentSwatch = CreateColorSwatch(titleBar, 14, 14, {C.accent[1], C.accent[2], C.accent[3], 1}, {0.4, 0.4, 0.4, 1})
+    local accentSwatch = CreateFrame("Button", nil, titleBar, "BackdropTemplate")
+    accentSwatch:SetSize(14, 14)
     accentSwatch:SetPoint("TOPLEFT", titleBar, "TOPLEFT", SIDEBAR_W + 14, -8)
+    accentSwatch:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    accentSwatch:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    accentSwatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     local accentLabel = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     SetFont(accentLabel, 10, "", C.textMuted)
@@ -4715,7 +5343,7 @@ function GUI:CreateMainFrame()
     -- Helper to apply accent color to header elements + theme + skinning
     local function ApplyAccentToAll(r, g, b)
         GUI:ApplyAccentColor(r, g, b)
-        accentSwatch:SetSwatchColor(r, g, b, 1)
+        accentSwatch:SetBackdropColor(r, g, b, 1)
         title:SetTextColor(C.accentLight[1], C.accentLight[2], C.accentLight[3], 1)
         version:SetTextColor(C.accentLight[1], C.accentLight[2], C.accentLight[3], 1)
         RefreshAllSkinning()
@@ -4726,13 +5354,16 @@ function GUI:CreateMainFrame()
     classToggle:SetSize(50, 14)
     classToggle:SetPoint("LEFT", accentLabel, "RIGHT", 8, 0)
 
-    local classBox = CreateFieldSurface(classToggle, "Frame", {0.1, 0.1, 0.1, 1}, {0.4, 0.4, 0.4, 1})
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(classBox, 12, 12)
-    else
-        classBox:SetSize(12, 12)
-    end
+    local classBox = CreateFrame("Frame", nil, classToggle, "BackdropTemplate")
+    classBox:SetSize(12, 12)
     classBox:SetPoint("LEFT", 0, 0)
+    classBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    classBox:SetBackdropColor(0.1, 0.1, 0.1, 1)
+    classBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
     local classCheck = classBox:CreateTexture(nil, "OVERLAY")
     classCheck:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
@@ -4798,10 +5429,17 @@ function GUI:CreateMainFrame()
     end)
 
     classToggle:SetScript("OnEnter", function()
-        classBox:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        classBox:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     classToggle:SetScript("OnLeave", function()
-        classBox:SetFieldBorderColor(0.4, 0.4, 0.4, 1)
+        classBox:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    end)
+
+    accentSwatch:SetScript("OnEnter", function(self)
+        pcall(self.SetBackdropBorderColor, self, C_accentLight_r, C_accentLight_g, C_accentLight_b, C_accentLight_a)
+    end)
+    accentSwatch:SetScript("OnLeave", function(self)
+        pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1)
     end)
 
     local pickerWatcher = CreateFrame("Frame")
@@ -4832,7 +5470,7 @@ function GUI:CreateMainFrame()
                 db.addonAccentColor = {r, g, b, 1}
                 -- Live-preview on header only (full rebuild happens on close)
                 GUI:ApplyAccentColor(r, g, b)
-                accentSwatch:SetSwatchColor(r, g, b, 1)
+                accentSwatch:SetBackdropColor(r, g, b, 1)
                 title:SetTextColor(C.accentLight[1], C.accentLight[2], C.accentLight[3], 1)
                 version:SetTextColor(C.accentLight[1], C.accentLight[2], C.accentLight[3], 1)
             end,
@@ -4854,19 +5492,24 @@ function GUI:CreateMainFrame()
     scaleLabel:SetText("Panel Scale:")
     scaleLabel:SetPoint("LEFT", scaleContainer, "LEFT", 0, 0)
 
-    local scaleEditField
-    scaleEditField, scaleEditBox = GUI:CreateInlineEditBox(scaleContainer, {
-        width = 38,
-        height = 16,
-        justifyH = "CENTER",
-        borderColor = {0.25, 0.25, 0.25, 1},
-        activeBorderColor = C.accent,
-        commitOnFocusLost = false,
+    local scaleEditBox = CreateFrame("EditBox", nil, scaleContainer, "BackdropTemplate")
+    scaleEditBox:SetSize(38, 16)
+    scaleEditBox:SetPoint("LEFT", scaleLabel, "RIGHT", 5, 0)
+    local px = QUICore:GetPixelSize(scaleEditBox)
+    scaleEditBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
     })
-    scaleEditField:SetPoint("LEFT", scaleLabel, "RIGHT", 5, 0)
+    scaleEditBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
+    scaleEditBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    scaleEditBox:SetFont(GetFontPath(), 10, "")
+    scaleEditBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    scaleEditBox:SetJustifyH("CENTER")
+    scaleEditBox:SetAutoFocus(false)
     scaleEditBox:SetMaxLetters(4)
 
-    local scaleSlider = CreateFrame("Slider", nil, scaleContainer)
+    local scaleSlider = CreateFrame("Slider", nil, scaleContainer, "BackdropTemplate")
     scaleSlider:SetSize(70, 12)
     scaleSlider:SetPoint("LEFT", scaleEditBox, "RIGHT", 5, 0)
     scaleSlider:SetOrientation("HORIZONTAL")
@@ -4874,13 +5517,8 @@ function GUI:CreateMainFrame()
     scaleSlider:SetValueStep(0.05)
     scaleSlider:SetObeyStepOnDrag(true)
     scaleSlider:EnableMouse(true)
-    scaleSlider.bg = scaleSlider:CreateTexture(nil, "BACKGROUND")
-    scaleSlider.bg:SetAllPoints()
-    scaleSlider.bg:SetTexture("Interface\\Buttons\\WHITE8x8")
-    scaleSlider.bg:SetVertexColor(0.22, 0.22, 0.22, 0.9)
-    if UIKit and UIKit.DisablePixelSnap then
-        UIKit.DisablePixelSnap(scaleSlider.bg)
-    end
+    scaleSlider:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
+    scaleSlider:SetBackdropColor(0.22, 0.22, 0.22, 0.9)
     thumb = scaleSlider:CreateTexture(nil, "OVERLAY")
     thumb:SetSize(8, 14)
     thumb:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
@@ -4940,8 +5578,12 @@ function GUI:CreateMainFrame()
         self:ClearFocus()
     end)
 
+    scaleEditBox:SetScript("OnEditFocusGained", function(self)
+        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+    end)
+
     scaleEditBox:SetScript("OnEditFocusLost", function(self)
-        scaleEditField:SetFieldBorderColor(0.25, 0.25, 0.25, 1)
+        pcall(self.SetBackdropBorderColor, self, 0.25, 0.25, 0.25, 1)
         local val = tonumber(self:GetText())
         if not val then
             self:SetText(string.format("%.2f", scaleSlider:GetValue()))
@@ -4949,13 +5591,16 @@ function GUI:CreateMainFrame()
     end)
 
     -- Close button [x]
-    local close = CreateFieldSurface(titleBar, "Button", {0.08, 0.08, 0.08, 0.6}, C.border)
-    if UIKit and UIKit.SetSizePx then
-        UIKit.SetSizePx(close, 22, 22)
-    else
-        close:SetSize(22, 22)
-    end
+    local close = CreateFrame("Button", nil, titleBar, "BackdropTemplate")
+    close:SetSize(22, 22)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -5)
+    close:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    close:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
+    close:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
 
     -- X drawn with two rotated lines
     local LINE_LEN, LINE_W = 10, 1.5
@@ -4973,14 +5618,14 @@ function GUI:CreateMainFrame()
 
     close:SetScript("OnClick", function() frame:Hide() end)
     close:SetScript("OnEnter", function(self)
-        self:SetFieldBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
-        self:SetFieldBackgroundColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
+        pcall(self.SetBackdropBorderColor, self, C.accent[1], C.accent[2], C.accent[3], 1)
+        self:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 0.15)
         xLine1:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
         xLine2:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     close:SetScript("OnLeave", function(self)
-        self:SetFieldBorderColor(C.border[1], C.border[2], C.border[3], 1)
-        self:SetFieldBackgroundColor(0.08, 0.08, 0.08, 0.6)
+        pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
+        self:SetBackdropColor(0.08, 0.08, 0.08, 0.6)
         xLine1:SetColorTexture(C.text[1], C.text[2], C.text[3], 0.8)
         xLine2:SetColorTexture(C.text[1], C.text[2], C.text[3], 0.8)
     end)
@@ -4995,7 +5640,7 @@ function GUI:CreateMainFrame()
     ---------------------------------------------------------------------------
     -- SIDEBAR (vertical tab list on the left)
     ---------------------------------------------------------------------------
-    local sidebar = CreateFrame("Frame", nil, frame)
+    local sidebar = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     sidebar:SetPoint("TOPLEFT", 10, -35)
     sidebar:SetPoint("BOTTOMLEFT", 10, 10)
     sidebar:SetWidth(SIDEBAR_W)
@@ -5068,7 +5713,7 @@ function GUI:CreateMainFrame()
     ---------------------------------------------------------------------------
     -- SUB-TAB BAR (sticky bar above scroll content, hidden by default)
     ---------------------------------------------------------------------------
-    local subTabBar = CreateFrame("Frame", nil, frame)
+    local subTabBar = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     subTabBar:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 5, 0)
     subTabBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -35)
     subTabBar:SetHeight(30)
@@ -5093,7 +5738,7 @@ function GUI:CreateMainFrame()
     ---------------------------------------------------------------------------
     -- CONTENT AREA (right of sidebar, below sub-tab bar when visible)
     ---------------------------------------------------------------------------
-    local contentArea = CreateFrame("Frame", nil, frame)
+    local contentArea = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     contentArea:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 5, 0)
     contentArea:SetPoint("BOTTOMRIGHT", -10, 10)
     contentArea:EnableMouse(false)
@@ -5627,7 +6272,7 @@ local ExportPopup = nil  -- Reusable popup frame
 function GUI:ShowExportPopup(title, exportString)
     -- Create popup frame if it doesn't exist
     if not ExportPopup then
-        local popup = CreateFrame("Frame", "QUI_ExportPopup", UIParent)
+        local popup = CreateFrame("Frame", "QUI_ExportPopup", UIParent, "BackdropTemplate")
         popup:SetSize(500, 220)
         popup:SetPoint("CENTER")
         popup:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -5637,7 +6282,7 @@ function GUI:ShowExportPopup(title, exportString)
         popup:RegisterForDrag("LeftButton")
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-        ApplyFieldSurface(popup, {0.08, 0.10, 0.14, 0.98}, {C.accent[1], C.accent[2], C.accent[3], 1})
+        CreateBackdrop(popup, {0.08, 0.10, 0.14, 0.98}, {C.accent[1], C.accent[2], C.accent[3], 1})
 
         -- Title
         popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -5651,9 +6296,10 @@ function GUI:ShowExportPopup(title, exportString)
         popup.hint:SetText("Select all (Ctrl+A) then copy (Ctrl+C)")
 
         -- Background for edit area
-        local editBg = CreateFieldSurface(popup, "Frame", {0.04, 0.05, 0.07, 1}, C.border)
+        local editBg = CreateFrame("Frame", nil, popup, "BackdropTemplate")
         editBg:SetPoint("TOPLEFT", 12, -55)
         editBg:SetPoint("BOTTOMRIGHT", -12, 45)
+        CreateBackdrop(editBg, {0.04, 0.05, 0.07, 1}, nil)
 
         -- Scroll frame for edit box
         local scrollFrame = CreateFrame("ScrollFrame", "QUI_ExportPopupScroll", editBg, "UIPanelScrollFrameTemplate")
@@ -5693,23 +6339,20 @@ function GUI:ShowExportPopup(title, exportString)
         closeBtn:SetPoint("BOTTOMRIGHT", -12, 10)
 
         -- X button in corner
-        local xBtn = CreateFieldSurface(popup, "Button", {0.12, 0.12, 0.12, 1}, C.border)
-        if UIKit and UIKit.SetSizePx then
-            UIKit.SetSizePx(xBtn, 22, 22)
-        else
-            xBtn:SetSize(22, 22)
-        end
+        local xBtn = CreateFrame("Button", nil, popup, "BackdropTemplate")
+        xBtn:SetSize(22, 22)
         xBtn:SetPoint("TOPRIGHT", -6, -6)
+        CreateBackdrop(xBtn, {0.12, 0.12, 0.12, 1}, nil)
         local xText = xBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         xText:SetPoint("CENTER", 0, 0)
         xText:SetText("x")
         xText:SetTextColor(0.6, 0.6, 0.6, 1)
         xBtn:SetScript("OnEnter", function(self)
-            self:SetFieldBorderColor(1, 0.3, 0.3, 1)
+            pcall(self.SetBackdropBorderColor, self, 1, 0.3, 0.3, 1)
             xText:SetTextColor(1, 0.3, 0.3, 1)
         end)
         xBtn:SetScript("OnLeave", function(self)
-            self:SetFieldBorderColor(C.border[1], C.border[2], C.border[3], 1)
+            pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
             xText:SetTextColor(0.6, 0.6, 0.6, 1)
         end)
         xBtn:SetScript("OnClick", function() popup:Hide() end)
@@ -5743,7 +6386,7 @@ local ImportPopup = nil  -- Reusable popup frame
 function GUI:ShowImportPopup(config)
     -- Create popup frame if it doesn't exist
     if not ImportPopup then
-        local popup = CreateFrame("Frame", "QUI_ImportPopup", UIParent)
+        local popup = CreateFrame("Frame", "QUI_ImportPopup", UIParent, "BackdropTemplate")
         popup:SetSize(500, 250)
         popup:SetPoint("CENTER")
         popup:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -5753,7 +6396,7 @@ function GUI:ShowImportPopup(config)
         popup:RegisterForDrag("LeftButton")
         popup:SetScript("OnDragStart", popup.StartMoving)
         popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-        ApplyFieldSurface(popup, {0.08, 0.10, 0.14, 0.98}, {C.accent[1], C.accent[2], C.accent[3], 1})
+        CreateBackdrop(popup, {0.08, 0.10, 0.14, 0.98}, {C.accent[1], C.accent[2], C.accent[3], 1})
 
         -- Title
         popup.title = popup:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -5766,9 +6409,10 @@ function GUI:ShowImportPopup(config)
         SetFont(popup.hint, 11, "", C.textMuted)
 
         -- Background for edit area
-        local editBg = CreateFieldSurface(popup, "Frame", {0.04, 0.05, 0.07, 1}, C.border)
+        local editBg = CreateFrame("Frame", nil, popup, "BackdropTemplate")
         editBg:SetPoint("TOPLEFT", 12, -55)
         editBg:SetPoint("BOTTOMRIGHT", -12, 50)
+        CreateBackdrop(editBg, {0.04, 0.05, 0.07, 1}, nil)
 
         -- Scroll frame for edit box
         local scrollFrame = CreateFrame("ScrollFrame", "QUI_ImportPopupScroll", editBg, "UIPanelScrollFrameTemplate")
@@ -5797,23 +6441,20 @@ function GUI:ShowImportPopup(config)
         popup.buttons = {}
 
         -- X button in corner
-        local xBtn = CreateFieldSurface(popup, "Button", {0.12, 0.12, 0.12, 1}, C.border)
-        if UIKit and UIKit.SetSizePx then
-            UIKit.SetSizePx(xBtn, 22, 22)
-        else
-            xBtn:SetSize(22, 22)
-        end
+        local xBtn = CreateFrame("Button", nil, popup, "BackdropTemplate")
+        xBtn:SetSize(22, 22)
         xBtn:SetPoint("TOPRIGHT", -6, -6)
+        CreateBackdrop(xBtn, {0.12, 0.12, 0.12, 1}, nil)
         local xText = xBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         xText:SetPoint("CENTER", 0, 0)
         xText:SetText("x")
         xText:SetTextColor(0.6, 0.6, 0.6, 1)
         xBtn:SetScript("OnEnter", function(self)
-            self:SetFieldBorderColor(1, 0.3, 0.3, 1)
+            pcall(self.SetBackdropBorderColor, self, 1, 0.3, 0.3, 1)
             xText:SetTextColor(1, 0.3, 0.3, 1)
         end)
         xBtn:SetScript("OnLeave", function(self)
-            self:SetFieldBorderColor(C.border[1], C.border[2], C.border[3], 1)
+            pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
             xText:SetTextColor(0.6, 0.6, 0.6, 1)
         end)
         xBtn:SetScript("OnClick", function() popup:Hide() end)

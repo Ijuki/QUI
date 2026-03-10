@@ -2457,10 +2457,14 @@ local function CreateDrawerToggleButton()
     drawerToggleButton:SetScript("OnEnter", function(self)
         CancelAutoHide()
         ShowToggleButton()
+        local s = GetSettings()
+        if s and s.buttonDrawer and s.buttonDrawer.openOnMouseover ~= false then
+            ShowDrawer()
+        end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("Addon Button Drawer")
+        GameTooltip:AddLine("|cffFFFFFFMouseover:|r Open drawer", 0.2, 1, 0.2)
         local total, hidden = 0, 0
-        local s = GetSettings()
         local hiddenButtons = (s and s.buttonDrawer and s.buttonDrawer.hiddenButtons) or {}
         for name in pairs(collectedButtons) do
             total = total + 1

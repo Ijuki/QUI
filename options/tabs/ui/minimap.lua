@@ -201,6 +201,13 @@ local function ShowPanelEditPopup(panelConfig, panelIndex)
     numSlotsSlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
     y = y - FORM_ROW
 
+    local lockCheck = GUI:CreateFormCheckbox(content, "Lock Position", "locked", panelConfig, function()
+        RefreshDatapanels()
+    end)
+    lockCheck:SetPoint("TOPLEFT", PAD, y)
+    lockCheck:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
+    y = y - FORM_ROW
+
     local bgOpacitySlider = GUI:CreateFormSlider(content, "Background Opacity", 0, 100, 5, "bgOpacity", panelConfig, RefreshDatapanels)
     bgOpacitySlider:SetPoint("TOPLEFT", PAD, y)
     bgOpacitySlider:SetPoint("RIGHT", content, "RIGHT", -PAD, 0)
@@ -645,6 +652,7 @@ local function BuildMinimapTab(tabContent)
                 bgOpacity = 98,
                 borderSize = 1,
                 borderColor = {0.2, 0.8, 0.6, 1},
+                openOnMouseover = true,
                 autoHideToggle = false,
                 hiddenButtons = {},
             }
@@ -655,6 +663,7 @@ local function BuildMinimapTab(tabContent)
         if mm.buttonDrawer.toggleOffsetY == nil then mm.buttonDrawer.toggleOffsetY = 0 end
         if mm.buttonDrawer.toggleSize == nil then mm.buttonDrawer.toggleSize = 20 end
         if not mm.buttonDrawer.toggleIcon then mm.buttonDrawer.toggleIcon = "hammer" end
+        if mm.buttonDrawer.openOnMouseover == nil then mm.buttonDrawer.openOnMouseover = true end
         if mm.buttonDrawer.autoHideToggle == nil then mm.buttonDrawer.autoHideToggle = false end
         if mm.buttonDrawer.hiddenButtons == nil then mm.buttonDrawer.hiddenButtons = {} end
         if mm.buttonDrawer.padding == nil then mm.buttonDrawer.padding = 6 end
@@ -670,6 +679,11 @@ local function BuildMinimapTab(tabContent)
         local drawerEnable = GUI:CreateFormCheckbox(tabContent, "Enable Button Drawer", "enabled", drawer, RefreshMinimap)
         drawerEnable:SetPoint("TOPLEFT", PAD, y)
         drawerEnable:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
+        y = y - FORM_ROW
+
+        local drawerHoverOpen = GUI:CreateFormCheckbox(tabContent, "Open Drawer on Mouseover", "openOnMouseover", drawer, RefreshMinimap)
+        drawerHoverOpen:SetPoint("TOPLEFT", PAD, y)
+        drawerHoverOpen:SetPoint("RIGHT", tabContent, "RIGHT", -PAD, 0)
         y = y - FORM_ROW
 
         -- Anchor dropdown
@@ -1586,6 +1600,10 @@ BuildDatatextTab = function(tabContent)
 
         if #panels > 0 then
             for i, panelConfig in ipairs(panels) do
+                if panelConfig.locked == nil then
+                    panelConfig.locked = false
+                end
+
                 local panelFrame = CreateFrame("Frame", nil, tabContent, "BackdropTemplate")
                 panelFrame:SetHeight(60)
                 panelFrame:SetPoint("TOPLEFT", PAD, y)
@@ -1600,16 +1618,14 @@ BuildDatatextTab = function(tabContent)
                 panelFrame:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
 
                 -- Panel name
-                local nameLabel = panelFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                local nameLabel = GUI:CreateLabel(panelFrame, "", 12, C.accentLight)
                 nameLabel:SetPoint("TOPLEFT", 10, -10)
                 nameLabel:SetText(string.format("Panel %d: %s", i, panelConfig.name or ("Panel " .. i)))
-                nameLabel:SetTextColor(C.accentLight[1], C.accentLight[2], C.accentLight[3], 1)
 
                 -- Status (simplified - just slot count)
-                local statusLabel = panelFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                local statusLabel = GUI:CreateLabel(panelFrame, "", 11, C.textMuted)
                 statusLabel:SetPoint("TOPLEFT", 10, -30)
                 statusLabel:SetText(string.format("%d slots", panelConfig.numSlots or 3))
-                statusLabel:SetTextColor(0.7, 0.7, 0.7, 1)
 
                 -- Edit button - opens configuration popup
                 local editBtn = GUI:CreateButton(panelFrame, "Edit", 60, 22, function()
@@ -1623,7 +1639,13 @@ BuildDatatextTab = function(tabContent)
                         QUICore.Datapanels:UpdatePanel(panelConfig.id)
                     end
                 end)
-                enableCheck:SetPoint("RIGHT", -80, 0)
+                enableCheck:SetPoint("LEFT", panelFrame, "LEFT", 120, 0)
+
+                -- Lock toggle
+                local lockCheck = GUI:CreateCheckbox(panelFrame, "Lock", "locked", panelConfig, function()
+                    RefreshDatapanels()
+                end)
+                lockCheck:SetPoint("LEFT", enableCheck, "RIGHT", 70, 0)
 
                 -- Delete button (with confirmation)
                 local delBtn = GUI:CreateButton(panelFrame, "Delete", 60, 22, function()

@@ -451,6 +451,7 @@ local defaults = {
             consumableIconSize = 40,              -- Icon size in pixels
             autoCombatLogRaid = false,  -- Auto start/stop combat logging in raids (opt-in)
             autoDeleteConfirm = true,  -- Auto-fill DELETE confirmation text
+            auctionHouseExpansionFilter = true,  -- Auto-enable current expansion filter in AH
             -- Popup & Toast Blocker (granular, all OFF by default)
             popupBlocker = {
                 enabled = false,
@@ -1345,6 +1346,13 @@ local defaults = {
             messageHistory = {
                 enabled = true,
                 maxHistory = 50,  -- Maximum number of messages to store
+            },
+            -- Sound on new message (SharedMedia compatible)
+            newMessageSound = {
+                enabled = false,
+                entries = {                -- Array of {channel, sound} - each channel can have its own sound
+                    { channel = "guild_officer", sound = "None" },
+                },
             },
         },
 
@@ -2435,7 +2443,9 @@ local defaults = {
             },
 
             -- Position
+            unifiedPosition = true,   -- true = party & raid share one position; false = separate movers
             position = { offsetX = -400, offsetY = 0 },
+            raidPosition = { offsetX = -400, offsetY = 0 },  -- only used when unifiedPosition = false
 
             -- Health bar
             health = {
@@ -2443,6 +2453,7 @@ local defaults = {
                 healthDisplayStyle = "percent",   -- percent, absolute, both, deficit
                 healthFontSize = 12,
                 healthAnchor = "RIGHT",
+                healthJustify = "RIGHT",
                 healthOffsetX = -4,
                 healthOffsetY = 0,
                 healthTextColor = { 1, 1, 1, 1 },
@@ -2454,6 +2465,8 @@ local defaults = {
                 powerBarHeight = 4,
                 powerBarUsePowerColor = true,
                 powerBarColor = { 0.2, 0.4, 0.8, 1 },
+                powerBarOnlyHealers = false,
+                powerBarOnlyTanks = false,
             },
 
             -- Name text
@@ -2461,6 +2474,7 @@ local defaults = {
                 showName = true,
                 nameFontSize = 12,
                 nameAnchor = "LEFT",
+                nameJustify = "LEFT",
                 nameOffsetX = 4,
                 nameOffsetY = 0,
                 maxNameLength = 10,
@@ -2474,22 +2488,30 @@ local defaults = {
 
             -- Indicators
             indicators = {
-                showRoleIcon = true, roleIconSize = 12, roleIconAnchor = "TOPLEFT",
-                showReadyCheck = true,
-                showResurrection = true,
-                showSummonPending = true,
-                showLeaderIcon = true,
-                showTargetMarker = true,
+                showRoleIcon = true, roleIconSize = 12, roleIconAnchor = "TOPLEFT", roleIconOffsetX = 2, roleIconOffsetY = -2,
+                showRoleTank = true, showRoleHealer = true, showRoleDPS = true,
+                showReadyCheck = true, readyCheckAnchor = "CENTER", readyCheckOffsetX = 0, readyCheckOffsetY = 0,
+                showResurrection = true, resurrectionAnchor = "CENTER", resurrectionOffsetX = 0, resurrectionOffsetY = 0,
+                showSummonPending = true, summonAnchor = "CENTER", summonOffsetX = 16, summonOffsetY = 0,
+                showLeaderIcon = true, leaderAnchor = "TOP", leaderOffsetX = 0, leaderOffsetY = 6,
+                showTargetMarker = true, targetMarkerAnchor = "TOPRIGHT", targetMarkerOffsetX = -2, targetMarkerOffsetY = -2,
                 showThreatBorder = true, threatColor = { 1, 0, 0, 0.8 }, threatFillOpacity = 0.15,
-                showPhaseIcon = true,
+                showPhaseIcon = true, phaseAnchor = "BOTTOMLEFT", phaseOffsetX = 2, phaseOffsetY = 2,
             },
 
             -- Healer features
             healer = {
-                dispelOverlay = { enabled = true, opacity = 0.8, fillOpacity = 0.18, color = { 0.26, 0.54, 1, 0.8 } },
+                dispelOverlay = {
+                    enabled = true, opacity = 0.8, fillOpacity = 0.18, borderSize = 3,
+                    colors = {
+                        Magic   = { 0.2, 0.6, 1.0, 1 },
+                        Curse   = { 0.6, 0.0, 1.0, 1 },
+                        Disease = { 0.6, 0.4, 0.0, 1 },
+                        Poison  = { 0.0, 0.6, 0.0, 1 },
+                    },
+                },
                 targetHighlight = { enabled = true, color = { 1, 1, 1, 0.6 }, fillOpacity = 0.12 },
-                myBuffIndicator = { enabled = false, color = { 0.2, 0.8, 0.2, 0.5 } },
-                defensiveIndicator = { enabled = false, iconSize = 16, position = "CENTER", offsetX = 0, offsetY = 0 },
+                defensiveIndicator = { enabled = false, iconSize = 16, maxIcons = 3, spacing = 2, growDirection = "RIGHT", position = "CENTER", offsetX = 0, offsetY = 0 },
             },
 
             -- Class power pips
@@ -2508,6 +2530,26 @@ local defaults = {
                 buffSpacing = 2, buffOffsetX = 2, buffOffsetY = 16,
                 showDurationColor = true,
                 showExpiringPulse = true,
+                -- Aura filtering
+                filterMode = "off",           -- "off" | "classification" | "whitelist" | "blacklist"
+                buffFilterOnlyMine = false,   -- only show player-cast buffs
+                buffHidePermanent = false,    -- hide permanent (duration 0) buffs
+                buffDeduplicateDefensives = true, -- hide buffs already shown as defensives/indicators
+                buffClassifications = {
+                    raid = false,
+                    cancelable = false,
+                    important = false,
+                },
+                debuffClassifications = {
+                    raid = true,
+                    crowdControl = true,
+                    important = true,
+                },
+                -- Spell-based whitelist/blacklist: { [spellID] = true }
+                buffWhitelist = {},
+                buffBlacklist = {},
+                debuffWhitelist = {},
+                debuffBlacklist = {},
             },
 
             -- Private auras (boss debuffs displayed by Blizzard)
@@ -2524,11 +2566,17 @@ local defaults = {
                 showCountdownNumbers = true,
             },
 
-            -- Custom aura indicators (per-spec)
+            -- Aura indicators (icon row, same pattern as buffs/debuffs)
             auraIndicators = {
                 enabled = false,
-                usePresets = true,    -- auto-load built-in presets for current spec
-                specs = {},           -- populated per-spec by user or presets
+                iconSize = 14,
+                anchor = "TOPLEFT",
+                anchorOffsetX = 0,
+                anchorOffsetY = 0,
+                growDirection = "RIGHT",
+                spacing = 2,
+                maxIndicators = 5,
+                trackedSpells = {},   -- [spellID] = true/false, toggled via Designer
             },
 
             -- Spotlight (pin specific members to a separate group)
@@ -3193,6 +3241,7 @@ local defaults = {
                 offsetY = 0,            -- Vertical offset from anchor position
                 toggleOffsetX = 0,      -- Horizontal offset for the toggle button
                 toggleOffsetY = 0,      -- Vertical offset for the toggle button
+                openOnMouseover = true, -- Open drawer when hovering the toggle button
                 autoHideToggle = false, -- Auto-hide the toggle button (show on minimap hover)
                 hiddenButtons = {},     -- Table of button names hidden from the drawer (e.g., { ["LibDBIcon10_Details"] = true })
                 autoHideDelay = 1.5,    -- Seconds after mouse leave before hiding (0 = no auto-hide)
@@ -4254,7 +4303,9 @@ function QUICore:NudgeSelectedElement(deltaX, deltaY)
     elseif sel.selectedType == "groupframes" then
         local gfem = ns.QUI_GroupFrameEditMode
         if gfem then
-            gfem:NudgeHeader("party", dx, dy)
+            -- Route to the correct mover based on which was selected
+            local nudgeKey = sel.selectedKey or "party"
+            gfem:NudgeHeader(nudgeKey, dx, dy)
             return true
         end
     end
