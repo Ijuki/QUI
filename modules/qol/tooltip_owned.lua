@@ -2243,6 +2243,193 @@ function OwnedEngine:Initialize()
         mainTip:SetMouseMotionEnabled(false)
     end
     mainTip:SetHyperlinksEnabled(true)
+
+    -------------------------------------------------------------------
+    -- ADDON TOOLTIP REDIRECTS
+    -- Some addons create their own GameTooltip-template frames and
+    -- shadow the local `GameTooltip` variable, bypassing the real
+    -- GameTooltip entirely. We override their mixin methods to
+    -- redirect tooltip calls to the real GameTooltip, which our
+    -- owned engine already handles.
+    -------------------------------------------------------------------
+    local GT = _G.GameTooltip
+
+    -- Redirect addon-created map pin tooltip mixins to the real
+    -- GameTooltip so our owned engine catches them normally.
+    C_Timer.After(1, function()
+        -- Area POI pin mixin: simple tooltips (title + description + item)
+        if WQL_AreaPOIPinMixin then
+            WQL_AreaPOIPinMixin.TryShowTooltip = function(self)
+                GT:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+                GameTooltip_SetTitle(GT, self.name, HIGHLIGHT_FONT_COLOR)
+                if self.description then
+                    GameTooltip_AddNormalLine(GT, self.description)
+                end
+                if type(self.itemID) == "number" then
+                    EmbeddedItemTooltip_SetItemByID(GT.ItemTooltip, self.itemID)
+                elseif type(self.itemID) == "table" then
+                    EmbeddedItemTooltip_SetItemByID(GT.ItemTooltip, self.itemID[1])
+                end
+                GT:Show()
+                return true
+            end
+
+            WQL_AreaPOIPinMixin.OnMouseLeave = function(self)
+                self:GetMap():TriggerEvent("ClearAreaLabel", MAP_AREA_LABEL_TYPE.POI)
+                GT:Hide()
+            end
+        end
+
+        -- World quest pin mixin: complex tooltips (quest info + objectives + rewards)
+        if WQL_WorldQuestPinMixin then
+            local function QUI_TaskPOI_OnEnter(self)
+                GT:SetOwner(self, "ANCHOR_RIGHT")
+
+                if not HaveQuestData(self.questID) then
+                    GameTooltip_SetTitle(GT, RETRIEVING_DATA, RED_FONT_COLOR)
+                    GameTooltip_SetTooltipWaitingForData(GT, true)
+                    GT:Show()
+                    return
+                end
+
+                if C_QuestLog.IsQuestCalling(self.questID) then
+                    -- Let Blizzard's calling quest handler populate
+                    if CallingPOI_OnEnter then
+                        CallingPOI_OnEnter(self)
+                    end
+                    return
+                end
+
+                -- Populate quest info on the real GameTooltip
+                local questID = self.questID
+                local widgetSetAdded = false
+                local widgetSetID = C_TaskQuest.GetQuestUIWidgetSetByType and
+                    C_TaskQuest.GetQuestUIWidgetSetByType(questID, Enum.MapIconUIWidgetSetType.Tooltip)
+                local isThreat = C_QuestLog.IsThreatQuest(questID)
+
+                local title, factionID, capped = C_TaskQuest.GetQuestInfoByQuestID(questID)
+                title = title or self.questName
+
+                if self.worldQuest or C_QuestLog.IsWorldQuest(questID) then
+                    self.worldQuest = true
+                    local tagInfo = C_QuestLog.GetQuestTagInfo(questID)
+                    local quality = tagInfo and tagInfo.quality or Enum.WorldQuestQuality.Common
+                    local colorData = ColorManager and ColorManager.GetColorDataForWorldQuestQuality and
+                        ColorManager.GetColorDataForWorldQuestQuality(quality)
+                    if colorData then
+                        GameTooltip_SetTitle(GT, title, colorData.color)
+                    else
+                        GameTooltip_SetTitle(GT, title)
+                    end
+
+                    if C_QuestLog.IsAccountQuest and C_QuestLog.IsAccountQuest(questID) then
+                        GameTooltip_AddColoredLine(GT, ACCOUNT_QUEST_LABEL, ACCOUNT_WIDE_FONT_COLOR)
+                    end
+
+                    QuestUtils_AddQuestTypeToTooltip(GT, questID, NORMAL_FONT_COLOR)
+
+                    local factionData = factionID and C_Reputation.GetFactionDataByID(factionID)
+                    if factionData then
+                        local awardsRep = C_QuestLog.DoesQuestAwardReputationWithFaction(questID, factionID)
+                        local yieldsRewards = (not capped) or C_Reputation.IsFactionParagonForCurrentPlayer(factionID)
+                        if awardsRep and yieldsRewards then
+                            GT:AddLine(factionData.name)
+                        else
+                            GT:AddLine(factionData.name, GRAY_FONT_COLOR:GetRGB())
+                        end
+                    end
+
+                    GameTooltip_AddQuestTimeToTooltip(GT, questID)
+                elseif isThreat then
+                    GameTooltip_SetTitle(GT, title)
+                    GameTooltip_AddQuestTimeToTooltip(GT, questID)
+                else
+                    GameTooltip_SetTitle(GT, title, NORMAL_FONT_COLOR)
+                end
+
+                if self.isCombatAllyQuest or (C_QuestLog.GetQuestType and C_QuestLog.GetQuestType(questID) == Enum.QuestTag.CombatAlly) then
+                    GameTooltip_AddColoredLine(GT, AVAILABLE_FOLLOWER_QUEST, HIGHLIGHT_FONT_COLOR, true)
+                    GameTooltip_AddColoredLine(GT, GRANTS_FOLLOWER_XP, GREEN_FONT_COLOR, true)
+                elseif self.isQuestStart then
+                    GameTooltip_AddColoredLine(GT, AVAILABLE_QUEST, HIGHLIGHT_FONT_COLOR, true)
+                    if AddFloorLocationLine then
+                        AddFloorLocationLine(GT, self.floorLocation, QUESTLINE_LOCATED_ABOVE, QUESTLINE_LOCATED_BELOW)
+                    end
+                else
+                    local questCompleted = C_QuestLog.IsComplete(questID)
+                    if questCompleted and self.shouldShowObjectivesAsStatusBar then
+                        GameTooltip_AddColoredLine(GT, QUEST_DASH .. QUEST_WATCH_QUEST_READY, HIGHLIGHT_FONT_COLOR)
+                    elseif not questCompleted and self.shouldShowObjectivesAsStatusBar then
+                        local questLogIndex = C_QuestLog.GetLogIndexForQuestID(questID)
+                        if questLogIndex then
+                            local _, questDescription = GetQuestLogQuestText(questLogIndex)
+                            if questDescription then
+                                GameTooltip_AddColoredLine(GT, QUEST_DASH .. questDescription, HIGHLIGHT_FONT_COLOR)
+                            end
+                        end
+                    end
+
+                    local numObjectives = self.numbObjectives or C_QuestLog.GetNumQuestObjectives(questID)
+                    for objectiveIndex = 1, numObjectives do
+                        local objectiveText, objectiveType, finished, numFulfilled, numRequired = GetQuestObjectiveInfo(questID, objectiveIndex, false)
+                        local showObjective = not (finished and isThreat)
+                        if showObjective then
+                            if self.shouldShowObjectivesAsStatusBar then
+                                local percent = math.floor((numFulfilled / numRequired) * 100)
+                                GameTooltip_ShowProgressBar(GT, 0, numRequired, numFulfilled, PERCENTAGE_STRING:format(percent))
+                            elseif objectiveText and #objectiveText > 0 then
+                                local color = finished and GRAY_FONT_COLOR or HIGHLIGHT_FONT_COLOR
+                                GT:AddLine(QUEST_DASH .. objectiveText, color.r, color.g, color.b, true)
+                            end
+                        end
+                    end
+
+                    local objectiveText, objectiveType, finished, numFulfilled, numRequired = GetQuestObjectiveInfo(questID, 1, false)
+                    if objectiveType == "progressbar" then
+                        local percent = C_TaskQuest.GetQuestProgressBarInfo(questID)
+                        local showObjective = not (finished and isThreat)
+                        if percent and showObjective then
+                            GameTooltip_ShowProgressBar(GT, 0, 100, percent, PERCENTAGE_STRING:format(percent))
+                        end
+                    end
+
+                    if widgetSetID then
+                        widgetSetAdded = true
+                        GameTooltip_AddWidgetSet(GT, widgetSetID)
+                    end
+
+                    GameTooltip_AddQuestRewardsToTooltip(GT, questID, self.questRewardTooltipStyle or TOOLTIP_QUEST_REWARDS_STYLE_DEFAULT)
+                end
+
+                if not widgetSetAdded and widgetSetID then
+                    GameTooltip_AddWidgetSet(GT, widgetSetID)
+                end
+
+                GT:Show()
+                EventRegistry:TriggerEvent("TaskPOI.TooltipShown", self, questID, self)
+            end
+
+            WQL_WorldQuestPinMixin.OnMouseEnter = function(self)
+                QUI_TaskPOI_OnEnter(self)
+                if POIButtonMixin and POIButtonMixin.OnEnter then
+                    POIButtonMixin.OnEnter(self)
+                end
+                if self.OnLegendPinMouseEnter then
+                    self:OnLegendPinMouseEnter()
+                end
+            end
+
+            WQL_WorldQuestPinMixin.OnMouseLeave = function(self)
+                GT:Hide()
+                if POIButtonMixin and POIButtonMixin.OnLeave then
+                    POIButtonMixin.OnLeave(self)
+                end
+                if self.OnLegendPinMouseLeave then
+                    self:OnLegendPinMouseLeave()
+                end
+            end
+        end
+    end)
 end
 
 function OwnedEngine:Refresh()
