@@ -140,8 +140,9 @@ function GUI:InitializeOptions()
         end
     end)
 
-    -- Mark that all tabs have been added (for search indexing)
+    -- Mark that all tabs have been added and start background index build
     GUI._allTabsAdded = true
+    GUI:StartBackgroundIndexBuild()
 
     return frame
 end

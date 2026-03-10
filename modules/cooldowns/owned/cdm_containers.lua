@@ -859,6 +859,10 @@ local function RefreshAll()
         if _G.QUI_RefreshCustomGlows then
             _G.QUI_RefreshCustomGlows()
         end
+        -- Sync range poll OnUpdate based on current settings
+        if ns.CDMIcons and ns.CDMIcons.SyncRangePoll then
+            ns.CDMIcons:SyncRangePoll()
+        end
     end)
 end
 

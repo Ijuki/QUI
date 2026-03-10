@@ -510,33 +510,33 @@ end
 
 -- Flag to track if search index has been built
 GUI._searchIndexBuilt = false
+GUI._searchIndexProgress = 0   -- Number of tabs indexed so far
+GUI._searchIndexTotal = 0      -- Total tabs to index
+GUI._searchIndexTicker = nil   -- Background ticker reference
 
--- Force-load all tabs to populate search registry
-function GUI:ForceLoadAllTabs()
+-- Build a single tab's search index (creates hidden frame, runs builder).
+-- Returns true if a tab was built, false if nothing left to build.
+function GUI:BuildNextTabIndex()
     local frame = self.MainFrame
-    if not frame or not frame.pages then return end
+    if not frame or not frame.pages then return false end
 
-    -- Initialize registry if needed (don't clear - keep registrations from already-visited tabs)
-    if not self.SettingsRegistry then
-        self.SettingsRegistry = {}
-    end
-    if not self.SettingsRegistryKeys then
-        self.SettingsRegistryKeys = {}
-    end
+    -- Initialize registry if needed
+    if not self.SettingsRegistry then self.SettingsRegistry = {} end
+    if not self.SettingsRegistryKeys then self.SettingsRegistryKeys = {} end
 
-    -- Build each tab that hasn't been built yet
+    -- Find the next unbuilt tab
     for tabIndex, page in pairs(frame.pages) do
-        if tabIndex ~= self._searchTabIndex then  -- Skip Search tab itself
+        if tabIndex ~= self._searchTabIndex then
             if page and page.createFunc and not page.built then
                 -- Create hidden frame if needed
                 if not page.frame then
                     page.frame = CreateFrame("Frame", nil, frame.contentArea)
                     page.frame:SetAllPoints()
-                    page.frame:EnableMouse(false)  -- Container frame - let children handle clicks
+                    page.frame:EnableMouse(false)
                 end
-                page.frame:Hide()  -- Keep hidden during build
+                page.frame:Hide()
 
-                -- Run the builder to register widgets (only once)
+                -- Run the builder to register widgets
                 local loadTab = frame.tabs[tabIndex]
                 if loadTab and loadTab.name then
                     self:SetSearchContext({
@@ -545,7 +545,7 @@ function GUI:ForceLoadAllTabs()
                     })
                 end
                 page.createFunc(page.frame)
-                page.built = true  -- Prevent duplicate widget creation
+                page.built = true
 
                 -- Capture sub-tab group created during page build
                 if GUI._lastSubTabGroup then
@@ -553,9 +553,81 @@ function GUI:ForceLoadAllTabs()
                     page._subTabDefs = page._subTabGroup.subTabDefs
                     GUI._lastSubTabGroup = nil
                 end
+
+                self._searchIndexProgress = self._searchIndexProgress + 1
+                return true  -- Built one tab this tick
             end
         end
     end
+
+    return false  -- Nothing left to build
+end
+
+-- Start background incremental index building (1 tab per tick).
+-- Called once after all tabs have been added to the options panel.
+function GUI:StartBackgroundIndexBuild()
+    if self._searchIndexBuilt then return end
+    if self._searchIndexTicker then return end  -- Already running
+
+    local frame = self.MainFrame
+    if not frame or not frame.pages then return end
+
+    -- Count total tabs that need building
+    local total = 0
+    for tabIndex, page in pairs(frame.pages) do
+        if tabIndex ~= self._searchTabIndex and page and page.createFunc and not page.built then
+            total = total + 1
+        end
+    end
+    self._searchIndexTotal = total
+    self._searchIndexProgress = 0
+
+    if total == 0 then
+        self._searchIndexBuilt = true
+        return
+    end
+
+    -- Build one tab per tick using chained C_Timer.NewTimer(0) so each
+    -- handle is cancellable and only one tab builds per frame.
+    local function BuildNextTick()
+        -- Abort if panel was destroyed/rebuilt
+        if not self.MainFrame or self.MainFrame ~= frame then
+            self._searchIndexTicker = nil
+            return
+        end
+
+        local built = self:BuildNextTabIndex()
+        if built then
+            -- Schedule next tab for next frame
+            self._searchIndexTicker = C_Timer.NewTimer(0, BuildNextTick)
+        else
+            -- All done
+            self._searchIndexBuilt = true
+            self._searchIndexTicker = nil
+        end
+    end
+
+    -- Start after a short delay so login/reload UI work completes first
+    self._searchIndexTicker = C_Timer.NewTimer(0.5, BuildNextTick)
+end
+
+-- Force-complete any remaining unbuilt tabs synchronously.
+-- Only called as a fallback if user opens Search before background build finishes.
+function GUI:ForceLoadAllTabs()
+    -- Cancel background builder if running
+    if self._searchIndexTicker then
+        self._searchIndexTicker:Cancel()
+        self._searchIndexTicker = nil
+    end
+
+    local frame = self.MainFrame
+    if not frame or not frame.pages then return end
+    if not self.SettingsRegistry then self.SettingsRegistry = {} end
+    if not self.SettingsRegistryKeys then self.SettingsRegistryKeys = {} end
+
+    while self:BuildNextTabIndex() do end  -- Build all remaining
+
+    self._searchIndexBuilt = true
 end
 
 ---------------------------------------------------------------------------
@@ -4437,6 +4509,11 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
     -- Check if we have any results at all (either settings or navigation)
     local hasResults = (results and #results > 0) or (navResults and #navResults > 0)
 
+    -- Index progress info
+    local isIndexing = not GUI._searchIndexBuilt and GUI._searchIndexTotal > 0
+    local indexProgress = GUI._searchIndexProgress or 0
+    local indexTotal = GUI._searchIndexTotal or 0
+
     -- No results message
     if not hasResults then
         if searchTerm and searchTerm ~= "" then
@@ -4447,12 +4524,21 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             table.insert(content._fontStrings, noResults)
             y = y - 30
 
-            local tip = content:CreateFontString(nil, "OVERLAY")
-            SetFont(tip, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
-            tip:SetText("Try different keywords, or visit other tabs first to index their settings")
-            tip:SetPoint("TOPLEFT", PADDING, y)
-            table.insert(content._fontStrings, tip)
-            y = y - 30
+            if isIndexing then
+                local tip = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.8})
+                tip:SetText("Indexing settings... (" .. indexProgress .. "/" .. indexTotal .. " tabs) — more results may appear shortly")
+                tip:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip)
+                y = y - 30
+            else
+                local tip = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
+                tip:SetText("Try different keywords")
+                tip:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip)
+                y = y - 30
+            end
         else
             -- Empty state - show instructions
             local instructions = content:CreateFontString(nil, "OVERLAY")
@@ -4462,11 +4548,19 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             table.insert(content._fontStrings, instructions)
             y = y - 30
 
-            local tip2 = content:CreateFontString(nil, "OVERLAY")
-            SetFont(tip2, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
-            tip2:SetText("Settings are indexed when you visit each tab")
-            tip2:SetPoint("TOPLEFT", PADDING, y)
-            table.insert(content._fontStrings, tip2)
+            if isIndexing then
+                local tip2 = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip2, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.8})
+                tip2:SetText("Indexing settings... (" .. indexProgress .. "/" .. indexTotal .. " tabs)")
+                tip2:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip2)
+            else
+                local tip2 = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip2, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
+                tip2:SetText("All settings indexed and ready to search")
+                tip2:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip2)
+            end
             y = y - 20
         end
 
@@ -4676,6 +4770,17 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
 
     -- Re-enable auto-registration (guaranteed even if widget builder errored)
     GUI._suppressSearchRegistration = false
+
+    -- Show indexing progress note at the bottom if still building
+    if isIndexing then
+        y = y - 10
+        local progressNote = content:CreateFontString(nil, "OVERLAY")
+        SetFont(progressNote, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.7})
+        progressNote:SetText("Indexing... (" .. indexProgress .. "/" .. indexTotal .. " tabs) — more results may appear")
+        progressNote:SetPoint("TOPLEFT", PADDING, y)
+        table.insert(content._fontStrings, progressNote)
+        y = y - 20
+    end
 
     content:SetHeight(math.abs(y) + 20)
 end
@@ -6039,10 +6144,9 @@ function GUI:SelectTab(frame, index)
         return
     end
 
-    -- Force-load all tabs when Search tab is selected
+    -- Start background index build if not done yet (non-blocking)
     if index == self._searchTabIndex and self._allTabsAdded and not self._searchIndexBuilt then
-        self:ForceLoadAllTabs()
-        self._searchIndexBuilt = true
+        self:StartBackgroundIndexBuild()
     end
 
     -- Auto-focus search input when navigating to Search tab
