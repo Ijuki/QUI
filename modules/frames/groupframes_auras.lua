@@ -129,16 +129,19 @@ local function GetDurationColor(remaining, duration)
 end
 
 local timerElapsed = 0
-sharedTimerFrame:SetScript("OnUpdate", function(self, dt)
+local cachedShowDurationColor = true
+
+local function SharedTimerOnUpdate(self, dt)
     timerElapsed = timerElapsed + dt
     if timerElapsed < TIMER_INTERVAL then return end
     timerElapsed = 0
 
     local now = GetTime()
     local db = GetDB()
-    local showDurationColor = db and db.auras and db.auras.showDurationColor ~= false
+    local hasAny = false
 
     for icon, state in pairs(timerIcons) do
+        hasAny = true
         if icon:IsShown() and state.expirationTime then
             local expTime = SafeToNumber(state.expirationTime, 0)
             local dur = SafeToNumber(state.duration, 0)
@@ -147,6 +150,10 @@ sharedTimerFrame:SetScript("OnUpdate", function(self, dt)
             if remaining > 0 then
                 if icon.durationText then
                     icon.durationText:SetText(FormatDuration(remaining))
+                    -- Determine context from icon's parent unit frame
+                    local isRaid = icon.unitFrame and icon.unitFrame._isRaid
+                    local vdb = db and (isRaid and db.raid or db.party) or db
+                    local showDurationColor = vdb and vdb.auras and vdb.auras.showDurationColor ~= false
                     if showDurationColor then
                         local r, g, b = GetDurationColor(remaining, dur)
                         icon.durationText:SetTextColor(r, g, b, 1)
@@ -163,10 +170,23 @@ sharedTimerFrame:SetScript("OnUpdate", function(self, dt)
             timerIcons[icon] = nil
         end
     end
-end)
+
+    -- Auto-disable when no icons remain
+    if not hasAny then
+        self:SetScript("OnUpdate", nil)
+    end
+end
+
+-- Start disabled — no icons at init
+sharedTimerFrame:SetScript("OnUpdate", nil)
 
 local function RegisterIconTimer(icon, state)
+    local wasEmpty = next(timerIcons) == nil
     timerIcons[icon] = state
+    if wasEmpty then
+        timerElapsed = 0
+        sharedTimerFrame:SetScript("OnUpdate", SharedTimerOnUpdate)
+    end
 end
 
 local function UnregisterIconTimer(icon)
@@ -197,8 +217,9 @@ local pendingMouseFix = false
 -- AURA ICON: Create/get icon for a frame
 ---------------------------------------------------------------------------
 local function GetFontPath()
-    local general = GetDB()
-    general = general and general.general
+    local db = GetDB()
+    local vdb = db and (db.party or db)
+    local general = vdb and vdb.general
     local fontName = general and general.font or "Quazii"
     return LSM:Fetch("font", fontName) or "Fonts\\FRIZQT__.TTF"
 end
@@ -398,9 +419,11 @@ local function UpdateAuraIcon(icon, auraData, unit)
         if icon.durationText then icon.durationText:SetText("") end
     end
 
-    -- Expiring pulse
+    -- Expiring pulse (context-aware: party vs raid)
     local db = GetDB()
-    local showPulse = db and db.auras and db.auras.showExpiringPulse ~= false
+    local isRaid = icon.unitFrame and icon.unitFrame._isRaid
+    local vdb = db and (isRaid and db.raid or db.party) or db
+    local showPulse = vdb and vdb.auras and vdb.auras.showExpiringPulse ~= false
     if showPulse and safeDur > 0 then
         local safeExp = SafeToNumber(displayData.expirationTime, 0)
         local remaining = safeExp - GetTime()
@@ -451,38 +474,45 @@ local DEBUFF_CLASSIFICATION_MAP = {
     important   = "HARMFUL|IMPORTANT",
 }
 
--- Cached filter strings (rebuilt when layoutVersion changes)
-local cachedBuffFilters = {}
-local cachedDebuffFilters = {}
+-- Per-context (party/raid) cached filter data
+-- Structure: filterCaches[contextKey] = { buffFilters={}, debuffFilters={}, filterMode="off", ... }
+local filterCaches = { party = {}, raid = {} }
 local cachedFilterVersion = -1
-local cachedFilterMode = "off"
-local cachedOnlyMine = false
-local cachedBuffWhitelist = nil   -- ref to db table when mode = whitelist
-local cachedBuffBlacklist = nil   -- ref to db table when mode = blacklist
-local cachedDebuffWhitelist = nil
-local cachedDebuffBlacklist = nil
 
-local function RebuildFilterCache()
-    local db = GetDB()
-    if not db or not db.auras then return end
-    local auraSettings = db.auras
+local function InitFilterCache()
+    return {
+        buffFilters = {},
+        debuffFilters = {},
+        filterMode = "off",
+        onlyMine = false,
+        buffWhitelist = nil,
+        buffBlacklist = nil,
+        debuffWhitelist = nil,
+        debuffBlacklist = nil,
+    }
+end
+filterCaches.party = InitFilterCache()
+filterCaches.raid = InitFilterCache()
 
-    cachedFilterMode = auraSettings.filterMode or "off"
-    cachedOnlyMine = auraSettings.buffFilterOnlyMine or false
+local function RebuildFilterCacheForContext(cache, auraSettings)
+    if not auraSettings then return end
 
-    wipe(cachedBuffFilters)
-    wipe(cachedDebuffFilters)
-    cachedBuffWhitelist = nil
-    cachedBuffBlacklist = nil
-    cachedDebuffWhitelist = nil
-    cachedDebuffBlacklist = nil
+    cache.filterMode = auraSettings.filterMode or "off"
+    cache.onlyMine = auraSettings.buffFilterOnlyMine or false
 
-    if cachedFilterMode == "classification" then
+    wipe(cache.buffFilters)
+    wipe(cache.debuffFilters)
+    cache.buffWhitelist = nil
+    cache.buffBlacklist = nil
+    cache.debuffWhitelist = nil
+    cache.debuffBlacklist = nil
+
+    if cache.filterMode == "classification" then
         local buffClass = auraSettings.buffClassifications
         if buffClass then
             for key, filterStr in pairs(BUFF_CLASSIFICATION_MAP) do
                 if buffClass[key] then
-                    table.insert(cachedBuffFilters, filterStr)
+                    table.insert(cache.buffFilters, filterStr)
                 end
             end
         end
@@ -491,23 +521,40 @@ local function RebuildFilterCache()
         if debuffClass then
             for key, filterStr in pairs(DEBUFF_CLASSIFICATION_MAP) do
                 if debuffClass[key] then
-                    table.insert(cachedDebuffFilters, filterStr)
+                    table.insert(cache.debuffFilters, filterStr)
                 end
             end
         end
-    elseif cachedFilterMode == "whitelist" then
+    elseif cache.filterMode == "whitelist" then
         local bwl = auraSettings.buffWhitelist
-        if bwl and next(bwl) then cachedBuffWhitelist = bwl end
+        if bwl and next(bwl) then cache.buffWhitelist = bwl end
         local dwl = auraSettings.debuffWhitelist
-        if dwl and next(dwl) then cachedDebuffWhitelist = dwl end
-    elseif cachedFilterMode == "blacklist" then
+        if dwl and next(dwl) then cache.debuffWhitelist = dwl end
+    elseif cache.filterMode == "blacklist" then
         local bbl = auraSettings.buffBlacklist
-        if bbl and next(bbl) then cachedBuffBlacklist = bbl end
+        if bbl and next(bbl) then cache.buffBlacklist = bbl end
         local dbl = auraSettings.debuffBlacklist
-        if dbl and next(dbl) then cachedDebuffBlacklist = dbl end
+        if dbl and next(dbl) then cache.debuffBlacklist = dbl end
     end
+end
+
+local function RebuildFilterCache()
+    local db = GetDB()
+    if not db then return end
+
+    -- Build party filter cache
+    local partyVdb = db.party or db
+    RebuildFilterCacheForContext(filterCaches.party, partyVdb.auras)
+
+    -- Build raid filter cache
+    local raidVdb = db.raid or db
+    RebuildFilterCacheForContext(filterCaches.raid, raidVdb.auras)
 
     cachedFilterVersion = layoutVersion
+end
+
+local function GetFilterCache(isRaid)
+    return isRaid and filterCaches.raid or filterCaches.party
 end
 
 -- Check if an aura passes whitelist/blacklist filter by spellID.
@@ -593,8 +640,11 @@ local function UpdateFrameAuras(frame)
     if not frame or not frame.unit then return end
 
     local db = GetDB()
-    if not db or not db.auras then return end
-    local auraSettings = db.auras
+    if not db then return end
+    local isRaid = frame._isRaid
+    local vdb = (isRaid and db.raid or db.party) or db
+    if not vdb.auras then return end
+    local auraSettings = vdb.auras
 
     -- Layout versioning: only reposition icons when settings have changed
     local needsLayout = (frameLayoutVersions[frame] or 0) ~= layoutVersion
@@ -622,10 +672,11 @@ local function UpdateFrameAuras(frame)
         RebuildFilterCache()
     end
 
-    local useClassification = cachedFilterMode == "classification"
-    local useWhitelist = cachedFilterMode == "whitelist"
-    local useBlacklist = cachedFilterMode == "blacklist"
-    local onlyMine = cachedOnlyMine
+    local fCache = GetFilterCache(isRaid)
+    local useClassification = fCache.filterMode == "classification"
+    local useWhitelist = fCache.filterMode == "whitelist"
+    local useBlacklist = fCache.filterMode == "blacklist"
+    local onlyMine = fCache.onlyMine
     local playerUnit = "player"
 
     -- Process debuffs
@@ -640,7 +691,7 @@ local function UpdateFrameAuras(frame)
 
         -- Collect harmful auras from shared cache (already scanned)
         wipe(sortedAuras)
-        local debuffFilters = useClassification and #cachedDebuffFilters > 0 and cachedDebuffFilters or nil
+        local debuffFilters = useClassification and #fCache.debuffFilters > 0 and fCache.debuffFilters or nil
         local cache = unitAuraCache[unit]
         if cache and cache.harmful then
             for _, auraData in ipairs(cache.harmful) do
@@ -652,12 +703,12 @@ local function UpdateFrameAuras(frame)
                 end
 
                 -- Whitelist/blacklist filter
-                if not dominated and useWhitelist and cachedDebuffWhitelist then
-                    if not AuraPassesSpellFilter(auraData, cachedDebuffWhitelist, nil) then
+                if not dominated and useWhitelist and fCache.debuffWhitelist then
+                    if not AuraPassesSpellFilter(auraData, fCache.debuffWhitelist, nil) then
                         dominated = true
                     end
-                elseif not dominated and useBlacklist and cachedDebuffBlacklist then
-                    if not AuraPassesSpellFilter(auraData, nil, cachedDebuffBlacklist) then
+                elseif not dominated and useBlacklist and fCache.debuffBlacklist then
+                    if not AuraPassesSpellFilter(auraData, nil, fCache.debuffBlacklist) then
                         dominated = true
                     end
                 end
@@ -787,19 +838,19 @@ local function UpdateFrameAuras(frame)
                 end
 
                 -- Classification filter
-                if useClassification and not dominated and #cachedBuffFilters > 0 then
-                    if not AuraPassesFilter(unit, auraData.auraInstanceID, cachedBuffFilters) then
+                if useClassification and not dominated and #fCache.buffFilters > 0 then
+                    if not AuraPassesFilter(unit, auraData.auraInstanceID, fCache.buffFilters) then
                         dominated = true
                     end
                 end
 
                 -- Whitelist/blacklist filter
-                if not dominated and useWhitelist and cachedBuffWhitelist then
-                    if not AuraPassesSpellFilter(auraData, cachedBuffWhitelist, nil) then
+                if not dominated and useWhitelist and fCache.buffWhitelist then
+                    if not AuraPassesSpellFilter(auraData, fCache.buffWhitelist, nil) then
                         dominated = true
                     end
-                elseif not dominated and useBlacklist and cachedBuffBlacklist then
-                    if not AuraPassesSpellFilter(auraData, nil, cachedBuffBlacklist) then
+                elseif not dominated and useBlacklist and fCache.buffBlacklist then
+                    if not AuraPassesSpellFilter(auraData, nil, fCache.buffBlacklist) then
                         dominated = true
                     end
                 end
@@ -943,6 +994,9 @@ end)
 ---------------------------------------------------------------------------
 function QUI_GFA:InvalidateLayout()
     layoutVersion = layoutVersion + 1
+    -- Refresh cached setting for shared timer
+    local db = GetDB()
+    cachedShowDurationColor = db and db.auras and db.auras.showDurationColor ~= false
 end
 
 ---------------------------------------------------------------------------
@@ -954,6 +1008,9 @@ function QUI_GFA:RefreshAll()
 
     -- Force layout recalculation on explicit refresh
     layoutVersion = layoutVersion + 1
+    -- Sync cached setting from DB
+    local db = GetDB()
+    cachedShowDurationColor = db and db.auras and db.auras.showDurationColor ~= false
 
     for unit, frame in pairs(GF.unitFrameMap) do
         if frame and frame:IsShown() then

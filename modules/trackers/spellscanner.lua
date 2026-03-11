@@ -32,6 +32,9 @@ SpellScanner.autoScan = false
 -- Callback for UI refresh when spell is scanned (set by options panel)
 SpellScanner.onScanCallback = nil
 
+-- Forward declarations
+local EnsureCleanupTicker
+
 ---------------------------------------------------------------------------
 -- DATABASE ACCESS
 -- Uses QUI.db.global.spellScanner for cross-character persistence
@@ -192,6 +195,7 @@ local function ScanSpellFromBuffs(castSpellID, itemID)
                 source = itemID and "item" or "spell",
                 sourceId = itemID or castSpellID,
             }
+            EnsureCleanupTicker()
 
             -- Notify user in scan mode
             if SpellScanner.scanMode then
@@ -245,6 +249,7 @@ local function OnSpellCastSucceeded(unit, castGUID, spellID)
                 source = "spell",
                 sourceId = spellID,
             }
+            EnsureCleanupTicker()
         end
         -- Even without duration data, we treat this as "known" and skip further scanning
         return
@@ -273,10 +278,24 @@ end
 
 local function CleanupExpiredBuffs()
     local now = GetTime()
+    local hasAny = false
     for spellID, data in pairs(SpellScanner.activeBuffs) do
         if data.expirationTime and data.expirationTime < now then
             SpellScanner.activeBuffs[spellID] = nil
+        else
+            hasAny = true
         end
+    end
+    -- Auto-stop ticker when no active buffs remain
+    if not hasAny and SpellScanner.cleanupTicker then
+        SpellScanner.cleanupTicker:Cancel()
+        SpellScanner.cleanupTicker = nil
+    end
+end
+
+EnsureCleanupTicker = function()
+    if not SpellScanner.cleanupTicker then
+        SpellScanner.cleanupTicker = C_Timer.NewTicker(1, CleanupExpiredBuffs)
     end
 end
 
@@ -384,8 +403,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
 end)
 
--- Periodic cleanup of expired buffs (stored reference for potential cancellation)
-SpellScanner.cleanupTicker = C_Timer.NewTicker(1, CleanupExpiredBuffs)
+-- Cleanup ticker starts on-demand when buffs are tracked (see EnsureCleanupTicker)
 
 ---------------------------------------------------------------------------
 -- SLASH COMMANDS

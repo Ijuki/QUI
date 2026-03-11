@@ -332,24 +332,29 @@ local function GetAbsorbTexturePath(textureName)
 end
 
 ---------------------------------------------------------------------------
--- HELPER: Get class color for a unit
+-- HELPER: Get class color for a unit (or the player if unit is nil)
+-- Returns the unit's actual class color for player characters,
+-- or hostility-based color for NPCs.
 ---------------------------------------------------------------------------
 local function GetUnitClassColor(unit)
+    unit = unit or "player"
     if not UnitExists(unit) then
         return 0.5, 0.5, 0.5, 1
     end
 
-    -- Use class color for players AND NPC party members (follower dungeon companions)
-    local _, class = UnitClass(unit)
-    if class then
-        local color = RAID_CLASS_COLORS[class]
-        if color then
-            return color.r, color.g, color.b, 1
+    -- Player characters: use their actual class color
+    if UnitIsPlayer(unit) then
+        local _, class = UnitClass(unit)
+        if type(class) == "string" then
+            local color = RAID_CLASS_COLORS[class]
+            if color then
+                return color.r, color.g, color.b, 1
+            end
         end
     end
 
-    -- NPCs use reaction color
-    local reaction = UnitReaction(unit, "player")
+    -- NPCs: use hostility-based colors
+    local reaction = Helpers.SafeToNumber(UnitReaction(unit, "player"), nil)
     if reaction then
         if reaction >= 5 then
             return 0.2, 0.8, 0.2, 1  -- Friendly (green)
@@ -560,8 +565,8 @@ local function GetUnitHostilityColor(unit)
     local db = GetDB()
     local general = db and db.general
 
-    local reaction = UnitReaction(unit, "player")
-    if type(reaction) == "number" then
+    local reaction = Helpers.SafeToNumber(UnitReaction(unit, "player"), nil)
+    if reaction then
         if reaction >= 5 then
             local c = general and general.hostilityColorFriendly or { 0.2, 0.8, 0.2, 1 }
             return c[1], c[2], c[3], c[4] or 1
@@ -580,9 +585,9 @@ end
 
 ---------------------------------------------------------------------------
 -- HELPER: Get health bar color based on settings
--- Logic: 
---   1. If ClassColor enabled AND unit is a player -> use class color
---   2. If HostilityColor enabled -> use reaction color (for NPCs or all units)
+-- Logic:
+--   1. If ClassColor enabled AND unit is a player -> use the unit's class color
+--   2. If HostilityColor enabled -> use reaction color (for NPCs)
 --   3. Otherwise -> use custom color
 ---------------------------------------------------------------------------
 local function GetHealthBarColor(unit, settings)
@@ -602,9 +607,7 @@ local function GetHealthBarColor(unit, settings)
         useClassColor = general and general.defaultUseClassColor
     end
 
-    if useClassColor then
-        -- Try class color for the unit (works for players AND NPC party members
-        -- like follower dungeon companions who have assigned classes)
+    if useClassColor and UnitIsPlayer(unit) then
         local _, class = UnitClass(unit)
         if type(class) == "string" then
             local color = RAID_CLASS_COLORS[class]
@@ -612,26 +615,12 @@ local function GetHealthBarColor(unit, settings)
                 return color.r, color.g, color.b, 1
             end
         end
-
-        -- Fallback: pet uses owner's (player's) class color
-        local petCheck = UnitIsUnit(unit, "pet")
-        local playerPetCheck = UnitIsUnit(unit, "playerpet")
-        local isPet = (not IsSecretValue(petCheck) and petCheck == true) or (not IsSecretValue(playerPetCheck) and playerPetCheck == true)
-        if isPet then
-            local _, pClass = UnitClass("player")
-            if type(pClass) == "string" then
-                local color = RAID_CLASS_COLORS[pClass]
-                if color then
-                    return color.r, color.g, color.b, 1
-                end
-            end
-        end
     end
 
     -- Check HostilityColor - applies to NPCs
     if settings and settings.useHostilityColor then
-        local reaction = UnitReaction(unit, "player")
-        if type(reaction) == "number" then
+        local reaction = Helpers.SafeToNumber(UnitReaction(unit, "player"), nil)
+        if reaction then
             if reaction >= 5 then
                 local c = general and general.hostilityColorFriendly or { 0.2, 0.8, 0.2, 1 }
                 return c[1], c[2], c[3], c[4] or 1
@@ -2252,13 +2241,7 @@ local function CreateUnitFrame(unit, unitKey)
         -- Determine border color
         local borderR, borderG, borderB = 0, 0, 0
         if settings.portraitBorderUseClassColor then
-            local _, class = UnitClass(unit)
-            if class then
-                local classColor = RAID_CLASS_COLORS[class]
-                if classColor then
-                    borderR, borderG, borderB = classColor.r, classColor.g, classColor.b
-                end
-            end
+            borderR, borderG, borderB = GetUnitClassColor(unit)
         elseif settings.portraitBorderColor then
             borderR = settings.portraitBorderColor[1] or 0
             borderG = settings.portraitBorderColor[2] or 0
@@ -3420,13 +3403,7 @@ function QUI_UF:RefreshFrame(unitKey)
         -- Determine border color first (needed for both styles)
         local borderR, borderG, borderB = 0, 0, 0
         if settings.portraitBorderUseClassColor then
-            local _, class = UnitClass(frame.unit)
-            if class then
-                local classColor = RAID_CLASS_COLORS[class]
-                if classColor then
-                    borderR, borderG, borderB = classColor.r, classColor.g, classColor.b
-                end
-            end
+            borderR, borderG, borderB = GetUnitClassColor(frame.unit or unit)
         elseif settings.portraitBorderColor then
             borderR = settings.portraitBorderColor[1] or 0
             borderG = settings.portraitBorderColor[2] or 0

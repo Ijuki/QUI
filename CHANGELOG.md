@@ -76,6 +76,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+
+## v2.49.0 - 2026-03-11
+
+### Added
+- added dual-engine tooltip system
+- added system datatext memory stats
+- added unit menu action type to click-cast bindings
+- split up group frames settings into separate party and raid profiles
+
+### Changed
+- refactor: simplify AH expansion filter to single OnShow hook
+
+### Fixed
+- fixed totembar not showing in combat
+- fixed unsafe Frame:Hide() on custom trackers
+- fix: remove taint-causing method replacement on Blizzard cooldown viewers
+- fix: defer custom tracker refresh to combat end when in lockdown
+- fix: rework shopping tooltip lifecycle to prevent flash and dedup
+- fix: obfuscate global mixin references in tooltip redirects
+- fix: size designer inner scroll from parent frame instead of outer viewport
+- fix: use actual unit class colors and improve designer scroll sizing
+- fix: guard GetAlpha with SafeToNumber for combat taint safety
+- fix: derive tooltip anchor from SetOwner when no SetPoint fires
+- fix: cache Blizzard tooltip anchor before offscreen override
+## v2.48.2 - 2026-03-10
+
+### Changed
+- did a major performance pass to reduce unneccesary CPU and memory usage
+- entering the search menu should be pretty much instant now
+
+### Fixed
+- fixed unitframe class color resolution regression
+- fixed blizzard party frames not hiding when wanted
 ## v2.48.1 - 2026-03-09
 
 ### Fixed

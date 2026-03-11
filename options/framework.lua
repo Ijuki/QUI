@@ -510,33 +510,33 @@ end
 
 -- Flag to track if search index has been built
 GUI._searchIndexBuilt = false
+GUI._searchIndexProgress = 0   -- Number of tabs indexed so far
+GUI._searchIndexTotal = 0      -- Total tabs to index
+GUI._searchIndexTicker = nil   -- Background ticker reference
 
--- Force-load all tabs to populate search registry
-function GUI:ForceLoadAllTabs()
+-- Build a single tab's search index (creates hidden frame, runs builder).
+-- Returns true if a tab was built, false if nothing left to build.
+function GUI:BuildNextTabIndex()
     local frame = self.MainFrame
-    if not frame or not frame.pages then return end
+    if not frame or not frame.pages then return false end
 
-    -- Initialize registry if needed (don't clear - keep registrations from already-visited tabs)
-    if not self.SettingsRegistry then
-        self.SettingsRegistry = {}
-    end
-    if not self.SettingsRegistryKeys then
-        self.SettingsRegistryKeys = {}
-    end
+    -- Initialize registry if needed
+    if not self.SettingsRegistry then self.SettingsRegistry = {} end
+    if not self.SettingsRegistryKeys then self.SettingsRegistryKeys = {} end
 
-    -- Build each tab that hasn't been built yet
+    -- Find the next unbuilt tab
     for tabIndex, page in pairs(frame.pages) do
-        if tabIndex ~= self._searchTabIndex then  -- Skip Search tab itself
+        if tabIndex ~= self._searchTabIndex then
             if page and page.createFunc and not page.built then
                 -- Create hidden frame if needed
                 if not page.frame then
                     page.frame = CreateFrame("Frame", nil, frame.contentArea)
                     page.frame:SetAllPoints()
-                    page.frame:EnableMouse(false)  -- Container frame - let children handle clicks
+                    page.frame:EnableMouse(false)
                 end
-                page.frame:Hide()  -- Keep hidden during build
+                page.frame:Hide()
 
-                -- Run the builder to register widgets (only once)
+                -- Run the builder to register widgets
                 local loadTab = frame.tabs[tabIndex]
                 if loadTab and loadTab.name then
                     self:SetSearchContext({
@@ -545,7 +545,7 @@ function GUI:ForceLoadAllTabs()
                     })
                 end
                 page.createFunc(page.frame)
-                page.built = true  -- Prevent duplicate widget creation
+                page.built = true
 
                 -- Capture sub-tab group created during page build
                 if GUI._lastSubTabGroup then
@@ -553,9 +553,81 @@ function GUI:ForceLoadAllTabs()
                     page._subTabDefs = page._subTabGroup.subTabDefs
                     GUI._lastSubTabGroup = nil
                 end
+
+                self._searchIndexProgress = self._searchIndexProgress + 1
+                return true  -- Built one tab this tick
             end
         end
     end
+
+    return false  -- Nothing left to build
+end
+
+-- Start background incremental index building (1 tab per tick).
+-- Called once after all tabs have been added to the options panel.
+function GUI:StartBackgroundIndexBuild()
+    if self._searchIndexBuilt then return end
+    if self._searchIndexTicker then return end  -- Already running
+
+    local frame = self.MainFrame
+    if not frame or not frame.pages then return end
+
+    -- Count total tabs that need building
+    local total = 0
+    for tabIndex, page in pairs(frame.pages) do
+        if tabIndex ~= self._searchTabIndex and page and page.createFunc and not page.built then
+            total = total + 1
+        end
+    end
+    self._searchIndexTotal = total
+    self._searchIndexProgress = 0
+
+    if total == 0 then
+        self._searchIndexBuilt = true
+        return
+    end
+
+    -- Build one tab per tick using chained C_Timer.NewTimer(0) so each
+    -- handle is cancellable and only one tab builds per frame.
+    local function BuildNextTick()
+        -- Abort if panel was destroyed/rebuilt
+        if not self.MainFrame or self.MainFrame ~= frame then
+            self._searchIndexTicker = nil
+            return
+        end
+
+        local built = self:BuildNextTabIndex()
+        if built then
+            -- Schedule next tab for next frame
+            self._searchIndexTicker = C_Timer.NewTimer(0, BuildNextTick)
+        else
+            -- All done
+            self._searchIndexBuilt = true
+            self._searchIndexTicker = nil
+        end
+    end
+
+    -- Start after a short delay so login/reload UI work completes first
+    self._searchIndexTicker = C_Timer.NewTimer(0.5, BuildNextTick)
+end
+
+-- Force-complete any remaining unbuilt tabs synchronously.
+-- Only called as a fallback if user opens Search before background build finishes.
+function GUI:ForceLoadAllTabs()
+    -- Cancel background builder if running
+    if self._searchIndexTicker then
+        self._searchIndexTicker:Cancel()
+        self._searchIndexTicker = nil
+    end
+
+    local frame = self.MainFrame
+    if not frame or not frame.pages then return end
+    if not self.SettingsRegistry then self.SettingsRegistry = {} end
+    if not self.SettingsRegistryKeys then self.SettingsRegistryKeys = {} end
+
+    while self:BuildNextTabIndex() do end  -- Build all remaining
+
+    self._searchIndexBuilt = true
 end
 
 ---------------------------------------------------------------------------
@@ -643,18 +715,29 @@ end
 -- WIDGET: THEMED BUTTON (Neutral style - accent border on hover only)
 ---------------------------------------------------------------------------
 function GUI:CreateButton(parent, text, width, height, onClick)
-    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(width or 120, height or 26)
+    local UIKit = ns.UIKit
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
 
-    -- Normal state: dark background with grey border (neutral)
-    local px = QUICore:GetPixelSize(btn)
-    btn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
-    btn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+    local btn = CreateFrame("Button", nil, parent, useUIKitBorders and nil or "BackdropTemplate")
+    btn:SetSize(width or 120, height or 26)
+    if useUIKitBorders then
+        btn.bg = UIKit.CreateBackground(btn, 0.15, 0.15, 0.15, 1)
+        UIKit.CreateBorderLines(btn)
+        UIKit.UpdateBorderLines(btn, 1, C.border[1], C.border[2], C.border[3], 1, false)
+    else
+        -- Normal state: dark background with grey border (neutral)
+        local px = QUICore:GetPixelSize(btn)
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        btn:SetBackdropColor(0.15, 0.15, 0.15, 1)
+        btn:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3], 1)
+    end
 
     -- Button text (off-white, not accent)
     local btnText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -664,13 +747,21 @@ function GUI:CreateButton(parent, text, width, height, onClick)
     btnText:SetText(text or "Button")
     btn.text = btnText
 
+    local function SetButtonBorderColor(r, g, b, a)
+        if useUIKitBorders then
+            UIKit.UpdateBorderLines(btn, 1, r, g, b, a or 1, false)
+        else
+            pcall(btn.SetBackdropBorderColor, btn, r, g, b, a or 1)
+        end
+    end
+
     -- Hover effect: accent border only (no background change)
-    btn:SetScript("OnEnter", function(self)
-        pcall(self.SetBackdropBorderColor, self, C.accent[1], C.accent[2], C.accent[3], 1)
+    btn:SetScript("OnEnter", function()
+        SetButtonBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
 
-    btn:SetScript("OnLeave", function(self)
-        pcall(self.SetBackdropBorderColor, self, C.border[1], C.border[2], C.border[3], 1)
+    btn:SetScript("OnLeave", function()
+        SetButtonBorderColor(C.border[1], C.border[2], C.border[3], 1)
     end)
 
     -- Click handler
@@ -2860,6 +2951,7 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     if parent._hasContent ~= nil then parent._hasContent = true end
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
+    local UIKit = ns.UIKit
 
     -- Label on left (off-white text, constrained to not overlap toggle)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2868,29 +2960,47 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
     text:SetPoint("LEFT", 0, 0)
     text:SetWidth(170)
     text:SetWordWrap(true)
+    text:SetNonSpaceWrap(true)
     text:SetJustifyH("LEFT")
 
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
+
     -- Toggle track (the pill-shaped background)
-    local track = CreateFrame("Button", nil, container, "BackdropTemplate")
+    local track = CreateFrame("Button", nil, container, useUIKitBorders and nil or "BackdropTemplate")
     track:SetSize(40, 20)
     track:SetPoint("LEFT", container, "LEFT", 180, 0)
-    local px = QUICore:GetPixelSize(track)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
+    if useUIKitBorders then
+        track._bg = UIKit.CreateBackground(track, C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
+        UIKit.CreateBorderLines(track)
+    else
+        local px = QUICore:GetPixelSize(track)
+        track:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+    end
 
     -- Thumb (the sliding circle)
-    local thumb = CreateFrame("Frame", nil, track, "BackdropTemplate")
+    local thumb = CreateFrame("Frame", nil, track, useUIKitBorders and nil or "BackdropTemplate")
     thumb:SetSize(16, 16)
-    thumb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
-    thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    if useUIKitBorders then
+        thumb._bg = UIKit.CreateBackground(thumb, C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+        UIKit.CreateBorderLines(thumb)
+        UIKit.UpdateBorderLines(thumb, 1, 0.85, 0.85, 0.85, 1, false)
+    else
+        local px = QUICore:GetPixelSize(track)
+        thumb:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+        thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    end
     thumb:SetFrameLevel(track:GetFrameLevel() + 1)
 
     container.track = track
@@ -2902,19 +3012,36 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
         return container.checked
     end
 
+    local function SetTrackVisual(bgR, bgG, bgB, bgA, borderR, borderG, borderB, borderA)
+        if useUIKitBorders then
+            if track._bg then
+                track._bg:SetVertexColor(bgR, bgG, bgB, bgA)
+            end
+            UIKit.UpdateBorderLines(track, 1, borderR, borderG, borderB, borderA, false)
+            return
+        end
+        track:SetBackdropColor(bgR, bgG, bgB, bgA)
+        track:SetBackdropBorderColor(borderR, borderG, borderB, borderA)
+    end
+
+    local function SetThumbAnchor(isOn)
+        thumb:ClearAllPoints()
+        if isOn then
+            thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
+        else
+            thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
+        end
+    end
+
     local function UpdateVisual(val)
         if val then
             -- ON state: Mint track, thumb on right
-            track:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
-            track:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
-            thumb:ClearAllPoints()
-            thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
+            SetTrackVisual(C.accent[1], C.accent[2], C.accent[3], 1, C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            SetThumbAnchor(true)
         else
             -- OFF state: Dark grey track, thumb on left
-            track:SetBackdropColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
-            track:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
-            thumb:ClearAllPoints()
-            thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
+            SetTrackVisual(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1, 0.12, 0.14, 0.18, 1)
+            SetThumbAnchor(false)
         end
     end
 
@@ -2935,23 +3062,38 @@ function GUI:CreateFormToggle(parent, label, dbKey, dbTable, onChange, registryI
 
     SetValue(GetValue(), true)  -- Skip callback on init
 
+    if useUIKitBorders and UIKit.RegisterScaleRefresh then
+        UIKit.RegisterScaleRefresh(track, "formToggleScale", function()
+            track:SetSize(40, 20)
+            track:ClearAllPoints()
+            track:SetPoint("LEFT", container, "LEFT", 180, 0)
+            thumb:SetSize(16, 16)
+            UIKit.UpdateBorderLines(thumb, 1, 0.85, 0.85, 0.85, 1, false)
+            UpdateVisual(GetValue())
+        end)
+    end
+
     -- Click to toggle
     track:SetScript("OnClick", function() SetValue(not GetValue()) end)
 
     -- Hover effects
-    track:SetScript("OnEnter", function(self)
+    track:SetScript("OnEnter", function()
         if GetValue() then
-            self:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            if useUIKitBorders then
+                UIKit.UpdateBorderLines(track, 1, C.accentHover[1], C.accentHover[2], C.accentHover[3], 1, false)
+            else
+                track:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            end
         else
-            self:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
+            if useUIKitBorders then
+                UIKit.UpdateBorderLines(track, 1, 0.25, 0.28, 0.35, 1, false)
+            else
+                track:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
+            end
         end
     end)
-    track:SetScript("OnLeave", function(self)
-        if GetValue() then
-            self:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
-        else
-            self:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
-        end
+    track:SetScript("OnLeave", function()
+        UpdateVisual(GetValue())
     end)
 
     -- Enable/disable the toggle (for conditional UI)
@@ -2994,6 +3136,7 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
     if parent._hasContent ~= nil then parent._hasContent = true end
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
+    local UIKit = ns.UIKit
 
     -- Label on left (off-white text, constrained to not overlap toggle)
     local text = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -3002,29 +3145,47 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
     text:SetPoint("LEFT", 0, 0)
     text:SetWidth(170)
     text:SetWordWrap(true)
+    text:SetNonSpaceWrap(true)
     text:SetJustifyH("LEFT")
 
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
+
     -- Toggle track
-    local track = CreateFrame("Button", nil, container, "BackdropTemplate")
+    local track = CreateFrame("Button", nil, container, useUIKitBorders and nil or "BackdropTemplate")
     track:SetSize(40, 20)
     track:SetPoint("LEFT", container, "LEFT", 180, 0)
-    local px = QUICore:GetPixelSize(track)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
+    if useUIKitBorders then
+        track._bg = UIKit.CreateBackground(track, C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
+        UIKit.CreateBorderLines(track)
+    else
+        local px = QUICore:GetPixelSize(track)
+        track:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+    end
 
     -- Thumb
-    local thumb = CreateFrame("Frame", nil, track, "BackdropTemplate")
+    local thumb = CreateFrame("Frame", nil, track, useUIKitBorders and nil or "BackdropTemplate")
     thumb:SetSize(16, 16)
-    thumb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
-    thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    if useUIKitBorders then
+        thumb._bg = UIKit.CreateBackground(thumb, C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+        UIKit.CreateBorderLines(thumb)
+        UIKit.UpdateBorderLines(thumb, 1, 0.85, 0.85, 0.85, 1, false)
+    else
+        local px = QUICore:GetPixelSize(track)
+        thumb:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        thumb:SetBackdropColor(C.toggleThumb[1], C.toggleThumb[2], C.toggleThumb[3], 1)
+        thumb:SetBackdropBorderColor(0.85, 0.85, 0.85, 1)
+    end
     thumb:SetFrameLevel(track:GetFrameLevel() + 1)
 
     container.track = track
@@ -3041,17 +3202,34 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
         return not GetDBValue()  -- Invert for display
     end
 
-    local function UpdateVisual(isOn)
+    local function SetTrackVisual(bgR, bgG, bgB, bgA, borderR, borderG, borderB, borderA)
+        if useUIKitBorders then
+            if track._bg then
+                track._bg:SetVertexColor(bgR, bgG, bgB, bgA)
+            end
+            UIKit.UpdateBorderLines(track, 1, borderR, borderG, borderB, borderA, false)
+            return
+        end
+        track:SetBackdropColor(bgR, bgG, bgB, bgA)
+        track:SetBackdropBorderColor(borderR, borderG, borderB, borderA)
+    end
+
+    local function SetThumbAnchor(isOn)
+        thumb:ClearAllPoints()
         if isOn then
-            track:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
-            track:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
-            thumb:ClearAllPoints()
             thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
         else
-            track:SetBackdropColor(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1)
-            track:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
-            thumb:ClearAllPoints()
             thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
+        end
+    end
+
+    local function UpdateVisual(isOn)
+        if isOn then
+            SetTrackVisual(C.accent[1], C.accent[2], C.accent[3], 1, C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
+            SetThumbAnchor(true)
+        else
+            SetTrackVisual(C.toggleOff[1], C.toggleOff[2], C.toggleOff[3], 1, 0.12, 0.14, 0.18, 1)
+            SetThumbAnchor(false)
         end
     end
 
@@ -3073,21 +3251,36 @@ function GUI:CreateFormToggleInverted(parent, label, dbKey, dbTable, onChange)
 
     SetOn(IsOn(), true)  -- Skip callback on init
 
+    if useUIKitBorders and UIKit.RegisterScaleRefresh then
+        UIKit.RegisterScaleRefresh(track, "formToggleInvertedScale", function()
+            track:SetSize(40, 20)
+            track:ClearAllPoints()
+            track:SetPoint("LEFT", container, "LEFT", 180, 0)
+            thumb:SetSize(16, 16)
+            UIKit.UpdateBorderLines(thumb, 1, 0.85, 0.85, 0.85, 1, false)
+            UpdateVisual(IsOn())
+        end)
+    end
+
     track:SetScript("OnClick", function() SetOn(not IsOn()) end)
 
-    track:SetScript("OnEnter", function(self)
+    track:SetScript("OnEnter", function()
         if IsOn() then
-            self:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            if useUIKitBorders then
+                UIKit.UpdateBorderLines(track, 1, C.accentHover[1], C.accentHover[2], C.accentHover[3], 1, false)
+            else
+                track:SetBackdropBorderColor(C.accentHover[1], C.accentHover[2], C.accentHover[3], 1)
+            end
         else
-            self:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
+            if useUIKitBorders then
+                UIKit.UpdateBorderLines(track, 1, 0.25, 0.28, 0.35, 1, false)
+            else
+                track:SetBackdropBorderColor(0.25, 0.28, 0.35, 1)
+            end
         end
     end)
-    track:SetScript("OnLeave", function(self)
-        if IsOn() then
-            self:SetBackdropBorderColor(C.accent[1] * 0.8, C.accent[2] * 0.8, C.accent[3] * 0.8, 1)
-        else
-            self:SetBackdropBorderColor(0.12, 0.14, 0.18, 1)
-        end
+    track:SetScript("OnLeave", function()
+        UpdateVisual(IsOn())
     end)
 
     -- Enable/disable the toggle (for conditional UI)
@@ -3450,6 +3643,11 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     container:EnableMouse(true)  -- Block clicks from passing through to frames behind
 
     options = options or {}
+    local UIKit = ns.UIKit
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
     local deferOnDrag = options.deferOnDrag or false
     local precision = options.precision
     local formatStr = precision and string.format("%%.%df", precision) or (step < 1 and "%.2f" or "%d")
@@ -3459,6 +3657,10 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Setting")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetNonSpaceWrap(true)
+    text:SetJustifyH("LEFT")
     text:SetWidth(170)
     text:SetWordWrap(true)
     text:SetJustifyH("LEFT")
@@ -3471,27 +3673,37 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     trackContainer:SetPoint("RIGHT", container, "RIGHT", -70, 0)
 
     -- Unfilled track (background) - rounded appearance via backdrop
-    local trackBg = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    local trackBg = CreateFrame("Frame", nil, trackContainer, useUIKitBorders and nil or "BackdropTemplate")
     trackBg:SetAllPoints()
     local px = QUICore:GetPixelSize(trackBg)
-    trackBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-        insets = {left = 0, right = 0, top = 0, bottom = 0},
-    })
-    trackBg:SetBackdropColor(C.sliderTrack[1], C.sliderTrack[2], C.sliderTrack[3], 1)
-    trackBg:SetBackdropBorderColor(0.1, 0.12, 0.15, 1)
+    if useUIKitBorders then
+        trackBg.bg = UIKit.CreateBackground(trackBg, C.sliderTrack[1], C.sliderTrack[2], C.sliderTrack[3], 1)
+        UIKit.CreateBorderLines(trackBg)
+        UIKit.UpdateBorderLines(trackBg, 1, 0.1, 0.12, 0.15, 1, false)
+    else
+        trackBg:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+            insets = {left = 0, right = 0, top = 0, bottom = 0},
+        })
+        trackBg:SetBackdropColor(C.sliderTrack[1], C.sliderTrack[2], C.sliderTrack[3], 1)
+        trackBg:SetBackdropBorderColor(0.1, 0.12, 0.15, 1)
+    end
 
     -- Filled track (mint portion from left to thumb)
-    local trackFill = CreateFrame("Frame", nil, trackContainer, "BackdropTemplate")
+    local trackFill = CreateFrame("Frame", nil, trackContainer, useUIKitBorders and nil or "BackdropTemplate")
     trackFill:SetPoint("TOPLEFT", px, -px)
     trackFill:SetPoint("BOTTOMLEFT", px, px)
     trackFill:SetWidth(1)  -- Will be updated dynamically
-    trackFill:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-    })
-    trackFill:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    if useUIKitBorders then
+        trackFill.bg = UIKit.CreateBackground(trackFill, C.accent[1], C.accent[2], C.accent[3], 1)
+    else
+        trackFill:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+        })
+        trackFill:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    end
 
     -- Actual slider (invisible, just for interaction)
     local slider = CreateFrame("Slider", nil, trackContainer)
@@ -3500,15 +3712,21 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     slider:SetHitRectInsets(0, 0, -10, -10)  -- Expand hit area 10px above/below for reliable hover detection
 
     -- Thumb frame (white circle with border)
-    local thumbFrame = CreateFrame("Frame", nil, slider, "BackdropTemplate")
+    local thumbFrame = CreateFrame("Frame", nil, slider, useUIKitBorders and nil or "BackdropTemplate")
     thumbFrame:SetSize(14, 14)
-    thumbFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    thumbFrame:SetBackdropColor(C.sliderThumb[1], C.sliderThumb[2], C.sliderThumb[3], 1)
-    thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
+    if useUIKitBorders then
+        thumbFrame.bg = UIKit.CreateBackground(thumbFrame, C.sliderThumb[1], C.sliderThumb[2], C.sliderThumb[3], 1)
+        UIKit.CreateBorderLines(thumbFrame)
+        UIKit.UpdateBorderLines(thumbFrame, 1, C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1, false)
+    else
+        thumbFrame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        thumbFrame:SetBackdropColor(C.sliderThumb[1], C.sliderThumb[2], C.sliderThumb[3], 1)
+        thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
+    end
     thumbFrame:SetFrameLevel(slider:GetFrameLevel() + 2)
     thumbFrame:EnableMouse(false)  -- Let clicks pass through to slider
 
@@ -3527,20 +3745,42 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
     thumb:SetAlpha(0)  -- Hide the actual thumb, we use thumbFrame instead
 
     -- Editbox for value (far right)
-    local editBox = CreateFrame("EditBox", nil, container, "BackdropTemplate")
+    local editBox = CreateFrame("EditBox", nil, container, useUIKitBorders and nil or "BackdropTemplate")
     editBox:SetSize(60, 22)
     editBox:SetPoint("RIGHT", 0, 0)
-    editBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    editBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
-    editBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    if useUIKitBorders then
+        editBox.bg = UIKit.CreateBackground(editBox, 0.08, 0.08, 0.08, 1)
+        UIKit.CreateBorderLines(editBox)
+        UIKit.UpdateBorderLines(editBox, 1, 0.25, 0.25, 0.25, 1, false)
+    else
+        editBox:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        editBox:SetBackdropColor(0.08, 0.08, 0.08, 1)
+        editBox:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+    end
     editBox:SetFont(GetFontPath(), 11, "")
     editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
     editBox:SetJustifyH("CENTER")
     editBox:SetAutoFocus(false)
+
+    local function SetThumbBorderColor(r, g, b, a)
+        if useUIKitBorders then
+            UIKit.UpdateBorderLines(thumbFrame, 1, r, g, b, a or 1, false)
+        else
+            thumbFrame:SetBackdropBorderColor(r, g, b, a or 1)
+        end
+    end
+
+    local function SetEditBoxBorderColor(r, g, b, a)
+        if useUIKitBorders then
+            UIKit.UpdateBorderLines(editBox, 1, r, g, b, a or 1, false)
+        else
+            editBox:SetBackdropBorderColor(r, g, b, a or 1)
+        end
+    end
 
     -- Configure slider
     slider:SetMinMaxValues(min or 0, max or 100)
@@ -3637,10 +3877,10 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
 
     -- Hover effects on thumb
     slider:SetScript("OnEnter", function()
-        thumbFrame:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        SetThumbBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     slider:SetScript("OnLeave", function()
-        thumbFrame:SetBackdropBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
+        SetThumbBorderColor(C.sliderThumbBorder[1], C.sliderThumbBorder[2], C.sliderThumbBorder[3], 1)
     end)
 
     editBox:SetScript("OnEnterPressed", function(self)
@@ -3655,17 +3895,17 @@ function GUI:CreateFormSlider(parent, label, min, max, step, dbKey, dbTable, onC
 
     -- Hover effect on editbox
     editBox:SetScript("OnEnter", function(self)
-        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        SetEditBoxBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     editBox:SetScript("OnEditFocusGained", function(self)
-        self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
+        SetEditBoxBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     editBox:SetScript("OnEditFocusLost", function(self)
-        self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+        SetEditBoxBorderColor(0.25, 0.25, 0.25, 1)
     end)
     editBox:SetScript("OnLeave", function(self)
         if not self:HasFocus() then
-            self:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+            SetEditBoxBorderColor(0.25, 0.25, 0.25, 1)
         end
     end)
 
@@ -3721,6 +3961,11 @@ end
 
 function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange, registryInfo)
     if parent._hasContent ~= nil then parent._hasContent = true end
+    local UIKit = ns.UIKit
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
     local container = CreateFrame("Frame", nil, parent)
     container:SetHeight(FORM_ROW_HEIGHT)
 
@@ -3731,28 +3976,42 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
     text:SetPoint("LEFT", 0, 0)
 
     -- Dropdown button (right side)
-    local dropdown = CreateFrame("Button", nil, container, "BackdropTemplate")
+    local dropdown = CreateFrame("Button", nil, container, useUIKitBorders and nil or "BackdropTemplate")
     dropdown:SetHeight(24)  -- Increased from 22
     dropdown:SetPoint("LEFT", container, "LEFT", 180, 0)
     dropdown:SetPoint("RIGHT", container, "RIGHT", 0, 0)
     local px = QUICore:GetPixelSize(dropdown)
-    dropdown:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    dropdown:SetBackdropColor(0.08, 0.08, 0.08, 1)
-    dropdown:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)  -- Increased from 0.25
+    if useUIKitBorders then
+        dropdown.bg = UIKit.CreateBackground(dropdown, 0.08, 0.08, 0.08, 1)
+        UIKit.CreateBorderLines(dropdown)
+        UIKit.UpdateBorderLines(dropdown, 1, 0.35, 0.35, 0.35, 1, false)
+    else
+        dropdown:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        dropdown:SetBackdropColor(0.08, 0.08, 0.08, 1)
+        dropdown:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)  -- Increased from 0.25
+    end
+
+    local function SetDropdownBorderColor(r, g, b, a)
+        if useUIKitBorders then
+            UIKit.UpdateBorderLines(dropdown, 1, r, g, b, a or 1, false)
+        else
+            pcall(dropdown.SetBackdropBorderColor, dropdown, r, g, b, a or 1)
+        end
+    end
 
     -- Chevron zone (right side with accent tint)
-    local chevronZone = CreateFrame("Frame", nil, dropdown, "BackdropTemplate")
+    local chevronZone = CreateFrame("Frame", nil, dropdown)
     chevronZone:SetWidth(CHEVRON_ZONE_WIDTH)
     chevronZone:SetPoint("TOPRIGHT", dropdown, "TOPRIGHT", -1, -1)
     chevronZone:SetPoint("BOTTOMRIGHT", dropdown, "BOTTOMRIGHT", -1, 1)
-    chevronZone:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-    })
-    chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+    local chevronZoneBg = chevronZone:CreateTexture(nil, "BACKGROUND")
+    chevronZoneBg:SetAllPoints()
+    chevronZoneBg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    chevronZoneBg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
 
     -- Separator line (left edge of chevron zone)
     local separator = chevronZone:CreateTexture(nil, "ARTWORK")
@@ -3788,29 +4047,35 @@ function GUI:CreateFormDropdown(parent, label, options, dbKey, dbTable, onChange
 
     -- Hover effect
     dropdown:SetScript("OnEnter", function(self)
-        pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a)
-        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA_HOVER)
+        SetDropdownBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a)
+        chevronZoneBg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA_HOVER)
         separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.5)
         chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
         chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     end)
     dropdown:SetScript("OnLeave", function(self)
-        pcall(self.SetBackdropBorderColor, self, 0.35, 0.35, 0.35, 1)
-        chevronZone:SetBackdropColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
+        SetDropdownBorderColor(0.35, 0.35, 0.35, 1)
+        chevronZoneBg:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], CHEVRON_BG_ALPHA)
         separator:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.3)
         chevronLeft:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
         chevronRight:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], CHEVRON_TEXT_ALPHA)
     end)
 
     -- Menu frame (parented to UIParent to avoid scroll frame clipping)
-    local menuFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    menuFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    menuFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-    menuFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    local menuFrame = CreateFrame("Frame", nil, UIParent, useUIKitBorders and nil or "BackdropTemplate")
+    if useUIKitBorders then
+        menuFrame.bg = UIKit.CreateBackground(menuFrame, 0.1, 0.1, 0.1, 0.98)
+        UIKit.CreateBorderLines(menuFrame)
+        UIKit.UpdateBorderLines(menuFrame, 1, 0.3, 0.3, 0.3, 1, false)
+    else
+        menuFrame:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        menuFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
+        menuFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    end
     menuFrame:SetFrameStrata("TOOLTIP")
     menuFrame:SetClipsChildren(true)
     menuFrame:Hide()
@@ -4012,6 +4277,11 @@ end
 function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, options)
     options = options or {}
     local noAlpha = options.noAlpha or false
+    local UIKit = ns.UIKit
+    local useUIKitBorders = UIKit
+        and UIKit.CreateBackground
+        and UIKit.CreateBorderLines
+        and UIKit.UpdateBorderLines
 
     if parent._hasContent ~= nil then parent._hasContent = true end
     local container = CreateFrame("Frame", nil, parent)
@@ -4022,21 +4292,49 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
     SetFont(text, 12, "", C.text)
     text:SetText(label or "Color")
     text:SetPoint("LEFT", 0, 0)
+    text:SetWidth(170)
+    text:SetWordWrap(true)
+    text:SetNonSpaceWrap(true)
+    text:SetJustifyH("LEFT")
 
     -- Color swatch aligned with other widgets (starts at 180px from left)
-    local swatch = CreateFrame("Button", nil, container, "BackdropTemplate")
+    local swatch = CreateFrame("Button", nil, container, useUIKitBorders and nil or "BackdropTemplate")
     swatch:SetSize(50, 18)
     swatch:SetPoint("LEFT", container, "LEFT", 180, 0)
     local px = QUICore:GetPixelSize(swatch)
-    swatch:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = px,
-    })
-    swatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    if useUIKitBorders then
+        swatch.bg = UIKit.CreateBackground(swatch, 1, 1, 1, 1)
+        UIKit.CreateBorderLines(swatch)
+        UIKit.UpdateBorderLines(swatch, 1, 0.4, 0.4, 0.4, 1, false)
+    else
+        swatch:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = px,
+        })
+        swatch:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    end
 
     container.swatch = swatch
     container.label = text
+
+    local function SetSwatchBorderColor(r, g, b, a)
+        if useUIKitBorders then
+            UIKit.UpdateBorderLines(swatch, 1, r, g, b, a or 1, false)
+        else
+            pcall(swatch.SetBackdropBorderColor, swatch, r, g, b, a or 1)
+        end
+    end
+
+    local function SetSwatchColor(r, g, b, a)
+        if useUIKitBorders then
+            if swatch.bg then
+                swatch.bg:SetVertexColor(r, g, b, a)
+            end
+        else
+            swatch:SetBackdropColor(r, g, b, a)
+        end
+    end
 
     local function GetColor()
         if dbTable and dbKey then
@@ -4048,7 +4346,7 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
 
     local function SetColor(r, g, b, a)
         local finalAlpha = noAlpha and 1 or (a or 1)
-        swatch:SetBackdropColor(r, g, b, finalAlpha)
+        SetSwatchColor(r, g, b, finalAlpha)
         if dbTable and dbKey then
             dbTable[dbKey] = {r, g, b, finalAlpha}
         end
@@ -4059,7 +4357,7 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
     container.SetColor = SetColor
 
     local r, g, b, a = GetColor()
-    swatch:SetBackdropColor(r, g, b, a)
+    SetSwatchColor(r, g, b, a)
 
     swatch:SetScript("OnClick", function()
         local currentR, currentG, currentB, currentA = GetColor()
@@ -4078,8 +4376,8 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
         })
     end)
 
-    swatch:SetScript("OnEnter", function(self) pcall(self.SetBackdropBorderColor, self, C_accent_r, C_accent_g, C_accent_b, C_accent_a) end)
-    swatch:SetScript("OnLeave", function(self) pcall(self.SetBackdropBorderColor, self, 0.4, 0.4, 0.4, 1) end)
+    swatch:SetScript("OnEnter", function() SetSwatchBorderColor(C_accent_r, C_accent_g, C_accent_b, C_accent_a) end)
+    swatch:SetScript("OnLeave", function() SetSwatchBorderColor(0.4, 0.4, 0.4, 1) end)
 
     -- Enable/disable (for conditional UI)
     container.SetEnabled = function(self, enabled)
@@ -4108,6 +4406,96 @@ function GUI:CreateFormColorPicker(parent, label, dbKey, dbTable, onChange, opti
     end
 
     return container
+end
+
+local CreateFormEditBoxModern = GUI.CreateFormEditBox
+
+---------------------------------------------------------------------------
+-- FORM EDIT BOX (single-line text input with label and DB binding)
+---------------------------------------------------------------------------
+function GUI:CreateFormEditBox(parent, label, dbKey, dbTable, onChange, options)
+    if CreateFormEditBoxModern then
+        return CreateFormEditBoxModern(self, parent, label, dbKey, dbTable, onChange, options)
+    end
+    return nil
+end
+
+---------------------------------------------------------------------------
+-- Inline edit box (lightweight, no label, used inside custom list entries)
+---------------------------------------------------------------------------
+function GUI:CreateInlineEditBox(parent, options)
+    options = options or {}
+    local w = options.width or 120
+    local h = options.height or 22
+    local editH = options.editHeight or (h - 2)
+    local inset = options.textInset or 6
+    local bg = options.bgColor or {0.08, 0.08, 0.08, 1}
+    local border = options.borderColor or {0.25, 0.25, 0.25, 1}
+    local activeBorder = options.activeBorderColor or C.accent
+
+    -- Background frame with backdrop
+    local bgFrame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    bgFrame:SetSize(w, h)
+    local px = QUICore:GetPixelSize(bgFrame)
+    bgFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = px,
+    })
+    bgFrame:SetBackdropColor(bg[1], bg[2], bg[3], bg[4] or 1)
+    bgFrame:SetBackdropBorderColor(border[1], border[2], border[3], border[4] or 1)
+
+    -- Helper for callers to update border color (used by CDM position fields)
+    bgFrame.SetFieldBorderColor = function(self, r, g, b, a)
+        pcall(self.SetBackdropBorderColor, self, r, g, b, a or 1)
+    end
+
+    -- Edit box inside
+    local editBox = CreateFrame("EditBox", nil, bgFrame)
+    editBox:SetHeight(editH)
+    editBox:SetPoint("LEFT", inset, 0)
+    editBox:SetPoint("RIGHT", -inset, 0)
+    editBox:SetFont(GetFontPath(), options.fontSize or 11, "")
+    editBox:SetTextColor(C_text_r, C_text_g, C_text_b, C_text_a)
+    editBox:SetJustifyH(options.justifyH or "LEFT")
+    editBox:SetAutoFocus(false)
+
+    if options.maxLetters then
+        editBox:SetMaxLetters(options.maxLetters)
+    end
+
+    if options.text then
+        editBox:SetText(options.text)
+    end
+
+    -- Border hover/focus effects
+    editBox:SetScript("OnEnter", function(self)
+        pcall(bgFrame.SetBackdropBorderColor, bgFrame, activeBorder[1], activeBorder[2], activeBorder[3], activeBorder[4] or 1)
+    end)
+    editBox:SetScript("OnLeave", function(self)
+        if not self:HasFocus() then
+            pcall(bgFrame.SetBackdropBorderColor, bgFrame, border[1], border[2], border[3], border[4] or 1)
+        end
+    end)
+
+    editBox:HookScript("OnEditFocusGained", function(self)
+        pcall(bgFrame.SetBackdropBorderColor, bgFrame, activeBorder[1], activeBorder[2], activeBorder[3], activeBorder[4] or 1)
+        if options.onEditFocusGained then options.onEditFocusGained(self) end
+    end)
+    editBox:HookScript("OnEditFocusLost", function(self)
+        pcall(bgFrame.SetBackdropBorderColor, bgFrame, border[1], border[2], border[3], border[4] or 1)
+    end)
+
+    editBox:SetScript("OnEnterPressed", function(self)
+        if options.onEnterPressed then options.onEnterPressed(self) end
+        self:ClearFocus()
+    end)
+    editBox:SetScript("OnEscapePressed", function(self)
+        if options.onEscapePressed then options.onEscapePressed(self) end
+        self:ClearFocus()
+    end)
+
+    return bgFrame, editBox
 end
 
 ---------------------------------------------------------------------------
@@ -4437,6 +4825,11 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
     -- Check if we have any results at all (either settings or navigation)
     local hasResults = (results and #results > 0) or (navResults and #navResults > 0)
 
+    -- Index progress info
+    local isIndexing = not GUI._searchIndexBuilt and GUI._searchIndexTotal > 0
+    local indexProgress = GUI._searchIndexProgress or 0
+    local indexTotal = GUI._searchIndexTotal or 0
+
     -- No results message
     if not hasResults then
         if searchTerm and searchTerm ~= "" then
@@ -4447,12 +4840,21 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             table.insert(content._fontStrings, noResults)
             y = y - 30
 
-            local tip = content:CreateFontString(nil, "OVERLAY")
-            SetFont(tip, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
-            tip:SetText("Try different keywords, or visit other tabs first to index their settings")
-            tip:SetPoint("TOPLEFT", PADDING, y)
-            table.insert(content._fontStrings, tip)
-            y = y - 30
+            if isIndexing then
+                local tip = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.8})
+                tip:SetText("Indexing settings... (" .. indexProgress .. "/" .. indexTotal .. " tabs) — more results may appear shortly")
+                tip:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip)
+                y = y - 30
+            else
+                local tip = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
+                tip:SetText("Try different keywords")
+                tip:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip)
+                y = y - 30
+            end
         else
             -- Empty state - show instructions
             local instructions = content:CreateFontString(nil, "OVERLAY")
@@ -4462,11 +4864,19 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
             table.insert(content._fontStrings, instructions)
             y = y - 30
 
-            local tip2 = content:CreateFontString(nil, "OVERLAY")
-            SetFont(tip2, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
-            tip2:SetText("Settings are indexed when you visit each tab")
-            tip2:SetPoint("TOPLEFT", PADDING, y)
-            table.insert(content._fontStrings, tip2)
+            if isIndexing then
+                local tip2 = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip2, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.8})
+                tip2:SetText("Indexing settings... (" .. indexProgress .. "/" .. indexTotal .. " tabs)")
+                tip2:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip2)
+            else
+                local tip2 = content:CreateFontString(nil, "OVERLAY")
+                SetFont(tip2, 10, "", {C.textMuted[1], C.textMuted[2], C.textMuted[3], 0.7})
+                tip2:SetText("All settings indexed and ready to search")
+                tip2:SetPoint("TOPLEFT", PADDING, y)
+                table.insert(content._fontStrings, tip2)
+            end
             y = y - 20
         end
 
@@ -4676,6 +5086,17 @@ function GUI:RenderSearchResults(content, results, searchTerm, navResults)
 
     -- Re-enable auto-registration (guaranteed even if widget builder errored)
     GUI._suppressSearchRegistration = false
+
+    -- Show indexing progress note at the bottom if still building
+    if isIndexing then
+        y = y - 10
+        local progressNote = content:CreateFontString(nil, "OVERLAY")
+        SetFont(progressNote, 10, "", {C.accent[1], C.accent[2], C.accent[3], 0.7})
+        progressNote:SetText("Indexing... (" .. indexProgress .. "/" .. indexTotal .. " tabs) — more results may appear")
+        progressNote:SetPoint("TOPLEFT", PADDING, y)
+        table.insert(content._fontStrings, progressNote)
+        y = y - 20
+    end
 
     content:SetHeight(math.abs(y) + 20)
 end
@@ -6039,10 +6460,9 @@ function GUI:SelectTab(frame, index)
         return
     end
 
-    -- Force-load all tabs when Search tab is selected
+    -- Start background index build if not done yet (non-blocking)
     if index == self._searchTabIndex and self._allTabsAdded and not self._searchIndexBuilt then
-        self:ForceLoadAllTabs()
-        self._searchIndexBuilt = true
+        self:StartBackgroundIndexBuild()
     end
 
     -- Auto-focus search input when navigating to Search tab

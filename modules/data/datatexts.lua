@@ -27,6 +27,33 @@ QUICore.Datatexts = Datatexts
 Datatexts.registry = {}
 Datatexts.activeInstances = {}  -- Track active datatext instances for cleanup
 
+---------------------------------------------------------------------------
+-- SHARED TICKER: One timer drives all 1s datatext updates
+---------------------------------------------------------------------------
+local sharedTickerFns = {}   -- frame -> Update function
+local sharedTicker = nil
+
+local function SharedTickerUpdate()
+    for frame, updateFn in pairs(sharedTickerFns) do
+        updateFn()
+    end
+end
+
+function Datatexts:RegisterSharedTicker(frame, updateFn)
+    sharedTickerFns[frame] = updateFn
+    if not sharedTicker then
+        sharedTicker = C_Timer.NewTicker(1, SharedTickerUpdate)
+    end
+end
+
+function Datatexts:UnregisterSharedTicker(frame)
+    sharedTickerFns[frame] = nil
+    if not next(sharedTickerFns) and sharedTicker then
+        sharedTicker:Cancel()
+        sharedTicker = nil
+    end
+end
+
 -- Get user's configured value color for datatexts (returns 0-255 integers for hex formatting)
 local function GetValueColor()
     -- Access db through ns.Addon which is always available
@@ -358,7 +385,7 @@ Datatexts:Register("time", {
         frame.Update = Update
 
         -- Update every second
-        frame.ticker = C_Timer.NewTicker(1, Update)
+        Datatexts:RegisterSharedTicker(frame, Update)
         
         -- Tooltip with lockouts and reset timers
         slotFrame:EnableMouse(true)
@@ -439,9 +466,7 @@ Datatexts:Register("time", {
     end,
     
     OnDisable = function(frame)
-        if frame.ticker then
-            frame.ticker:Cancel()
-        end
+        Datatexts:UnregisterSharedTicker(frame)
     end,
 })
 
@@ -475,16 +500,14 @@ Datatexts:Register("fps", {
         end
         
         frame.Update = Update
-        frame.ticker = C_Timer.NewTicker(1, Update)
+        Datatexts:RegisterSharedTicker(frame, Update)
         
         Update()
         return frame
     end,
     
     OnDisable = function(frame)
-        if frame.ticker then
-            frame.ticker:Cancel()
-        end
+        Datatexts:UnregisterSharedTicker(frame)
     end,
 })
 
@@ -519,16 +542,14 @@ Datatexts:Register("latency", {
         end
 
         frame.Update = Update
-        frame.ticker = C_Timer.NewTicker(1, Update)
+        Datatexts:RegisterSharedTicker(frame, Update)
 
         Update()
         return frame
     end,
     
     OnDisable = function(frame)
-        if frame.ticker then
-            frame.ticker:Cancel()
-        end
+        Datatexts:UnregisterSharedTicker(frame)
     end,
 })
 
@@ -591,9 +612,9 @@ Datatexts:Register("system", {
         end
 
         frame.Update = Update
-        frame.ticker = C_Timer.NewTicker(1, Update)
+        Datatexts:RegisterSharedTicker(frame, Update)
 
-        -- Tooltip with latency details
+        -- Tooltip with latency details and addon memory usage
         slotFrame:EnableMouse(true)
         slotFrame:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -606,11 +627,85 @@ Datatexts:Register("system", {
 
             -- Performance stats
             local currentFps = floor(GetFramerate() + 0.5)
-            local _, _, homePing, worldPing = GetNetStats()
+            local bandIn, bandOut, homePing, worldPing = GetNetStats()
 
             GameTooltip:AddDoubleLine("Framerate:", format("%d fps", currentFps), 0.8, 0.8, 0.8, ar, ag, ab)
             GameTooltip:AddDoubleLine("Home Latency:", format("%d ms", floor(homePing or 0)), 0.8, 0.8, 0.8, ar, ag, ab)
             GameTooltip:AddDoubleLine("World Latency:", format("%d ms", floor(worldPing or 0)), 0.8, 0.8, 0.8, ar, ag, ab)
+
+            -- Bandwidth (only shown when actively downloading)
+            if GetAvailableBandwidth then
+                local avail = GetAvailableBandwidth()
+                if avail and avail > 0 then
+                    GameTooltip:AddDoubleLine("Bandwidth:", format("%.2f Mbps", avail), 0.8, 0.8, 0.8, ar, ag, ab)
+                    if GetDownloadedPercentage then
+                        local pct = GetDownloadedPercentage()
+                        if pct and pct > 0 and pct < 1 then
+                            GameTooltip:AddDoubleLine("Downloaded:", format("%d%%", pct * 100), 0.8, 0.8, 0.8, ar, ag, ab)
+                        end
+                    end
+                end
+            end
+
+            -- Protocol info
+            if GetNetIpTypes then
+                local homeType, worldType = GetNetIpTypes()
+                if homeType or worldType then
+                    local homeProto = (homeType and homeType == 1) and "IPv6" or "IPv4"
+                    local worldProto = (worldType and worldType == 1) and "IPv6" or "IPv4"
+                    GameTooltip:AddDoubleLine("Protocol:", format("Home %s / World %s", homeProto, worldProto), 0.8, 0.8, 0.8, 0.6, 0.6, 0.6)
+                end
+            end
+
+            -- Addon memory usage
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("AddOn Memory", 1, 1, 1)
+
+            UpdateAddOnMemoryUsage()
+            local addons = {}
+            local totalMem = 0
+            for i = 1, C_AddOns.GetNumAddOns() do
+                local ok, loaded = pcall(C_AddOns.IsAddOnLoaded, i)
+                if ok and loaded then
+                    local mem = GetAddOnMemoryUsage(i)
+                    totalMem = totalMem + mem
+                    local name = C_AddOns.GetAddOnInfo(i)
+                    addons[#addons + 1] = { name = name, mem = mem }
+                end
+            end
+
+            -- Sort by memory usage (highest first)
+            table.sort(addons, function(a, b) return a.mem > b.mem end)
+
+            -- Show top addons (limit to avoid massive tooltip)
+            local maxDisplay = 20
+            for i = 1, min(#addons, maxDisplay) do
+                local a = addons[i]
+                local memStr
+                if a.mem >= 1024 then
+                    memStr = format("%.1f MB", a.mem / 1024)
+                else
+                    memStr = format("%.0f KB", a.mem)
+                end
+                -- Color: red for heavy (>10MB), yellow for moderate (>1MB), green for light
+                local mr, mg, mb
+                if a.mem >= 10240 then
+                    mr, mg, mb = 1, 0.3, 0.3
+                elseif a.mem >= 1024 then
+                    mr, mg, mb = 1, 0.82, 0.2
+                else
+                    mr, mg, mb = 0.6, 0.8, 0.6
+                end
+                GameTooltip:AddDoubleLine(a.name, memStr, 0.8, 0.8, 0.8, mr, mg, mb)
+            end
+            if #addons > maxDisplay then
+                GameTooltip:AddLine(format("  ... and %d more", #addons - maxDisplay), 0.5, 0.5, 0.5)
+            end
+
+            -- Total
+            GameTooltip:AddLine(" ")
+            local totalStr = totalMem >= 1024 and format("%.1f MB", totalMem / 1024) or format("%.0f KB", totalMem)
+            GameTooltip:AddDoubleLine("Total:", totalStr, 1, 1, 1, ar, ag, ab)
 
             GameTooltip:Show()
         end)
@@ -621,9 +716,7 @@ Datatexts:Register("system", {
     end,
 
     OnDisable = function(frame)
-        if frame.ticker then
-            frame.ticker:Cancel()
-        end
+        Datatexts:UnregisterSharedTicker(frame)
     end,
 })
 
