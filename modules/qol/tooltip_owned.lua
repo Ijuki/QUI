@@ -47,23 +47,6 @@ local blizzAnchorCache = {}   -- [blizzFrame] = { point, relativeTo, relPoint, x
 local blizzOwnerCache = {}    -- [blizzFrame] = { owner, anchorType } — from SetOwner calls
 local fadeState = {}          -- [ownedFrame] = { elapsed, duration } when fading out
 
----------------------------------------------------------------------------
--- DEBUG: Lightweight tooltip lifecycle tracing.
--- Enabled by /qui debug (sets QUI.db.char.debug = true for one session).
--- Prints to default chat frame with |cFF00FFFF[TT]|r prefix.
----------------------------------------------------------------------------
-local function TooltipDebug(msg, ...)
-    if not (_G.QUI and _G.QUI.db and _G.QUI.db.char and _G.QUI.db.char.debug) then return end
-    local text = msg
-    if select("#", ...) > 0 then
-        text = format(msg, ...)
-    end
-    local cf = DEFAULT_CHAT_FRAME
-    if cf and cf.AddMessage then
-        cf:AddMessage("|cFF00FFFF[TT]|r " .. text)
-    end
-end
-
 -- Cancel any active fade-out and restore full alpha (called before showing).
 local function CancelFadeOut(ownedTip)
     if fadeState[ownedTip] then
@@ -631,7 +614,6 @@ local function ReadEmbeddedContent(blizzTip)
                 end
 
                 if moneyText then
-                    TooltipDebug("MONEY FRAME found: %d copper → %s", copperTotal, moneyText)
                     embedded[#embedded + 1] = {
                         leftText = moneyText,
                         lr = 1, lg = 1, lb = 1,
@@ -1488,7 +1470,6 @@ local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
 
     -- Cursor follow mode (primary tooltips only)
     if settings and settings.anchorToCursor then
-        TooltipDebug("ANCHOR %s: cursor-follow mode", blizzTip:GetName() or "?")
         Provider:PositionTooltipAtCursor(ownedTip, settings)
         return
     end
@@ -1501,11 +1482,8 @@ local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
         local y = Helpers.SafeToNumber(cached.y, 0)
         ownedTip:ClearAllPoints()
         if cached.relativeTo then
-            local relName = cached.relativeTo.GetName and cached.relativeTo:GetName() or tostring(cached.relativeTo)
-            TooltipDebug("ANCHOR %s: cached SetPoint %s→%s(%s) +%.0f,%.0f", blizzTip:GetName() or "?", cached.point, relName, cached.relPoint or cached.point, x, y)
             ownedTip:SetPoint(cached.point, cached.relativeTo, cached.relPoint or cached.point, x, y)
         else
-            TooltipDebug("ANCHOR %s: cached SetPoint %s→UIParent(%s) +%.0f,%.0f", blizzTip:GetName() or "?", cached.point, cached.relPoint or "BOTTOMLEFT", x, y)
             ownedTip:SetPoint(cached.point, UIParent, cached.relPoint or "BOTTOMLEFT", x, y)
         end
         return
@@ -1523,8 +1501,6 @@ local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
         if mapping and owner.GetCenter then
             local oX = Helpers.SafeToNumber(ownerInfo.offsetX, 0)
             local oY = Helpers.SafeToNumber(ownerInfo.offsetY, 0)
-            local ownerName = owner.GetName and owner:GetName() or tostring(owner)
-            TooltipDebug("ANCHOR %s: ownerCache %s→%s type=%s +%.0f,%.0f", blizzTip:GetName() or "?", mapping[1], ownerName, tostring(anchorType), oX, oY)
             ownedTip:ClearAllPoints()
             ownedTip:SetPoint(mapping[1], owner, mapping[2], oX, oY)
             return
@@ -1532,7 +1508,6 @@ local function AnchorOwnedTooltip(ownedTip, blizzTip, settings)
     end
 
     -- Last fallback: cursor position
-    TooltipDebug("ANCHOR %s: fallback cursor (no cache, no owner)", blizzTip:GetName() or "?")
     Provider:PositionTooltipAtCursor(ownedTip, settings)
 end
 
@@ -1743,8 +1718,6 @@ local function SetupVisibilityWatcher()
             ownerChanged[blizzTip] = nil
 
             if isNewContent then
-                local wTipName = blizzTip:GetName() or tostring(blizzTip)
-                TooltipDebug("WATCHER new content: %s wasShown=%s pending=%s", wTipName, tostring(wasShown[blizzTip]), tostring(pendingPopulate[blizzTip] ~= nil))
                 -- Shopping tooltips defer to the continuous check below.
                 if ownedTip._isShoppingTooltip then
                     activelyHandling[blizzTip] = true
@@ -1765,26 +1738,35 @@ local function SetupVisibilityWatcher()
                         if IsEmbeddedSubTooltip(blizzTip) then return end
                         local okStill, still = pcall(blizzTip.IsShown, blizzTip)
                         if not okStill or not still then return end
+
+                        -- Visibility check: same logic as HandleTooltipData.
+                        -- If this context should be hidden, suppress both Blizzard
+                        -- and owned tooltips — the user wants no tooltip at all.
+                        if not ownedTip._isShoppingTooltip then
+                            local owner = nil
+                            local okOwner
+                            okOwner, owner = pcall(blizzTip.GetOwner, blizzTip)
+                            if not okOwner then owner = nil end
+                            local context = Provider:GetTooltipContext(owner)
+                            if not Provider:ShouldShowTooltip(context) then
+                                return
+                            end
+                            if Provider:IsOwnerFadedOut(owner) then
+                                return
+                            end
+                        end
+
                         -- Discover child tooltips created by other addons
                         if OwnedEngine._discoverChildTooltips then
                             OwnedEngine._discoverChildTooltips(blizzTip)
                         end
                         local lines, hasExtra = ReadAllContent(blizzTip)
-                        TooltipDebug("WATCHER populate %s lines=%d", wTipName, #lines)
-                        for di, dl in ipairs(lines) do
-                            local okLT, ltStr = pcall(tostring, dl.leftText or "")
-                            if not okLT then ltStr = "<secret>" end
-                            TooltipDebug("  L%d: %s", di, ltStr)
-                        end
                         if #lines > 0 then
                             ownedTip._hasEmbeddedContent = hasExtra
                             ApplyClassColorName(lines, settings, blizzTip)
                             PopulateTooltip(ownedTip, lines, nil, nil, blizzTip)
                             AnchorOwnedTooltip(ownedTip, blizzTip, settings)
                             ownedTip:Show()
-                            local okW, ownW = pcall(ownedTip.GetWidth, ownedTip)
-                            local okH, ownH = pcall(ownedTip.GetHeight, ownedTip)
-                            TooltipDebug("  SHOWN watcher owned=%s visible=%s size=%.0fx%.0f alpha=%.2f", tostring(ownedTip:IsShown()), tostring(ownedTip:IsVisible()), okW and ownW or 0, okH and ownH or 0, ownedTip:GetAlpha())
                         end
                         -- Late content re-checks — widget content, embedded
                         -- items, and async addon additions. Use content hash
@@ -1922,14 +1904,9 @@ local function HandleTooltipData(blizzTip, tooltipData, tooltipType)
     local ownedTip = tooltipPairs[blizzTip]
     if not ownedTip then return end
 
-    local tipName = blizzTip:GetName() or tostring(blizzTip)
-
-    TooltipDebug("PostCall: %s type=%s", tipName, tostring(tooltipType))
-
     -- Skip if this frame is currently used as an embedded sub-tooltip.
     -- Its content is already merged into the main tooltip via ReadEmbeddedContent.
     if IsEmbeddedSubTooltip(blizzTip) then
-        TooltipDebug("  SKIP embedded sub-tooltip")
         pcall(blizzTip.SetAlpha, blizzTip, 0)
         return
     end
@@ -1943,7 +1920,6 @@ local function HandleTooltipData(blizzTip, tooltipData, tooltipType)
     -- Check visibility
     local settings = Provider:GetSettings()
     if not settings or not settings.enabled then
-        TooltipDebug("  SKIP not enabled")
         return
     end
 
@@ -1957,15 +1933,11 @@ local function HandleTooltipData(blizzTip, tooltipData, tooltipType)
         -- Context/visibility check
         local context = Provider:GetTooltipContext(owner)
         if not Provider:ShouldShowTooltip(context) then
-            local ownerName = owner and owner.GetName and owner:GetName() or "nil"
-            TooltipDebug("  SKIP visibility context=%s owner=%s", context, ownerName)
             return
         end
 
         -- Check if owner is faded out
         if Provider:IsOwnerFadedOut(owner) then
-            local ownerName = owner and owner.GetName and owner:GetName() or "nil"
-            TooltipDebug("  SKIP faded out owner=%s", ownerName)
             return
         end
     end
@@ -2040,14 +2012,7 @@ local function HandleTooltipData(blizzTip, tooltipData, tooltipType)
         -- Read all content (text lines + embedded items + widgets).
         -- By now, all synchronous hooks (OnTooltipSetItem etc.) have run.
         local updatedLines, hasExtra = ReadAllContent(blizzTip)
-        TooltipDebug("POPULATE %s lines=%d hasExtra=%s", tipName, #updatedLines, tostring(hasExtra))
-        for di, dl in ipairs(updatedLines) do
-            local okLT, ltStr = pcall(tostring, dl.leftText or "")
-            if not okLT then ltStr = "<secret>" end
-            TooltipDebug("  L%d: %s", di, ltStr)
-        end
         if #updatedLines == 0 then
-            TooltipDebug("  EMPTY — hiding owned tip")
             ownedTip:Hide()
             return
         end
@@ -2059,7 +2024,6 @@ local function HandleTooltipData(blizzTip, tooltipData, tooltipType)
         PopulateTooltip(ownedTip, updatedLines, tooltipType, tooltipData, blizzTip)
         AnchorOwnedTooltip(ownedTip, blizzTip, settings)
         ownedTip:Show()
-        TooltipDebug("  SHOWN owned tip for %s", tipName)
 
         -- Store content hash for late re-checks. Use hash instead of line
         -- count so we also catch external addons that modify existing lines
@@ -2242,8 +2206,6 @@ function OwnedEngine:Initialize()
             -- TooltipDataProcessor (world quest map pins, manual AddLine, etc.).
             if blizzFrame.HookScript then
                 pcall(blizzFrame.HookScript, blizzFrame, "OnShow", function(self)
-                    local selfName = self:GetName() or tostring(self)
-                    TooltipDebug("OnShow: %s", selfName)
                     local s = Provider and Provider:GetSettings()
                     if not s or not s.enabled then return end
                     -- Skip if this frame is currently used as an embedded sub-tooltip.
@@ -2300,8 +2262,6 @@ function OwnedEngine:Initialize()
                 -- cycles (Blizzard clears and re-populates tooltips during setup).
                 -- If the tooltip re-shows within that frame, cancel the hide.
                 pcall(blizzFrame.HookScript, blizzFrame, "OnHide", function(self)
-                    local hideName = self:GetName() or tostring(self)
-                    TooltipDebug("OnHide: %s isShopping=%s", hideName, tostring(isShopping))
                     -- Shopping tooltips: don't hide via OnHide. Blizzard's
                     -- comparison system cycles shopping tooltips through
                     -- hide/show during setup — reacting to OnHide causes
@@ -2316,7 +2276,6 @@ function OwnedEngine:Initialize()
                         -- If Blizzard re-showed the tooltip (refresh cycle), don't hide
                         local okShown, shown = pcall(self.IsShown, self)
                         if okShown and shown then
-                            TooltipDebug("OnHide deferred: %s re-shown, skip hide", hideName)
                             return
                         end
                         local ownedTip = tooltipPairs[self]
