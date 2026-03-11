@@ -1289,13 +1289,16 @@ local function UpdateLeaderIcon(frame)
     -- Check if unit is leader or assistant
     -- Note: Assistants only exist in raids, not parties
     if UnitIsGroupLeader(frame.unit) then
-        frame.leaderIcon:SetTexture([[Interface\GroupFrame\UI-Group-LeaderIcon]])
+        frame.leaderIcon:SetAtlas("groupfinder-icon-leader")
+        frame.leaderIcon:SetAlpha(1)
         frame.leaderIcon:Show()
     elseif IsInRaid() and UnitIsGroupAssistant(frame.unit) then
-        frame.leaderIcon:SetTexture([[Interface\GroupFrame\UI-Group-AssistantIcon]])
+        frame.leaderIcon:SetAtlas("groupfinder-icon-leader")
+        frame.leaderIcon:SetAlpha(0.6)
         frame.leaderIcon:Show()
     else
         frame.leaderIcon:Hide()
+        frame.leaderIcon:SetAlpha(1)
     end
 end
 
@@ -3852,9 +3855,19 @@ initFrame:SetScript("OnEvent", function(self, event)
             QUI_UF:Initialize()
             -- Hook Blizzard Edit Mode after frames are created
             QUI_UF:HookBlizzardEditMode()
-            -- Register frames with Clique after creation
+            -- Register frames with Clique and click-cast after creation
             C_Timer.After(0.5, function()
                 QUI_UF:RegisterWithClique()
+                local GFCC = ns.QUI_GroupFrameClickCast
+                if GFCC then
+                    -- Initialize if not already done (e.g. group frames disabled)
+                    if not GFCC:IsEnabled() then
+                        GFCC:Initialize()
+                    end
+                    if GFCC:IsEnabled() then
+                        GFCC:RegisterUnitFrames()
+                    end
+                end
             end)
         end)
     elseif event == "PLAYER_ENTERING_WORLD" then
