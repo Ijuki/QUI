@@ -1,41 +1,29 @@
 diff --git a/modules/chat/chat.lua b/modules/chat/chat.lua
-index 6f6bdac..a585664 100644
+index e4385b0..58d1410 100644
 --- a/modules/chat/chat.lua
 +++ b/modules/chat/chat.lua
-@@ -138,23 +138,42 @@ local function StyleFontStrings(chatFrame)
+@@ -162,22 +162,41 @@ local function StyleFontStrings(chatFrame)
      end
  end
  
 --- Timestamp - Prepend time to messages
-----------------------------------------------------------------------------
--local function AddTimestamp(text)
--    local settings = GetSettings()
--    if not settings or not settings.timestamps or not settings.timestamps.enabled then
--        return text
--    end
--
--    local fmt = settings.timestamps.format == "12h" and "%I:%M %p" or "%H:%M"
--    local timestamp = date(fmt)
--    local color = settings.timestamps.color
--    if color then
--        local hex = string.format("%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
--        return string.format("|cff%s[%s]|r %s", hex, timestamp, text)
--    end
--    return string.format("[%s] %s", timestamp, text)
--end
 +-- Timestamp - Configure Blizzard-native timestamp prefix
-+---------------------------------------------------------------------------
+ ---------------------------------------------------------------------------
+-local function AddTimestamp(text)
 +local function BuildTimestampFormat()
-+    local settings = GetSettings()
-+    if not settings or not settings.timestamps or not settings.timestamps.enabled then
+     local settings = GetSettings()
+     if not settings or not settings.timestamps or not settings.timestamps.enabled then
+-        return text
 +        return nil
-+    end
-+
-+    local fmt = settings.timestamps.format == "12h" and "%I:%M %p" or "%H:%M"
+     end
+ 
+     local fmt = settings.timestamps.format == "12h" and "%I:%M %p" or "%H:%M"
+-    local timestamp = date(fmt)
 +    local timestampTemplate = string.format("[%s]", fmt)
-+    local color = settings.timestamps.color
-+    if color then
-+        local hex = string.format("%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
+     local color = settings.timestamps.color
+     if color then
+         local hex = string.format("%02x%02x%02x", color[1]*255, color[2]*255, color[3]*255)
+-        return string.format("|cff%s[%s]|r %s", hex, timestamp, text)
 +        return string.format("|cff%s%s|r ", hex, timestampTemplate)
 +    end
 +    return string.format("%s ", timestampTemplate)
@@ -57,28 +45,24 @@ index 6f6bdac..a585664 100644
 +
 +    if enabled and format then
 +        _G.CHAT_TIMESTAMP_FORMAT = format
-+    end
-+end
+     end
+-    return string.format("[%s] %s", timestamp, text)
+ end
  
  ---------------------------------------------------------------------------
- -- Channel label formatting
-@@ -326,12 +345,10 @@ local function InstallMessageFilters()
+@@ -479,9 +498,8 @@ local function InstallMessageFilters()
  
          local modified = msg
  
--
 -        if settings.timestamps and settings.timestamps.enabled then
 -            modified = AddTimestamp(modified)
 -        end
--
 +        -- Normalize channel labels before URL detection.
 +        modified = FormatChannelLabels(modified)
  
-+        -- Apply URL detection
+         -- Apply URL detection
          if settings.urls and settings.urls.enabled then
-             modified = MakeURLsClickable(modified)
-         end
-@@ -1347,6 +1364,7 @@ end
+@@ -1476,6 +1494,7 @@ end
  ---------------------------------------------------------------------------
  local function RefreshAll()
      local settings = GetSettings()
@@ -86,11 +70,3 @@ index 6f6bdac..a585664 100644
  
      -- Handle each skinned frame
      for chatFrame in pairs(skinnedFrames) do
-@@ -1400,6 +1418,7 @@ eventFrame:SetScript("OnEvent", function(self, event)
-     if event == "PLAYER_LOGIN" then
-         C_Timer.After(0.5, function()
-             local settings = GetSettings()
-+            ApplyTimestampSettings()
-             if not settings or not settings.enabled then return end
- 
-             -- Setup URL click handler (once)
