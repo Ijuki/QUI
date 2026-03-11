@@ -12,6 +12,7 @@ local Helpers = ns.Helpers
 local IsSecretValue = Helpers.IsSecretValue
 local SafeValue = Helpers.SafeValue
 local SafeToNumber = Helpers.SafeToNumber
+local issecretvalue = _G.issecretvalue
 local GetDB = Helpers.CreateDBGetter("quiGroupFrames")
 
 local GetCore = Helpers.GetCore
@@ -945,6 +946,9 @@ local function UpdateThreat(frame)
     if ok and status and status >= 2 then
         local tc = indSettings.threatColor or { 1, 0, 0, 0.8 }
         frame.threatBorder:SetBackdropBorderColor(tc[1], tc[2], tc[3], tc[4] or 0.8)
+        -- Keep threat border below icons/indicators — re-level in case frame
+        -- base level shifted since decoration (secure header can re-level children)
+        frame.threatBorder:SetFrameLevel(frame:GetFrameLevel() + 3)
         frame.threatBorder:Show()
     else
         frame.threatBorder:Hide()
@@ -1629,7 +1633,8 @@ local function DecorateGroupFrame(frame)
     -- Ready check icon
     local readyCheckIcon = frame.readyCheckIcon or textFrame:CreateTexture(nil, "OVERLAY")
     readyCheckIcon:ClearAllPoints()
-    readyCheckIcon:SetSize(16, 16)
+    local rcSize = indDB.readyCheckSize or 16
+    readyCheckIcon:SetSize(rcSize, rcSize)
     local rcAnchor = indDB.readyCheckAnchor or "CENTER"
     readyCheckIcon:SetPoint(rcAnchor, frame, rcAnchor, indDB.readyCheckOffsetX or 0, BottomPadY(rcAnchor, indDB.readyCheckOffsetY or 0))
     readyCheckIcon:Hide()
@@ -1638,7 +1643,8 @@ local function DecorateGroupFrame(frame)
     -- Resurrection icon
     local resIcon = frame.resIcon or textFrame:CreateTexture(nil, "OVERLAY")
     resIcon:ClearAllPoints()
-    resIcon:SetSize(16, 16)
+    local resSize = indDB.resurrectionSize or 16
+    resIcon:SetSize(resSize, resSize)
     local resAnchor = indDB.resurrectionAnchor or "CENTER"
     resIcon:SetPoint(resAnchor, frame, resAnchor, indDB.resurrectionOffsetX or 0, BottomPadY(resAnchor, indDB.resurrectionOffsetY or 0))
     resIcon:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
@@ -1648,7 +1654,8 @@ local function DecorateGroupFrame(frame)
     -- Summon pending icon
     local summonIcon = frame.summonIcon or textFrame:CreateTexture(nil, "OVERLAY")
     summonIcon:ClearAllPoints()
-    summonIcon:SetSize(16, 16)
+    local sumSize = indDB.summonSize or 20
+    summonIcon:SetSize(sumSize, sumSize)
     local sumAnchor = indDB.summonAnchor or "CENTER"
     summonIcon:SetPoint(sumAnchor, frame, sumAnchor, indDB.summonOffsetX or 16, BottomPadY(sumAnchor, indDB.summonOffsetY or 0))
     summonIcon:SetAtlas("RaidFrame-Icon-SummonPending")
@@ -1658,7 +1665,8 @@ local function DecorateGroupFrame(frame)
     -- Leader icon
     local leaderIcon = frame.leaderIcon or textFrame:CreateTexture(nil, "OVERLAY")
     leaderIcon:ClearAllPoints()
-    leaderIcon:SetSize(12, 12)
+    local ldrSize = indDB.leaderSize or 12
+    leaderIcon:SetSize(ldrSize, ldrSize)
     local ldrAnchor = indDB.leaderAnchor or "TOP"
     leaderIcon:SetPoint(ldrAnchor, frame, ldrAnchor, indDB.leaderOffsetX or 0, BottomPadY(ldrAnchor, indDB.leaderOffsetY or 6))
     leaderIcon:Hide()
@@ -1667,7 +1675,8 @@ local function DecorateGroupFrame(frame)
     -- Target marker (raid icon)
     local targetMarker = frame.targetMarker or textFrame:CreateTexture(nil, "OVERLAY")
     targetMarker:ClearAllPoints()
-    targetMarker:SetSize(14, 14)
+    local tmSize = indDB.targetMarkerSize or 14
+    targetMarker:SetSize(tmSize, tmSize)
     local tmAnchor = indDB.targetMarkerAnchor or "TOPRIGHT"
     targetMarker:SetPoint(tmAnchor, frame, tmAnchor, indDB.targetMarkerOffsetX or -2, BottomPadY(tmAnchor, indDB.targetMarkerOffsetY or -2))
     targetMarker:Hide()
@@ -1676,7 +1685,8 @@ local function DecorateGroupFrame(frame)
     -- Phase icon
     local phaseIcon = frame.phaseIcon or textFrame:CreateTexture(nil, "OVERLAY")
     phaseIcon:ClearAllPoints()
-    phaseIcon:SetSize(16, 16)
+    local phSize = indDB.phaseSize or 16
+    phaseIcon:SetSize(phSize, phSize)
     local phAnchor = indDB.phaseAnchor or "BOTTOMLEFT"
     phaseIcon:SetPoint(phAnchor, frame, phAnchor, indDB.phaseOffsetX or 2, BottomPadY(phAnchor, indDB.phaseOffsetY or 2))
     phaseIcon:SetTexture("Interface\\TargetingFrame\\UI-PhasingIcon")
@@ -1690,7 +1700,7 @@ local function DecorateGroupFrame(frame)
     threatBorder:ClearAllPoints()
     threatBorder:SetPoint("TOPLEFT", -px, px)
     threatBorder:SetPoint("BOTTOMRIGHT", px, -px)
-    threatBorder:SetFrameLevel(frame:GetFrameLevel() + 5)
+    threatBorder:SetFrameLevel(frame:GetFrameLevel() + 3)
     threatBorder:SetBackdrop({
         edgeFile = "Interface\\Buttons\\WHITE8x8",
         edgeSize = threatBorderPx,
@@ -2440,6 +2450,11 @@ local function CheckUnitRange(unit)
     if UnitIsUnit(unit, "player") then return true end
     if not UnitExists(unit) then return true end
 
+    -- Phased units are always out of range
+    if UnitPhaseReason and UnitPhaseReason(unit) then
+        return false
+    end
+
     local connected = UnitIsConnected(unit)
     if IsSecretValue(connected) then connected = true end
     if not connected then
@@ -2455,8 +2470,15 @@ local function CheckUnitRange(unit)
     -- IsSpellInRange returns true/false/nil (normal booleans, not secret values)
     if rangeSpell and not isDead then
         local result = C_Spell.IsSpellInRange(rangeSpell, unit)
-        if result ~= nil then
-            return result
+        if result == true then
+            return true
+        elseif result == false then
+            -- OR with CheckInteractDistance out of combat for leniency
+            -- (avoids false OOR from spec/talent edge cases)
+            if not InCombatLockdown() and CheckInteractDistance(unit, 4) then
+                return true
+            end
+            return false
         else
             spellReturnedNil = true
         end
@@ -2470,7 +2492,7 @@ local function CheckUnitRange(unit)
 
     -- Out of combat: interact distance (~28 yards)
     if not InCombatLockdown() then
-        return CheckInteractDistance(unit, 4)
+        return CheckInteractDistance(unit, 4) and true or false
     end
 
     -- NIL-ON-ALIVE: friendly spell returned nil on alive connected target in
@@ -2479,18 +2501,29 @@ local function CheckUnitRange(unit)
         return false
     end
 
-    -- In-combat last resort: UnitInRange (Warrior/DH/Hunter with no friendly spell)
+    -- In-combat last resort: UnitInRange (DK/DH/Hunter/Warrior with no friendly spell)
+    -- Returns secret booleans in Midnight+ — propagate them downstream.
+    -- SetAlphaFromBoolean handles secret booleans natively (C-side resolves them).
     if UnitInRange then
-        local inRange, checked = UnitInRange(unit)
-        -- Guard against secret values (Midnight+)
-        if IsSecretValue(inRange) or IsSecretValue(checked) then
-            return true  -- Can't trust secret values, assume in range
+        local inRange = UnitInRange(unit)
+        if issecretvalue and issecretvalue(inRange) then
+            return inRange  -- Secret boolean, handled by SetAlphaFromBoolean downstream
         end
-        if checked and not inRange then return false end
+        if inRange ~= nil then return inRange end
     end
 
     -- No method available — assume in range
     return true
+end
+
+local function ApplyRangeAlpha(frame, inRange, outAlpha)
+    -- SetAlphaFromBoolean handles secret booleans natively (Midnight+ C-side API).
+    -- When UnitInRange returns a secret boolean, this resolves it correctly.
+    if frame.SetAlphaFromBoolean then
+        frame:SetAlphaFromBoolean(inRange, 1, outAlpha)
+    else
+        frame:SetAlpha(inRange and 1 or outAlpha)
+    end
 end
 
 local function DoRangeCheck()
@@ -2508,13 +2541,18 @@ local function DoRangeCheck()
                 local inRange = CheckUnitRange(unit)
                 local state = GetFrameState(frame)
 
-                if rangeCache[unit] ~= inRange then
+                -- Secret values (from UnitInRange fallback) can't be compared
+                -- with ==, so always update when secrets are involved.
+                local cached = rangeCache[unit]
+                local isSecret = issecretvalue and (issecretvalue(inRange) or issecretvalue(cached))
+
+                if isSecret or cached ~= inRange or state.outOfRange == nil then
                     rangeCache[unit] = inRange
-                    state.outOfRange = not inRange
-                    frame:SetAlpha(inRange and 1 or outAlpha)
-                elseif state.outOfRange == nil then
-                    state.outOfRange = not inRange
-                    frame:SetAlpha(inRange and 1 or outAlpha)
+                    -- outOfRange state: secret booleans can't be negated in Lua,
+                    -- so store the raw inRange and let alpha application handle it.
+                    state.outOfRange = true  -- Mark as range-managed
+                    state.inRange = inRange  -- Store raw value (may be secret)
+                    ApplyRangeAlpha(frame, inRange, outAlpha)
                 end
             end
         end
