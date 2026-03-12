@@ -1333,7 +1333,7 @@ local defaults = {
 
         -- Tooltip Management
         tooltip = {
-            engine = "owned",                  -- "classic" (hook-based) or "owned" (taint-free)
+            engine = "classic",                -- "classic" (hook-based)
             enabled = true,                    -- Master toggle for tooltip module
             anchorToCursor = true,             -- Follow cursor vs default anchor
             cursorAnchor = "TOPLEFT",          -- Tooltip point anchored to cursor
@@ -2706,6 +2706,8 @@ local defaults = {
                 showTooltip = true,
                 unitFrames = {
                     player = false,
+                    target = false,
+                    targettarget = false,
                     focus = false,
                     pet = false,
                 },
@@ -3895,6 +3897,11 @@ function QUICore:OnInitialize()
         end
     end
 
+    -- Migrate tooltip engine: "owned" engine removed, force to "classic"
+    if profile.tooltip and profile.tooltip.engine == "owned" then
+        profile.tooltip.engine = "classic"
+    end
+
     -- Initialize preserved scale - will be properly set in OnEnable after UI scale is applied
     self._preservedUIScale = nil
 
@@ -3908,7 +3915,7 @@ function QUICore:OnInitialize()
     self._lastKnownEngine = self.db.profile.ncdm and self.db.profile.ncdm.engine or "owned"
 
     -- Track tooltip engine so profile switches to a different engine trigger reload
-    self._lastKnownTooltipEngine = self.db.profile.tooltip and self.db.profile.tooltip.engine or "owned"
+    self._lastKnownTooltipEngine = self.db.profile.tooltip and self.db.profile.tooltip.engine or "classic"
 
     self.db.RegisterCallback(self, "OnProfileChanged", "OnProfileChanged")
     self.db.RegisterCallback(self, "OnProfileCopied",  "OnProfileChanged")
@@ -3981,12 +3988,10 @@ function QUICore:OnProfileChanged(event, db, profileKey)
         return
     end
 
-    -- Check if tooltip engine changed — requires reload since engines can't hot-swap
-    local newTooltipEngine = self.db.profile.tooltip and self.db.profile.tooltip.engine or "owned"
+    -- Tooltip engine change detection (legacy — only "classic" engine remains)
+    local newTooltipEngine = self.db.profile.tooltip and self.db.profile.tooltip.engine or "classic"
     if newTooltipEngine ~= self._lastKnownTooltipEngine then
         self._lastKnownTooltipEngine = newTooltipEngine
-        self:SafeReload()
-        return
     end
 
     -- Wipe the font registry so stale FontStrings from the old profile's frames

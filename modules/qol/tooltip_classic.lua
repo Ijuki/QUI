@@ -30,15 +30,14 @@ local function EnsureCursorFollowHooks(tooltip)
 
     tooltip:HookScript("OnUpdate", function(self)
         if not cursorFollowActive[self] then return end
-        if InCombatLockdown() then
-            cursorFollowActive[self] = nil
-            return
-        end
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled or not settings.anchorToCursor then
             cursorFollowActive[self] = nil
             return
         end
+        -- PositionTooltipAtCursor uses cached UIParent scale (updated on
+        -- UI_SCALE_CHANGED) so arithmetic is safe during combat.
+        -- GetCursorPosition returns screen coordinates, not combat-restricted data.
         Provider:PositionTooltipAtCursor(self, settings)
     end)
 
@@ -69,23 +68,37 @@ local function SetupTooltipHook()
     ns.QUI_AnchorTooltipToCursor = AnchorTooltipToCursor
 
     hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
-        if InCombatLockdown() then return end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return end
         if parent and parent.IsForbidden and parent:IsForbidden() then return end
 
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled then return end
 
-        local context = Provider:GetTooltipContext(parent)
-        if not Provider:ShouldShowTooltip(context) then
-            tooltip:Hide()
-            tooltip:SetOwner(UIParent, "ANCHOR_NONE")
-            tooltip:ClearLines()
-            return
+        -- Visibility/context checks call methods on Blizzard frames (GetName,
+        -- GetAttribute, GetActionInfo) which can taint the execution context
+        -- during combat. Skip them — combat hiding is handled by the SetUnit
+        -- hook and OnCombatStateChanged instead.
+        if not InCombatLockdown() then
+            local context = Provider:GetTooltipContext(parent)
+            if not Provider:ShouldShowTooltip(context) then
+                tooltip:Hide()
+                tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+                tooltip:ClearLines()
+                return
+            end
         end
 
+        -- Cursor positioning uses cached UIParent scale and
+        -- GetCursorPosition (screen coords, not restricted) — safe in combat.
         if settings.anchorToCursor then
-            AnchorTooltipToCursor(tooltip, parent, settings)
+            -- Don't call AnchorTooltipToCursor here — it calls SetOwner()
+            -- which re-taints the tooltip from addon context, breaking
+            -- widget-set layout (secret value arithmetic on child frames).
+            -- Blizzard already called SetOwner(parent, "ANCHOR_NONE") inside
+            -- GameTooltip_SetDefaultAnchor before this hook fires.
+            EnsureCursorFollowHooks(tooltip)
+            cursorFollowActive[tooltip] = true
+            Provider:PositionTooltipAtCursor(tooltip, settings)
         else
             cursorFollowActive[tooltip] = nil
         end

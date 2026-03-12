@@ -1,9 +1,7 @@
 --[[
     QUI Tooltip Provider
-    Abstraction layer that lets multiple tooltip engine implementations coexist.
-    Only one engine initializes at runtime based on db.profile.tooltip.engine.
-
-    Load order: tooltip_provider.lua → tooltips.lua (classic) → tooltip_owned.lua (owned)
+    Abstraction layer for the tooltip engine.
+    Load order: tooltip_provider.lua → tooltip_classic.lua
     Engine files call RegisterEngine() at load time.
     Provider calls Initialize() on the selected engine after PLAYER_LOGIN.
 ]]
@@ -17,7 +15,7 @@ local Helpers = ns.Helpers
 local TooltipProvider = {
     engines = {},           -- name → engine table
     activeEngine = nil,     -- the initialized engine table
-    activeEngineName = nil, -- "classic" or "owned"
+    activeEngineName = nil, -- "classic"
     initialized = false,
 }
 
@@ -26,7 +24,7 @@ local TooltipProvider = {
 ---------------------------------------------------------------------------
 
 --- Register a tooltip engine implementation.
---- @param name string  Engine identifier ("classic" or "owned")
+--- @param name string  Engine identifier ("classic")
 --- @param engine table  Table with contract methods (Initialize, Refresh, etc.)
 function TooltipProvider:RegisterEngine(name, engine)
     self.engines[name] = engine
@@ -54,6 +52,29 @@ local strfind = string.find
 local strmatch = string.match
 local GetMouseFoci = GetMouseFoci
 local WorldFrame = WorldFrame
+
+---------------------------------------------------------------------------
+-- Cached UI Scale
+-- GetEffectiveScale() can return secret values during combat.
+-- Cache the scale on UI_SCALE_CHANGED and use the cached value for
+-- cursor positioning arithmetic. This is the MidnightTooltip pattern.
+---------------------------------------------------------------------------
+local cachedUIScale = 1
+
+local function UpdateCachedUIScale()
+    local ok, scale = pcall(UIParent.GetEffectiveScale, UIParent)
+    if ok and scale and type(scale) == "number" and scale > 0 then
+        cachedUIScale = scale
+    end
+end
+
+local scaleEventFrame = CreateFrame("Frame")
+scaleEventFrame:RegisterEvent("UI_SCALE_CHANGED")
+scaleEventFrame:RegisterEvent("DISPLAY_SIZE_CHANGED")
+scaleEventFrame:RegisterEvent("PLAYER_LOGIN")
+scaleEventFrame:SetScript("OnEvent", function()
+    UpdateCachedUIScale()
+end)
 
 ---------------------------------------------------------------------------
 -- Mouse Focus Detection
@@ -273,15 +294,13 @@ end
 function TooltipProvider:PositionTooltipAtCursor(tooltip, settings)
     if not tooltip then return end
     if tooltip.IsForbidden and tooltip:IsForbidden() then return end
-    -- No combat guard needed — owned tooltip frames are addon-created,
-    -- so ClearAllPoints/SetPoint are safe during combat.
 
     local cursorX, cursorY = GetCursorPosition()
     if not cursorX or not cursorY then return end
 
-    local scale = UIParent:GetEffectiveScale()
-    if not scale or scale == 0 then return end
-
+    -- Use cached scale (updated on UI_SCALE_CHANGED) to avoid calling
+    -- GetEffectiveScale() during combat where it may return secret values.
+    local scale = cachedUIScale
     local anchor, offsetX, offsetY = self:GetCursorAnchorConfig(settings)
     tooltip:ClearAllPoints()
     tooltip:SetPoint(anchor, UIParent, "BOTTOMLEFT", (cursorX / scale) + offsetX, (cursorY / scale) + offsetY)
@@ -295,9 +314,9 @@ function TooltipProvider:InitializeEngine()
     if self.initialized then return end
 
     local QUICore = ns.Addon
-    local engineName = "owned"
+    local engineName = "classic"
     if QUICore and QUICore.db and QUICore.db.profile and QUICore.db.profile.tooltip then
-        engineName = QUICore.db.profile.tooltip.engine or "owned"
+        engineName = QUICore.db.profile.tooltip.engine or "classic"
     end
 
     local engine = self.engines[engineName]

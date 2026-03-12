@@ -2824,9 +2824,11 @@ local function BuildClickCastSettings(content, gfdb, onChange)
     y = y - 22
 
     local ufFrames = {
-        { key = "player",  label = "Player" },
-        { key = "focus",   label = "Focus" },
-        { key = "pet",     label = "Pet" },
+        { key = "player",       label = "Player" },
+        { key = "target",       label = "Target" },
+        { key = "targettarget", label = "Target of Target" },
+        { key = "focus",        label = "Focus" },
+        { key = "pet",          label = "Pet" },
     }
 
     local refreshClickCast = function()
@@ -2928,8 +2930,9 @@ local function BuildClickCastSettings(content, gfdb, onChange)
     addHeader:SetPoint("TOPLEFT", 0, 0)
     local ay = -addHeader.gap
 
-    -- Drop zone for spellbook drag
+    -- Drop zone for spellbook/macro drag
     local dropZone = CreateFrame("Button", nil, addContainer, "BackdropTemplate")
+    dropZone:RegisterForClicks("LeftButtonUp")
     SetHeightPx(dropZone, 68)
     dropZone:SetPoint("TOPLEFT", 0, ay)
     dropZone:SetPoint("RIGHT", addContainer, "RIGHT", 0, 0)
@@ -2939,15 +2942,18 @@ local function BuildClickCastSettings(content, gfdb, onChange)
 
     local dropLabel = dropZone:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     dropLabel:SetPoint("CENTER", 0, 0)
-    dropLabel:SetText("Drop a spell from your spellbook")
+    dropLabel:SetText("Drop a spell or macro here")
     dropLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3], 1)
 
     local addState = { bindingType = "mouse", button = "LeftButton", key = nil, modifiers = "", actionType = "spell", spellName = "", macroText = "" }
-    local spellInput
+    local spellInput, macroInput, actionDrop
+    local spellInputContainer, macroInputContainer
     local mouseButtonContainer, keyCaptureContainer
 
-    dropZone:SetScript("OnReceiveDrag", function()
+    local function HandleCursorDrop()
         local cursorType, id1, id2, _, id4 = GetCursorInfo()
+        if not cursorType then return false end
+
         if cursorType == "spell" then
             local slotIndex, bookType, spellID = id1, id2 or "spell", id4
             if not spellID and slotIndex then
@@ -2963,19 +2969,39 @@ local function BuildClickCastSettings(content, gfdb, onChange)
                     addState.spellName = name
                     addState.actionType = "spell"
                     if spellInput then spellInput:SetText(name) end
+                    if actionDrop then actionDrop.SetValue("spell", true) end
+                    if spellInputContainer then spellInputContainer:Show() end
+                    if macroInputContainer then macroInputContainer:Hide() end
                 end
             end
             ClearCursor()
+            return true
+        elseif cursorType == "macro" then
+            local macroIndex = id1
+            if macroIndex then
+                local name, _, body = GetMacroInfo(macroIndex)
+                if body then
+                    addState.actionType = "macro"
+                    addState.macroText = body
+                    addState.spellName = name or "Macro"
+                    if macroInput then macroInput:SetText(body) end
+                    if actionDrop then actionDrop.SetValue("macro", true) end
+                    if macroInputContainer then macroInputContainer:Show() end
+                    if spellInputContainer then spellInputContainer:Hide() end
+                end
+            end
+            ClearCursor()
+            return true
         end
-    end)
-    dropZone:SetScript("OnMouseUp", function(self)
-        if GetCursorInfo() == "spell" then
-            local handler = self:GetScript("OnReceiveDrag")
-            if handler then handler() end
-        end
+        return false
+    end
+
+    dropZone:SetScript("OnReceiveDrag", HandleCursorDrop)
+    dropZone:SetScript("OnClick", function()
+        if GetCursorInfo() then HandleCursorDrop() end
     end)
     dropZone:SetScript("OnEnter", function(self)
-        if GetCursorInfo() == "spell" then
+        if GetCursorInfo() then
             self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
             dropLabel:SetTextColor(C.accent[1], C.accent[2], C.accent[3], 1)
         end
@@ -3079,8 +3105,7 @@ local function BuildClickCastSettings(content, gfdb, onChange)
     ay = ay - FORM_ROW
 
     -- Action type dropdown
-    local spellInputContainer, macroInputContainer
-    local actionDrop = GUI:CreateFormDropdown(addContainer, "Action Type", ACTION_TYPE_OPTIONS, "actionType", addState, function(val)
+    actionDrop = GUI:CreateFormDropdown(addContainer, "Action Type", ACTION_TYPE_OPTIONS, "actionType", addState, function(val)
         addState.actionType = val
         if spellInputContainer then spellInputContainer:SetShown(val == "spell") end
         if macroInputContainer then macroInputContainer:SetShown(val == "macro") end
@@ -3143,7 +3168,7 @@ local function BuildClickCastSettings(content, gfdb, onChange)
     macroInputBg:SetBackdropColor(0.08, 0.08, 0.08, 1)
     macroInputBg:SetBackdropBorderColor(0.35, 0.35, 0.35, 1)
 
-    local macroInput = CreateFrame("EditBox", nil, macroInputBg)
+    macroInput = CreateFrame("EditBox", nil, macroInputBg)
     macroInput:SetPoint("LEFT", 8, 0)
     macroInput:SetPoint("RIGHT", -8, 0)
     macroInput:SetHeight(22)
@@ -3161,7 +3186,7 @@ local function BuildClickCastSettings(content, gfdb, onChange)
         SetHeightPx(dropZone, 68)
         ApplyPixelBackdrop(dropZone, 1, true)
         dropZone:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], 0.8)
-        if GetCursorInfo() == "spell" then
+        if GetCursorInfo() then
             dropZone:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 1)
         else
             dropZone:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3], 0.5)
@@ -3199,6 +3224,7 @@ local function BuildClickCastSettings(content, gfdb, onChange)
     local addBtnY = ay - FORM_ROW
     local addBtn = GUI:CreateButton(addContainer, "Add Binding", 130, 26, function()
         local actionType = addState.actionType
+        if type(actionType) ~= "string" then print("|cFFFF5555[QUI]|r Invalid action type. Please re-select.") return end
         local newBinding = { modifiers = addState.modifiers, actionType = actionType }
         if addState.bindingType == "key" then
             if not addState.key or addState.key == "" then print("|cFFFF5555[QUI]|r Press a key to bind first.") return end
@@ -3256,6 +3282,10 @@ local function BuildClickCastSettings(content, gfdb, onChange)
             listY = -28
         else
             for i, binding in ipairs(bindings) do
+                local actionType = binding.actionType
+                if type(actionType) ~= "string" then actionType = "spell" end
+                local spellName = binding.spell
+                if type(spellName) ~= "string" then spellName = nil end
                 local row = CreateFrame("Frame", nil, bindingListFrame)
                 row:SetSize(400, 28)
                 row:SetPoint("TOPLEFT", 0, listY)
@@ -3263,9 +3293,8 @@ local function BuildClickCastSettings(content, gfdb, onChange)
                 iconTex:SetSize(24, 24)
                 iconTex:SetPoint("LEFT", 0, 0)
                 iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                local actionType = binding.actionType or "spell"
-                if actionType == "spell" and binding.spell then
-                    local spellID = C_Spell.GetSpellIDForSpellIdentifier(binding.spell)
+                if actionType == "spell" and spellName then
+                    local spellID = C_Spell.GetSpellIDForSpellIdentifier(spellName)
                     if spellID then
                         local info = C_Spell.GetSpellInfo(spellID)
                         iconTex:SetTexture(info and info.iconID or "Interface\\Icons\\INV_Misc_QuestionMark")
@@ -3287,7 +3316,7 @@ local function BuildClickCastSettings(content, gfdb, onChange)
                 spellText:SetPoint("LEFT", comboText, "RIGHT", 8, 0)
                 spellText:SetWidth(140)
                 spellText:SetJustifyH("LEFT")
-                local displayName = binding.spell or actionType
+                local displayName = spellName or actionType
                 if actionType == "macro" then displayName = "Macro"
                 elseif actionType == "menu" then displayName = "Unit Menu" end
                 spellText:SetText(displayName)
