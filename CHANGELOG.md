@@ -81,6 +81,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.49.4 - 2026-03-12
+
+### Added
+- added global ping keybinds, self-first header, show solo option
+- added ping action types to click-casting system
+
+### Fixed
+- fixed crafting order icon always showing
+- fix: initialize CDM at ADDON_LOADED for combat reload support
+- fix: remove unused CreateBorder helper and tooltip sticking monitor
+- fix: eliminate GameTooltip taint from HookScript and hooksecurefunc
 ## v2.49.3 - 2026-03-12
 
 ### Added
