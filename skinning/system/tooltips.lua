@@ -215,31 +215,11 @@ end
 local skinnedTooltips = Helpers.CreateStateTable()   -- tooltip → true
 local hookedTooltips = Helpers.CreateStateTable()    -- tooltip → true (OnShow hooked)
 
--- Forward declaration: QueueCombatTooltipSkin is used by SkinTooltip/ReapplySkin
--- but defined after them (circular dependency with FlushCombatSkinQueue).
-local QueueCombatTooltipSkin
-
 -- NineSlice piece names used by Blizzard tooltips
 local NINE_SLICE_PIECES = {
     "TopLeftCorner", "TopRightCorner", "BottomLeftCorner", "BottomRightCorner",
     "TopEdge", "BottomEdge", "LeftEdge", "RightEdge", "Center",
 }
-
--- TAINT SAFETY: Check if tooltip dimensions are tainted (secret values).
--- Calling SetBackdrop/NineSlice geometry math when dimensions are tainted
--- permanently infects the tooltip's layout state. pcall does NOT prevent this.
-local function HasTaintedDimensions(tooltip)
-    local ok, result = pcall(function()
-        local w = tooltip:GetWidth()
-        local h = tooltip:GetHeight()
-        if Helpers.IsSecretValue(w) or Helpers.IsSecretValue(h) then
-            return true
-        end
-        local _ = w + h  -- arithmetic test: errors if either is secret
-        return false
-    end)
-    return not ok or result == true
-end
 
 -- NineSlice color locking state (weak-keyed to avoid preventing GC)
 local colorLockedNineSlices = Helpers.CreateStateTable()
@@ -352,22 +332,11 @@ local function LockNineSliceColors(nineSlice)
     end
 end
 
--- Full skin application for a tooltip
+-- Full skin application for a tooltip (called outside combat only)
 local function SkinTooltip(tooltip)
     if not tooltip then return end
     if tooltip.IsForbidden and tooltip:IsForbidden() then return end
     if skinnedTooltips[tooltip] then return end
-
-    -- TAINT SAFETY: Do NOT call HasTaintedDimensions here — GetWidth()/GetHeight()
-    -- from addon context triggers pending OnSizeChanged → EmbeddedItemTooltip_UpdateSize
-    -- in addon execution context, causing secret value arithmetic errors.
-    -- NineSlice operations are already pcall-wrapped by callers.
-    -- TAINT SAFETY: Defer if GameTooltip has a tainted widget container child
-    -- (e.g. from WorldQuestsList tainting shownWidgetCount).
-    if tooltip == GameTooltip and Helpers.HasTaintedWidgetContainer(tooltip) then
-        QueueCombatTooltipSkin(tooltip)
-        return
-    end
 
     local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
     local thickness = GetEffectiveBorderThickness()
@@ -414,16 +383,10 @@ local function SkinTooltip(tooltip)
     skinnedTooltips[tooltip] = true
 end
 
--- Re-apply skin to an already-skinned tooltip (called on every Show)
+-- Re-apply skin to an already-skinned tooltip (called on every Show, out of combat)
 local function ReapplySkin(tooltip)
     if not tooltip then return end
     if tooltip.IsForbidden and tooltip:IsForbidden() then return end
-
-    -- TAINT SAFETY: Do NOT call HasTaintedDimensions here — see SkinTooltip comment.
-    if tooltip == GameTooltip and Helpers.HasTaintedWidgetContainer(tooltip) then
-        QueueCombatTooltipSkin(tooltip)
-        return
-    end
 
     local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
     local thickness = GetEffectiveBorderThickness()
@@ -448,6 +411,88 @@ local function ReapplySkin(tooltip)
         pcall(tooltip.SetBackdropColor, tooltip, bgr, bgg, bgb, bga)
         pcall(tooltip.SetBackdropBorderColor, tooltip, sr, sg, sb, sa)
     end
+end
+
+---------------------------------------------------------------------------
+-- Cached pixel size for combat-safe NineSlice geometry.
+-- GetEffectiveScale() returns secret values during combat, so
+-- SkinBase.GetPixelSize() falls back to 1 (wrong — makes borders huge).
+-- We cache the correct pixel size on UI_SCALE_CHANGED (same pattern as
+-- the cached UIParent scale in tooltip_provider.lua). NineSlice inherits
+-- UIParent's scale chain (tooltips don't use custom SetScale), so using
+-- UIParent-based pixel size is correct.
+---------------------------------------------------------------------------
+local cachedPixelSize = 1
+
+local function UpdateCachedPixelSize()
+    local core = GetCore()
+    if core and core.GetPixelSize then
+        local px = core:GetPixelSize() -- nil frame → UIParent scale
+        if type(px) == "number" and px > 0 then
+            cachedPixelSize = px
+        end
+    end
+end
+
+local pixelCacheFrame = CreateFrame("Frame")
+pixelCacheFrame:RegisterEvent("UI_SCALE_CHANGED")
+pixelCacheFrame:RegisterEvent("DISPLAY_SIZE_CHANGED")
+pixelCacheFrame:RegisterEvent("PLAYER_LOGIN")
+pixelCacheFrame:SetScript("OnEvent", UpdateCachedPixelSize)
+
+---------------------------------------------------------------------------
+-- Combat-safe reapply: full NineSlice skin using cached pixel size.
+-- All operations are C-side visual calls on the NineSlice sub-frame
+-- (not on GameTooltip itself), so they don't propagate taint to widget
+-- containers. Geometry uses cachedPixelSize instead of live
+-- GetEffectiveScale() to avoid secret values.
+---------------------------------------------------------------------------
+local function CombatSafeReapply(tooltip)
+    if not tooltip then return end
+    if tooltip.IsForbidden and tooltip:IsForbidden() then return end
+    if not IsEnabled() then return end
+
+    local ns = tooltip.NineSlice
+    if not ns then return end
+
+    local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
+    local thickness = GetEffectiveBorderThickness()
+    local edge = (thickness or 1) * cachedPixelSize
+
+    -- Flat textures (Blizzard may have re-applied default textures via
+    -- SharedTooltip_SetBackdropStyle between tooltip shows)
+    for _, pieceName in ipairs(NINE_SLICE_PIECES) do
+        local piece = ns[pieceName]
+        if piece and piece.SetTexture then
+            pcall(piece.SetTexture, piece, FLAT_TEXTURE)
+            pcall(piece.SetTexCoord, piece, 0, 1, 0, 1)
+        end
+    end
+
+    -- Geometry (corners, edges, center inset)
+    local tl, tr = ns.TopLeftCorner, ns.TopRightCorner
+    local bl, br = ns.BottomLeftCorner, ns.BottomRightCorner
+    if tl then pcall(tl.SetSize, tl, edge, edge) end
+    if tr then pcall(tr.SetSize, tr, edge, edge) end
+    if bl then pcall(bl.SetSize, bl, edge, edge) end
+    if br then pcall(br.SetSize, br, edge, edge) end
+
+    local te, be = ns.TopEdge, ns.BottomEdge
+    local le, re = ns.LeftEdge, ns.RightEdge
+    if te then pcall(te.SetHeight, te, edge) end
+    if be then pcall(be.SetHeight, be, edge) end
+    if le then pcall(le.SetWidth, le, edge) end
+    if re then pcall(re.SetWidth, re, edge) end
+
+    local center = ns.Center
+    if center then
+        pcall(center.ClearAllPoints, center)
+        pcall(center.SetPoint, center, "TOPLEFT", ns, "TOPLEFT", edge, -edge)
+        pcall(center.SetPoint, center, "BOTTOMRIGHT", ns, "BOTTOMRIGHT", -edge, edge)
+    end
+
+    -- Colors
+    ApplyNineSliceColors(ns, sr, sg, sb, sa, bgr, bgg, bgb, bga)
 end
 
 ---------------------------------------------------------------------------
@@ -489,59 +534,25 @@ local function RestoreEmbeddedBorder(frame)
     end
 end
 
--- During combat, avoid mutating tooltip internals directly inside the secure
--- OnShow/PostCall chain. Defer all skinning until combat ends via PLAYER_REGEN_ENABLED.
--- C_Timer.After(0) does NOT escape taint propagation — it fires on the same frame.
-local combatSkinQueue = {}
-local combatSkinEventFrame
-
-local function FlushCombatSkinQueue()
-    if InCombatLockdown() then return end
-    for tooltip in pairs(combatSkinQueue) do
-        if tooltip and tooltip.IsShown and tooltip:IsShown() and IsEnabled() then
-            if not skinnedTooltips[tooltip] then
-                SkinTooltip(tooltip)
-            else
-                ReapplySkin(tooltip)
-            end
-            ApplyTooltipFontSizeToFrame(tooltip)
-        end
-    end
-    wipe(combatSkinQueue)
-    combatSkinEventFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
-end
-
-QueueCombatTooltipSkin = function(tooltip)
-    if not tooltip or combatSkinQueue[tooltip] then return end
-    combatSkinQueue[tooltip] = true
-    if not combatSkinEventFrame then
-        combatSkinEventFrame = CreateFrame("Frame")
-        combatSkinEventFrame:SetScript("OnEvent", FlushCombatSkinQueue)
-    end
-    combatSkinEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-end
-
 local function SetupEmbeddedTooltipHooks()
     -- Hook SharedTooltip_SetBackdropStyle to catch Blizzard re-applying the
     -- embedded backdrop style. Fires AFTER Blizzard's function, giving us
     -- the last word on the NineSlice appearance.
     if SharedTooltip_SetBackdropStyle then
         hooksecurefunc("SharedTooltip_SetBackdropStyle", function(tooltip, style, isEmbedded)
-            -- TAINT SAFETY: Any addon code here taints the execution context.
-            -- Combat check must be first to avoid tainting subsequent Blizzard
-            -- calls in the same call stack (e.g. GameTooltip_AddWidgetSet).
-            if InCombatLockdown() then return end
             if not IsEnabled() then return end
             if not tooltip then return end
             if isEmbedded or tooltip.IsEmbedded then
-                -- Embedded tooltip (e.g. EmbeddedItemTooltip): hide its NineSlice
+                -- Embedded tooltip (e.g. EmbeddedItemTooltip): hide its NineSlice.
+                -- SetAlpha is C-side, safe in combat.
                 StripEmbeddedBorder(tooltip)
+            elseif InCombatLockdown() then
+                -- Combat: textures + colors only (no geometry — GetEffectiveScale
+                -- can return secret values). These are C-side visual ops on the
+                -- NineSlice sub-frame, not on GameTooltip itself.
+                pcall(CombatSafeReapply, tooltip)
             elseif skinnedTooltips[tooltip] then
-                -- Blizzard just re-applied a backdrop style to a skinned tooltip.
-                -- Re-apply QUI skin so our flat look wins without needing to nil
-                -- out layoutType/backdropInfo (which taints the frame).
-                -- ReapplySkin only touches NineSlice textures/colors (C-side ops),
-                -- so it's safe to call even in combat — no taint propagation.
+                -- Out of combat: full reapply including geometry.
                 pcall(ReapplySkin, tooltip)
             end
         end)
@@ -550,22 +561,19 @@ local function SetupEmbeddedTooltipHooks()
     -- TAINT SAFETY: Use hooksecurefunc on Show instead of HookScript("OnShow")
     -- to prevent tainting the frame's script handler (same rationale as
     -- HookTooltipOnShow above).
+    -- SetAlpha is C-side, safe in combat — no need for InCombatLockdown guard.
     if EmbeddedItemTooltip then
         hooksecurefunc(EmbeddedItemTooltip, "Show", function(self)
-            if InCombatLockdown() then return end
             if not IsEnabled() then return end
             StripEmbeddedBorder(self)
         end)
-        -- Initial strip if already visible
         if IsEnabled() then
             StripEmbeddedBorder(EmbeddedItemTooltip)
         end
     end
 
-    -- Also handle GameTooltip.ItemTooltip sub-frame if present
     if GameTooltip and GameTooltip.ItemTooltip and GameTooltip.ItemTooltip.NineSlice then
         hooksecurefunc(GameTooltip.ItemTooltip, "Show", function(self)
-            if InCombatLockdown() then return end
             if not IsEnabled() then return end
             local nineSlice = self.NineSlice
             if nineSlice then
@@ -698,24 +706,24 @@ local function HookTooltipOnShow(tooltip)
     end
 
     hooksecurefunc(tooltip, "Show", function(self)
-        if InCombatLockdown() then
-            QueueCombatTooltipSkin(self)
-            return
-        end
         if not IsEnabled() then return end
 
-        -- TAINT SAFETY: Defer ALL skin work out of the hooksecurefunc
+        if InCombatLockdown() then
+            -- Combat: textures + colors only (C-side visual ops on NineSlice).
+            -- Skip geometry (GetEffectiveScale can return secret values) and
+            -- font sizing (modifying FontStrings propagates taint).
+            pcall(CombatSafeReapply, self)
+            return
+        end
+
+        -- Out of combat: defer full skin work out of the hooksecurefunc
         -- execution context.  Running synchronously here means GetWidth()/
-        -- GetHeight() calls (e.g. HasTaintedDimensions, NineSlice geometry)
-        -- execute in addon context.  This triggers OnSizeChanged on child
-        -- frames (EmbeddedItemTooltip), and any arithmetic Blizzard does on
-        -- the frame width inside that cascade uses a value "tainted by QUI",
-        -- producing "attempt to perform arithmetic on a secret number value"
-        -- errors even outside strict combat lockdown.
+        -- GetHeight() calls execute in addon context, triggering OnSizeChanged
+        -- on child frames and producing secret value arithmetic errors.
         C_Timer.After(0, function()
             if not self:IsShown() then return end
             if InCombatLockdown() then
-                QueueCombatTooltipSkin(self)
+                pcall(CombatSafeReapply, self)
                 return
             end
             pcall(ApplyTooltipFontSizeToFrame, self)
@@ -794,39 +802,39 @@ local function SetupTooltipPostProcessor()
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
         if not tooltip or tooltip == EmbeddedItemTooltip then return end
         SafeHookTooltipOnShow(tooltip)
-        if not InCombatLockdown() then
+        if InCombatLockdown() then
+            pcall(CombatSafeReapply, tooltip)
+        else
             DeferFontSizing(tooltip)
             if IsEnabled() and not skinnedTooltips[tooltip] then
                 SkinTooltip(tooltip)
             end
-        elseif IsEnabled() then
-            QueueCombatTooltipSkin(tooltip)
         end
     end)
 
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, function(tooltip)
         if not tooltip or tooltip == EmbeddedItemTooltip then return end
         SafeHookTooltipOnShow(tooltip)
-        if not InCombatLockdown() then
+        if InCombatLockdown() then
+            pcall(CombatSafeReapply, tooltip)
+        else
             DeferFontSizing(tooltip)
             if IsEnabled() and not skinnedTooltips[tooltip] then
                 SkinTooltip(tooltip)
             end
-        elseif IsEnabled() then
-            QueueCombatTooltipSkin(tooltip)
         end
     end)
 
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tooltip)
         if not tooltip or tooltip == EmbeddedItemTooltip then return end
         SafeHookTooltipOnShow(tooltip)
-        if not InCombatLockdown() then
+        if InCombatLockdown() then
+            pcall(CombatSafeReapply, tooltip)
+        else
             DeferFontSizing(tooltip)
             if IsEnabled() and not skinnedTooltips[tooltip] then
                 SkinTooltip(tooltip)
             end
-        elseif IsEnabled() then
-            QueueCombatTooltipSkin(tooltip)
         end
         -- Health bar hiding works independently of skinning
         UpdateHealthBarVisibility(tooltip)
@@ -895,9 +903,13 @@ eventFrame:SetScript("OnEvent", function(self, event)
                 local shown = GameTooltip:IsShown()
                 if shown and not gtWasShown then
                     -- GameTooltip just became visible
-                    if InCombatLockdown() then
-                        QueueCombatTooltipSkin(GameTooltip)
-                    elseif IsEnabled() then
+                    if not IsEnabled() then
+                        -- nothing
+                    elseif InCombatLockdown() then
+                        -- Combat: textures + colors only (C-side ops on NineSlice).
+                        -- Skip geometry and font sizing during combat.
+                        pcall(CombatSafeReapply, GameTooltip)
+                    else
                         if not skinnedTooltips[GameTooltip] then
                             pcall(SkinTooltip, GameTooltip)
                         else

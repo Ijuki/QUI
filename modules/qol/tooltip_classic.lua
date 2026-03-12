@@ -91,7 +91,14 @@ local function SetupTooltipHook()
         -- Cursor positioning uses cached UIParent scale and
         -- GetCursorPosition (screen coords, not restricted) — safe in combat.
         if settings.anchorToCursor then
-            AnchorTooltipToCursor(tooltip, parent, settings)
+            -- Don't call AnchorTooltipToCursor here — it calls SetOwner()
+            -- which re-taints the tooltip from addon context, breaking
+            -- widget-set layout (secret value arithmetic on child frames).
+            -- Blizzard already called SetOwner(parent, "ANCHOR_NONE") inside
+            -- GameTooltip_SetDefaultAnchor before this hook fires.
+            EnsureCursorFollowHooks(tooltip)
+            cursorFollowActive[tooltip] = true
+            Provider:PositionTooltipAtCursor(tooltip, settings)
         else
             cursorFollowActive[tooltip] = nil
         end
