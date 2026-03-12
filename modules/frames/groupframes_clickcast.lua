@@ -627,6 +627,27 @@ function QUI_GFCC:GetModifierLabels()
 end
 
 ---------------------------------------------------------------------------
+-- GLOBAL PING BUTTONS: SecureActionButtons for Bindings.xml keybinds.
+-- Created once at load time with fixed macrotext so they work in combat.
+-- Mouseover fallback to target covers nameplates, world frames, and
+-- targeted units with no hover.
+---------------------------------------------------------------------------
+local PING_BUTTONS = {
+    { name = "QUI_PingButton_Contextual", macro = "/ping [@mouseover,exists][@target,exists]" },
+    { name = "QUI_PingButton_Assist",     macro = "/ping [@mouseover,exists] assist; [@target,exists] assist" },
+    { name = "QUI_PingButton_Attack",     macro = "/ping [@mouseover,exists] attack; [@target,exists] attack" },
+    { name = "QUI_PingButton_Warning",    macro = "/ping [@mouseover,exists] warning; [@target,exists] warning" },
+    { name = "QUI_PingButton_OnMyWay",    macro = "/ping [@mouseover,exists] onmyway; [@target,exists] onmyway" },
+}
+
+for _, def in ipairs(PING_BUTTONS) do
+    local btn = CreateFrame("Button", def.name, UIParent, "SecureActionButtonTemplate")
+    btn:SetAttribute("type", "macro")
+    btn:SetAttribute("macrotext", def.macro)
+    btn:Hide()
+end
+
+---------------------------------------------------------------------------
 -- EVENTS: Spec change and combat end
 ---------------------------------------------------------------------------
 local eventFrame = CreateFrame("Frame")
