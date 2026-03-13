@@ -774,6 +774,14 @@ function GUI:CreateButton(parent, text, width, height, onClick)
         btnText:SetText(newText)
     end
 
+    -- Public method for callers that need custom hover colors.
+    function btn:SetBorderColor(r, g, b, a)
+        SetButtonBorderColor(r, g, b, a)
+    end
+
+    -- Backward-compatible alias used by some option tabs.
+    btn.SetFieldBorderColor = btn.SetBorderColor
+
     return btn
 end
 
