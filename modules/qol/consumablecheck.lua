@@ -161,6 +161,7 @@ local ToggleConsumablePicker
 local HideConsumablePicker
 local StartButtonGlow
 local StopButtonGlow
+local RequestHideConsumablesFrame
 local ITEM_CLASS_CONSUMABLE_ID = (Enum and Enum.ItemClass and Enum.ItemClass.Consumable) or LE_ITEM_CLASS_CONSUMABLE
 local FOOD_AND_DRINK_SUBCLASS_ID = Enum and Enum.ItemConsumableSubclass and Enum.ItemConsumableSubclass.FoodAndDrink
 local FLASK_SUBCLASS_ID = Enum and Enum.ItemConsumableSubclass and Enum.ItemConsumableSubclass.Flask
@@ -481,19 +482,12 @@ ConsumablesFrame:SetSize(DEFAULT_BUTTON_SIZE * 6 + BUTTON_SPACING * 5, DEFAULT_B
 ConsumablesFrame:Hide()
 ConsumablesFrame.buttons = {}
 
-local pendingConsumablesVisibility = nil
+local consumableCombatDeferFrame
+local hideConsumablesAfterCombat = false
 
-local function SetConsumablesFrameVisible(shouldShow)
-    if InCombatLockdown() then
-        pendingConsumablesVisibility = shouldShow and true or false
-        return
-    end
-
-    if shouldShow then
-        ConsumablesFrame:Show()
-        return
-    end
-
+local function HideConsumablesFrameNow()
+    if not ConsumablesFrame then return end
+    ConsumablesFrame:SetAlpha(1)
     ConsumablesFrame:Hide()
     for _, button in pairs(ConsumablesFrame.buttons) do
         if type(button) == "table" and button.click then
@@ -502,12 +496,34 @@ local function SetConsumablesFrameVisible(shouldShow)
     end
 end
 
-local function ApplyPendingConsumablesVisibility()
-    if pendingConsumablesVisibility == nil then return end
-    if InCombatLockdown() then return end
-    local shouldShow = pendingConsumablesVisibility
-    pendingConsumablesVisibility = nil
-    SetConsumablesFrameVisible(shouldShow)
+local function EnsureConsumableCombatDeferFrame()
+    if consumableCombatDeferFrame then return end
+    consumableCombatDeferFrame = CreateFrame("Frame")
+    consumableCombatDeferFrame:SetScript("OnEvent", function(f, event)
+        if event ~= "PLAYER_REGEN_ENABLED" then return end
+        f:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        if hideConsumablesAfterCombat then
+            hideConsumablesAfterCombat = false
+            HideConsumablesFrameNow()
+        end
+    end)
+end
+
+RequestHideConsumablesFrame = function()
+    HideConsumablePicker()
+    if InCombatLockdown() then
+        hideConsumablesAfterCombat = true
+        if ConsumablesFrame:IsShown() then
+            -- In combat we cannot hide this protected frame safely, so make it invisible immediately.
+            ConsumablesFrame:SetAlpha(0)
+        end
+        EnsureConsumableCombatDeferFrame()
+        consumableCombatDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+
+    hideConsumablesAfterCombat = false
+    HideConsumablesFrameNow()
 end
 
 -- Close button
@@ -533,8 +549,7 @@ closeButton:SetScript("OnLeave", function(self)
     self.text:SetTextColor(0.8, 0.8, 0.8, 1)
 end)
 closeButton:SetScript("OnClick", function()
-    HideConsumablePicker()
-    SetConsumablesFrameVisible(false)
+    RequestHideConsumablesFrame()
 end)
 ConsumablesFrame.closeButton = closeButton
 
@@ -1309,6 +1324,7 @@ local function ShowConsumablesStandalone()
     InitializeButtons()
     UpdateConsumables()
     ConsumablesFrame:SetScale(GetConsumableScale())
+    ConsumablesFrame:SetAlpha(1)
 
     local settings = GetSettings()
     local anchorMode = settings and settings.consumableAnchorMode ~= false
@@ -1332,43 +1348,23 @@ local function ShowConsumablesStandalone()
         end
     end
 
-    SetConsumablesFrameVisible(true)
+    ConsumablesFrame:Show()
 end
 
 local function OnReadyCheck(starter, timer)
     local settings = GetSettings()
     if not settings or settings.consumableCheckEnabled == false then return end
     if settings.consumableOnReadyCheck == false then return end
-    if InCombatLockdown() then
-        pendingConsumablesVisibility = true
-        return
-    end
 
     HideConsumablePicker()
     PositionConsumablesFrame()
     UpdateConsumables()
-    SetConsumablesFrameVisible(true)
+    ConsumablesFrame:SetAlpha(1)
+    ConsumablesFrame:Show()
 end
 
-local consumableCombatDeferFrame  -- reused for combat-deferred hides
-
 local function OnReadyCheckFinished()
-    HideConsumablePicker()
-    if not InCombatLockdown() then
-        SetConsumablesFrameVisible(false)
-    else
-        -- Defer hide until combat ends to avoid ADDON_ACTION_BLOCKED
-        if not consumableCombatDeferFrame then
-            consumableCombatDeferFrame = CreateFrame("Frame")
-            consumableCombatDeferFrame:SetScript("OnEvent", function(f)
-                f:UnregisterAllEvents()
-                if ConsumablesFrame then
-                    SetConsumablesFrameVisible(false)
-                end
-            end)
-        end
-        consumableCombatDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    end
+    RequestHideConsumablesFrame()
 end
 
 local function OnInstanceEnter()
@@ -1535,8 +1531,10 @@ combatFrame:SetScript("OnEvent", function(self, event)
             end
         end
     elseif event == "PLAYER_REGEN_ENABLED" then
+        if hideConsumablesAfterCombat then
+            return
+        end
         UpdateConsumables()
-        ApplyPendingConsumablesVisibility()
     end
 end)
 
@@ -1558,7 +1556,6 @@ end)
 ---------------------------------------------------------------------------
 
 _G.QUI_RefreshConsumables = function()
-    if InCombatLockdown() then return end
     if ConsumablesFrame:IsShown() then
         local point, relativeTo, relativePoint, x, y = ConsumablesFrame:GetPoint()
         InitializeButtons()
@@ -1570,7 +1567,6 @@ _G.QUI_RefreshConsumables = function()
 end
 
 _G.QUI_RepositionConsumables = function()
-    if InCombatLockdown() then return end
     if ConsumablesFrame:IsShown() then
         InitializeButtons()
         UpdateConsumables()
@@ -1583,4 +1579,4 @@ end
 _G.QUI_ToggleConsumablesMover = ToggleMover
 
 _G.QUI_ShowConsumables = function() ShowConsumablesStandalone() end
-_G.QUI_HideConsumables = function() SetConsumablesFrameVisible(false) end
+_G.QUI_HideConsumables = function() RequestHideConsumablesFrame() end

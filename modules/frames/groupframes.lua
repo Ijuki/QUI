@@ -12,6 +12,7 @@ local Helpers = ns.Helpers
 local IsSecretValue = Helpers.IsSecretValue
 local SafeValue = Helpers.SafeValue
 local SafeToNumber = Helpers.SafeToNumber
+local issecretvalue = _G.issecretvalue
 local GetDB = Helpers.CreateDBGetter("quiGroupFrames")
 
 local GetCore = Helpers.GetCore
@@ -188,6 +189,12 @@ end
 local function GetHealthSettings(isRaid)
     local vdb = GetVisualDB(isRaid)
     return vdb and vdb.health
+end
+
+local function GetHealthFillDirection(isRaid)
+    local vdb = GetVisualDB(isRaid)
+    local h = vdb and vdb.health
+    return h and h.healthFillDirection or "HORIZONTAL"
 end
 
 local function GetPowerSettings(isRaid)
@@ -380,18 +387,21 @@ local function CalculateHeaderSize(db, memberCount)
 
     local w, h = GetFrameDimensions(mode)
 
-    local framesPerGroup = 5
+    local groupBy = layout and layout.groupBy or "GROUP"
+    local isFlat = (groupBy == "NONE")
+    local framesPerGroup = isFlat and (layout and layout.unitsPerFlat or 5) or 5
     local numGroups = math.ceil(memberCount / framesPerGroup)
     local framesInTallestGroup = math.min(memberCount, framesPerGroup)
+    local colSpacing = isFlat and spacing or groupSpacing
 
     local horizontal = (grow == "LEFT" or grow == "RIGHT")
     local totalW, totalH
 
     if horizontal then
         totalW = framesInTallestGroup * w + (framesInTallestGroup - 1) * spacing
-        totalH = numGroups * h + (numGroups - 1) * groupSpacing
+        totalH = numGroups * h + (numGroups - 1) * colSpacing
     else
-        totalW = numGroups * w + (numGroups - 1) * groupSpacing
+        totalW = numGroups * w + (numGroups - 1) * colSpacing
         totalH = framesInTallestGroup * h + (framesInTallestGroup - 1) * spacing
     end
 
@@ -728,6 +738,7 @@ local function UpdateAbsorbs(frame)
     frame.absorbBar:ClearAllPoints()
     frame.absorbBar:SetAllPoints(frame.healthBar)
     frame.absorbBar:SetReverseFill(true)
+    frame.absorbBar:SetOrientation(frame._isVerticalFill and "VERTICAL" or "HORIZONTAL")
     frame.absorbBar:SetMinMaxValues(0, maxHP)
     frame.absorbBar:SetValue(absorbAmount)
 
@@ -787,13 +798,19 @@ local function UpdateHealPrediction(frame)
         return
     end
 
-    -- Anchor from health fill edge to health bar right edge — naturally constrains
-    -- to remaining space, no Lua-side math needed.
+    -- Anchor from health fill edge — naturally constrains to remaining space.
     local healthTexture = frame.healthBar:GetStatusBarTexture()
 
     frame.healPredictionBar:ClearAllPoints()
-    frame.healPredictionBar:SetPoint("TOPLEFT", healthTexture, "TOPRIGHT", 0, 0)
-    frame.healPredictionBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", 0, 0)
+    if frame._isVerticalFill then
+        frame.healPredictionBar:SetPoint("BOTTOMLEFT", healthTexture, "TOPLEFT", 0, 0)
+        frame.healPredictionBar:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", 0, 0)
+        frame.healPredictionBar:SetOrientation("VERTICAL")
+    else
+        frame.healPredictionBar:SetPoint("TOPLEFT", healthTexture, "TOPRIGHT", 0, 0)
+        frame.healPredictionBar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", 0, 0)
+        frame.healPredictionBar:SetOrientation("HORIZONTAL")
+    end
 
     -- C-side SetMinMaxValues/SetValue handle secret values natively — no pcall needed
     frame.healPredictionBar:SetMinMaxValues(0, maxHP)
@@ -1463,6 +1480,9 @@ local function DecorateGroupFrame(frame)
     healthBar:SetValue(100)
     healthBar:EnableMouse(false)
     healthBar:SetAlpha(healthOpacity)
+    local isVertical = (GetHealthFillDirection(isRaid) == "VERTICAL")
+    healthBar:SetOrientation(isVertical and "VERTICAL" or "HORIZONTAL")
+    frame._isVerticalFill = isVertical
     frame.healthBar = healthBar
 
     -- No separate healthBg texture — the frame backdrop shows through the
@@ -1503,6 +1523,7 @@ local function DecorateGroupFrame(frame)
     absorbBar:ClearAllPoints()
     absorbBar:SetAllPoints(healthBar)
     absorbBar:SetReverseFill(true)
+    absorbBar:SetOrientation(isVertical and "VERTICAL" or "HORIZONTAL")
     absorbBar:SetMinMaxValues(0, 1)
     absorbBar:SetValue(0)
     absorbBar:Hide()
@@ -1907,7 +1928,7 @@ end
 local function RebuildUnitFrameMap()
     wipe(QUI_GF.unitFrameMap)
 
-    for _, headerKey in ipairs({"party", "raid"}) do
+    for _, headerKey in ipairs({"party", "raid", "self"}) do
         local header = QUI_GF.headers[headerKey]
         if header and header:IsShown() then
             local i = 1
@@ -1932,10 +1953,14 @@ local function ConfigurePartyHeader(header)
     local layout = GetLayoutSettings(false)
     if not layout then return end
 
+    local db = GetSettings()
+    local selfFirst = db and db.selfFirst
+
     header:SetAttribute("showParty", true)
-    header:SetAttribute("showPlayer", layout.showPlayer ~= false)
+    header:SetAttribute("showPlayer", selfFirst and false or (layout.showPlayer ~= false))
     header:SetAttribute("showRaid", false)
-    header:SetAttribute("showSolo", false)
+    local showSolo = layout.showSolo and not selfFirst
+    header:SetAttribute("showSolo", showSolo or false)
     header:SetAttribute("maxColumns", 1)
     header:SetAttribute("unitsPerColumn", 5)
 
@@ -2015,9 +2040,19 @@ local function ConfigureRaidHeader(header)
     -- Columns for groups
     -- When frames within a group are horizontal, groups stack vertically (and vice versa)
     local horizontal = (grow == "LEFT" or grow == "RIGHT")
-    header:SetAttribute("maxColumns", 8)
-    header:SetAttribute("unitsPerColumn", 5)
-    header:SetAttribute("columnSpacing", groupSpacing)
+    local groupBy = layout.groupBy or "GROUP"
+    local isFlat = (groupBy == "NONE")
+
+    if isFlat then
+        local upc = layout.unitsPerFlat or 5
+        header:SetAttribute("unitsPerColumn", upc)
+        header:SetAttribute("maxColumns", math.ceil(40 / upc))
+        header:SetAttribute("columnSpacing", spacing)
+    else
+        header:SetAttribute("maxColumns", 8)
+        header:SetAttribute("unitsPerColumn", 5)
+        header:SetAttribute("columnSpacing", groupSpacing)
+    end
 
     if horizontal then
         -- Groups stack vertically when intra-group is horizontal
@@ -2032,8 +2067,11 @@ local function ConfigureRaidHeader(header)
     end
 
     -- Group filtering
-    local groupBy = layout.groupBy or "GROUP"
-    if groupBy == "GROUP" then
+    if groupBy == "NONE" then
+        header:SetAttribute("groupBy", nil)
+        header:SetAttribute("groupFilter", nil)
+        header:SetAttribute("groupingOrder", nil)
+    elseif groupBy == "GROUP" then
         header:SetAttribute("groupBy", "GROUP")
         header:SetAttribute("groupFilter", "1,2,3,4,5,6,7,8")
         header:SetAttribute("groupingOrder", "1,2,3,4,5,6,7,8")
@@ -2156,6 +2194,48 @@ local function CreateHeaders()
             end
         end
     end)
+
+    -- Self header — shows only the player, used for self-first feature
+    local selfHeader = CreateFrame("Frame", "QUI_SelfHeader", UIParent, "SecureGroupHeaderTemplate")
+    selfHeader:SetAttribute("template", "SecureUnitButtonTemplate, BackdropTemplate")
+    selfHeader:SetAttribute("initialConfigFunction", initConfigFunc)
+    selfHeader:SetAttribute("showPlayer", true)
+    selfHeader:SetAttribute("showParty", false)
+    selfHeader:SetAttribute("showRaid", false)
+    selfHeader:SetAttribute("showSolo", true)
+    selfHeader:SetAttribute("maxColumns", 1)
+    selfHeader:SetAttribute("unitsPerColumn", 1)
+
+    -- Use party dimensions for self header
+    local partyDims = db.party and db.party.dimensions
+    local selfW = partyDims and partyDims.partyWidth or 200
+    local selfH = partyDims and partyDims.partyHeight or 40
+    selfHeader:SetAttribute("_initialAttributeNames", "unit-width,unit-height")
+    selfHeader:SetAttribute("_initialAttribute-unit-width", selfW)
+    selfHeader:SetAttribute("_initialAttribute-unit-height", selfH)
+    selfHeader:SetSize(selfW, selfH)
+    selfHeader:SetPoint("CENTER", UIParent, "CENTER", offsetX, offsetY + selfH + 4)
+    selfHeader:SetMovable(true)
+    selfHeader:SetClampedToScreen(true)
+
+    -- Pre-create the single child
+    selfHeader:SetAttribute("startingIndex", 1)
+    selfHeader:Show()
+    selfHeader:Hide()
+
+    QUI_GF.headers.self = selfHeader
+    QUI:DebugPrint("[GF] CreateHeaders self header created")
+
+    selfHeader:HookScript("OnAttributeChanged", function(self, key, value)
+        if value and type(key) == "string" and key:match("^child") then
+            DecorateGroupFrame(value)
+            if not InCombatLockdown() then
+                value:RegisterForClicks("AnyUp")
+            else
+                pendingRegisterClicks = true
+            end
+        end
+    end)
 end
 
 ---------------------------------------------------------------------------
@@ -2185,6 +2265,26 @@ local function UpdateHeaderSizes()
         local w, h = CalculateHeaderSize(db, count)
         raidHdr:SetSize(w, h)
         QUI:DebugPrint(("[GF] UpdateHeaderSizes raid: count=%d size=(%d,%d)"):format(count, w, h))
+    end
+
+    -- Self header uses party dimensions and anchors above the active group header
+    local selfHdr = QUI_GF.headers.self
+    if selfHdr then
+        local partyDims = db.party and db.party.dimensions
+        local sw = partyDims and partyDims.partyWidth or 200
+        local sh = partyDims and partyDims.partyHeight or 40
+        selfHdr:SetAttribute("_initialAttribute-unit-width", sw)
+        selfHdr:SetAttribute("_initialAttribute-unit-height", sh)
+        selfHdr:SetSize(sw, sh)
+        -- Resize existing child
+        local child = selfHdr:GetAttribute("child1")
+        if child then child:SetSize(sw, sh) end
+        -- Anchor above the active header
+        selfHdr:ClearAllPoints()
+        local anchor = IsInRaid() and raidHdr or partyHdr
+        if anchor then
+            selfHdr:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 4)
+        end
     end
 end
 
@@ -2221,6 +2321,7 @@ local function UpdateHeaderVisibility()
     if not db or not db.enabled then
         if QUI_GF.headers.party then QUI_GF.headers.party:Hide() end
         if QUI_GF.headers.raid then QUI_GF.headers.raid:Hide() end
+        if QUI_GF.headers.self then QUI_GF.headers.self:Hide() end
         return
     end
 
@@ -2229,21 +2330,45 @@ local function UpdateHeaderVisibility()
         return
     end
 
+    local selfFirst = db.selfFirst
+    local selfHeader = QUI_GF.headers.self
+
     if IsInRaid() then
         if QUI_GF.headers.party then QUI_GF.headers.party:Hide() end
         if QUI_GF.headers.raid then QUI_GF.headers.raid:Show() end
+        -- Self header in raid: show above raid frames when selfFirst is on
+        if selfHeader then
+            if selfFirst then selfHeader:Show() else selfHeader:Hide() end
+        end
     elseif IsInGroup() then
         if QUI_GF.headers.raid then QUI_GF.headers.raid:Hide() end
         if QUI_GF.headers.party then QUI_GF.headers.party:Show() end
+        if selfHeader then
+            if selfFirst then selfHeader:Show() else selfHeader:Hide() end
+        end
     else
-        if QUI_GF.headers.party then QUI_GF.headers.party:Hide() end
-        if QUI_GF.headers.raid then QUI_GF.headers.raid:Hide() end
+        -- Solo: check showSolo setting
+        local partyLayout = GetLayoutSettings(false)
+        local showSolo = partyLayout and partyLayout.showSolo
+        if selfFirst then showSolo = false end
+        if showSolo then
+            if QUI_GF.headers.raid then QUI_GF.headers.raid:Hide() end
+            if QUI_GF.headers.party then QUI_GF.headers.party:Show() end
+        else
+            if QUI_GF.headers.party then QUI_GF.headers.party:Hide() end
+            if QUI_GF.headers.raid then QUI_GF.headers.raid:Hide() end
+        end
+        -- Self header solo: show when selfFirst is on
+        if selfHeader then
+            if selfFirst then selfHeader:Show() else selfHeader:Hide() end
+        end
     end
 
     -- Defer decoration + map rebuild to next frame (after header creates children)
     C_Timer.After(0.1, function()
         DecorateHeaderChildren(QUI_GF.headers.party)
         DecorateHeaderChildren(QUI_GF.headers.raid)
+        DecorateHeaderChildren(QUI_GF.headers.self)
         RebuildUnitFrameMap()
         QUI_GF:RefreshAllFrames()
     end)
@@ -2267,7 +2392,7 @@ local function UpdateFrameScaling(forceUpdate)
     local w, h = GetFrameDimensions(mode)
 
     -- Update header attributes (secure context — must be out of combat)
-    for _, headerKey in ipairs({"party", "raid"}) do
+    for _, headerKey in ipairs({"party", "raid", "self"}) do
         local header = QUI_GF.headers[headerKey]
         if header then
             header:SetAttribute("_initialAttribute-unit-width", w)
@@ -2293,6 +2418,11 @@ local function UpdateFrameScaling(forceUpdate)
                     child.healthBar:ClearAllPoints()
                     child.healthBar:SetPoint("TOPLEFT", child, "TOPLEFT", borderSize, -borderSize)
                     child.healthBar:SetPoint("BOTTOMRIGHT", child, "BOTTOMRIGHT", -borderSize, borderSize + powerHeight + sepH)
+
+                    -- Re-apply orientation after resize
+                    local vertFill = (GetHealthFillDirection(child._isRaid) == "VERTICAL")
+                    child.healthBar:SetOrientation(vertFill and "VERTICAL" or "HORIZONTAL")
+                    child._isVerticalFill = vertFill
 
                     if child.powerBar then
                         child.powerBar:ClearAllPoints()
@@ -2403,6 +2533,7 @@ local RES_SPELLS = {
 local playerClass = nil
 local rangeSpell = nil   -- Resolved friendly spell ID for living targets
 local resSpell = nil     -- Resolved rez spell ID for dead targets
+local rangeCache = {}    -- unit → boolean (change detection, avoids redundant SetAlpha)
 
 local function ResolveRangeSpells()
     if not playerClass then
@@ -2410,6 +2541,7 @@ local function ResolveRangeSpells()
     end
 
     -- Clear cache — spells changed, previous results may be stale
+    wipe(rangeCache)
 
     -- Resolve primary range spell (spec-based first, then class fallback)
     rangeSpell = nil
@@ -2499,17 +2631,28 @@ local function CheckUnitRange(unit)
     end
 
     -- In-combat last resort: UnitInRange (DK/DH/Hunter/Warrior with no friendly spell)
-    -- May return secret booleans in Midnight+ — pass through directly.
-    -- SetAlphaFromBoolean handles them natively on the C side.
+    -- Returns secret booleans in Midnight+ — propagate them downstream.
+    -- SetAlphaFromBoolean handles secret booleans natively (C-side resolves them).
     if UnitInRange then
         local inRange = UnitInRange(unit)
-        -- Secret booleans are non-nil; nil means API unavailable for this unit
-        if IsSecretValue(inRange) then return inRange end
+        if issecretvalue and issecretvalue(inRange) then
+            return inRange  -- Secret boolean, handled by SetAlphaFromBoolean downstream
+        end
         if inRange ~= nil then return inRange end
     end
 
     -- No method available — assume in range
     return true
+end
+
+local function ApplyRangeAlpha(frame, inRange, outAlpha)
+    -- SetAlphaFromBoolean handles secret booleans natively (Midnight+ C-side API).
+    -- When UnitInRange returns a secret boolean, this resolves it correctly.
+    if frame.SetAlphaFromBoolean then
+        frame:SetAlphaFromBoolean(inRange, 1, outAlpha)
+    else
+        frame:SetAlpha(inRange and 1 or outAlpha)
+    end
 end
 
 local function DoRangeCheck()
@@ -2525,12 +2668,21 @@ local function DoRangeCheck()
             if rangeSettings and rangeSettings.enabled ~= false then
                 local outAlpha = rangeSettings.outOfRangeAlpha or 0.4
                 local inRange = CheckUnitRange(unit)
+                local state = GetFrameState(frame)
 
-                -- Pass directly to C-side. SetAlphaFromBoolean handles both
-                -- normal booleans and secret booleans natively — no need to
-                -- detect, cache, or compare. C-side resolves the conditional.
-                GetFrameState(frame).outOfRange = true
-                frame:SetAlphaFromBoolean(inRange, 1, outAlpha)
+                -- Secret values (from UnitInRange fallback) can't be compared
+                -- with ==, so always update when secrets are involved.
+                local cached = rangeCache[unit]
+                local isSecret = issecretvalue and (issecretvalue(inRange) or issecretvalue(cached))
+
+                if isSecret or cached ~= inRange or state.outOfRange == nil then
+                    rangeCache[unit] = inRange
+                    -- outOfRange state: secret booleans can't be negated in Lua,
+                    -- so store the raw inRange and let alpha application handle it.
+                    state.outOfRange = true  -- Mark as range-managed
+                    state.inRange = inRange  -- Store raw value (may be secret)
+                    ApplyRangeAlpha(frame, inRange, outAlpha)
+                end
             end
         end
     end
@@ -2558,6 +2710,7 @@ local function StopRangeCheck()
         rangeCheckTicker:Cancel()
         rangeCheckTicker = nil
     end
+    wipe(rangeCache)
 end
 
 ---------------------------------------------------------------------------
@@ -2709,11 +2862,13 @@ local function OnEvent(self, event, arg1, ...)
         -- Combat started: clear range cache so stale OOC values
         -- (CheckInteractDistance) don't persist into combat where
         -- that API is unavailable. (QUI pattern)
-    
+        wipe(rangeCache)
+
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Combat ended: clear range cache so combat-era results
         -- don't prevent OOC methods from updating.
-    
+        wipe(rangeCache)
+
         -- Process deferred operations
         if pendingResize then
             pendingResize = false
@@ -2863,6 +3018,11 @@ function QUI_GF:RefreshSettings()
     -- Re-configure headers
     if self.headers.party then ConfigurePartyHeader(self.headers.party) end
     if self.headers.raid then ConfigureRaidHeader(self.headers.raid) end
+    -- Self header uses party settings; re-apply self-first visibility
+    if self.headers.self then
+        local selfFirst = db and db.selfFirst
+        self.headers.self:SetAttribute("showSolo", selfFirst and true or false)
+    end
 
     -- Force re-decoration of all children
     for _, frame in pairs(self.allFrames) do
@@ -2871,7 +3031,7 @@ function QUI_GF:RefreshSettings()
     wipe(self.allFrames)
 
     -- Also clear decorated flag on header children directly
-    for _, headerKey in ipairs({"party", "raid"}) do
+    for _, headerKey in ipairs({"party", "raid", "self"}) do
         local header = self.headers[headerKey]
         if header then
             local i = 1
@@ -2901,7 +3061,7 @@ local function ApplyHUDLayering()
 
     if QUICore.GetHUDFrameLevel then
         local frameLevel = QUICore:GetHUDFrameLevel(level)
-        for _, headerKey in ipairs({"party", "raid"}) do
+        for _, headerKey in ipairs({"party", "raid", "self"}) do
             local header = QUI_GF.headers[headerKey]
             if header then
                 pcall(header.SetFrameLevel, header, frameLevel)
@@ -2967,7 +3127,7 @@ function QUI_GF:Disable()
 
     if InCombatLockdown() then return end
 
-    for _, headerKey in ipairs({"party", "raid"}) do
+    for _, headerKey in ipairs({"party", "raid", "self"}) do
         local header = self.headers[headerKey]
         if header then
             header:Hide()

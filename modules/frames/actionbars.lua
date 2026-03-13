@@ -3400,9 +3400,36 @@ end
 -- EVENT HANDLING
 ---------------------------------------------------------------------------
 
+local function RefreshAllButtonVisuals()
+    for barKey, _ in pairs(BUTTON_PATTERNS) do
+        local effectiveSettings = GetEffectiveSettings(barKey)
+        if effectiveSettings then
+            local buttons = GetBarButtons(barKey)
+            for _, button in ipairs(buttons) do
+                UpdateButtonText(button, effectiveSettings)
+                UpdateEmptySlotVisibility(button, effectiveSettings)
+            end
+        end
+    end
+end
+
+local function QueueAllButtonVisualRefresh(delay)
+    if ActionBars.visualRefreshQueued then return end
+    ActionBars.visualRefreshQueued = true
+    C_Timer.After(delay or 0.05, function()
+        ActionBars.visualRefreshQueued = nil
+        RefreshAllButtonVisuals()
+    end)
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+eventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+eventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORMS")
+eventFrame:RegisterEvent("UPDATE_STEALTH")
 eventFrame:RegisterEvent("UPDATE_BINDINGS")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("CURSOR_CHANGED")
@@ -3427,18 +3454,17 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
         -- Re-apply text styling and empty slot visibility when actions change
-        C_Timer.After(0.1, function()
-            for barKey, _ in pairs(BUTTON_PATTERNS) do
-                local effectiveSettings = GetEffectiveSettings(barKey)
-                if effectiveSettings then
-                    local buttons = GetBarButtons(barKey)
-                    for _, button in ipairs(buttons) do
-                        UpdateButtonText(button, effectiveSettings)
-                        UpdateEmptySlotVisibility(button, effectiveSettings)
-                    end
-                end
-            end
-        end)
+        QueueAllButtonVisualRefresh(0.1)
+
+    elseif event == "ACTIONBAR_PAGE_CHANGED"
+        or event == "UPDATE_BONUS_ACTIONBAR"
+        or event == "UPDATE_SHAPESHIFT_FORM"
+        or event == "UPDATE_SHAPESHIFT_FORMS"
+        or event == "UPDATE_STEALTH" then
+        -- Paging/form changes can happen in combat (e.g. druid shapeshifts).
+        -- Refresh QUI-managed visuals immediately so displayed buttons match
+        -- the active page even while combat lockdown defers slot updates.
+        QueueAllButtonVisualRefresh(0.05)
 
     elseif event == "CURSOR_CHANGED" then
         -- Show/hide drag preview on hidden empty slots
@@ -3540,18 +3566,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         -- Process slot changes deferred from combat
         if ActionBars.pendingSlotUpdate then
             ActionBars.pendingSlotUpdate = false
-            C_Timer.After(0.1, function()
-                for barKey, _ in pairs(BUTTON_PATTERNS) do
-                    local effectiveSettings = GetEffectiveSettings(barKey)
-                    if effectiveSettings then
-                        local buttons = GetBarButtons(barKey)
-                        for _, button in ipairs(buttons) do
-                            UpdateButtonText(button, effectiveSettings)
-                            UpdateEmptySlotVisibility(button, effectiveSettings)
-                        end
-                    end
-                end
-            end)
+            QueueAllButtonVisualRefresh(0.1)
         end
     end
 end)

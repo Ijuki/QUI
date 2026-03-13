@@ -24,21 +24,48 @@ local ClassicEngine = {}
 local cursorFollowActive = setmetatable({}, {__mode = "k"})
 local cursorFollowHooked = setmetatable({}, {__mode = "k"})
 
+-- TAINT SAFETY: For GameTooltip, cursor follow uses a SEPARATE watcher
+-- frame instead of HookScript. HookScript on GameTooltip permanently taints
+-- its dispatch tables, causing ADDON_ACTION_BLOCKED when the world map's
+-- secure context (secureexecuterange) uses GameTooltip for map pins.
+local gtCursorWatcher
+
 local function EnsureCursorFollowHooks(tooltip)
     if not tooltip or cursorFollowHooked[tooltip] then return end
     cursorFollowHooked[tooltip] = true
 
+    if tooltip == GameTooltip then
+        -- Use a separate watcher frame for GameTooltip to avoid taint
+        if not gtCursorWatcher then
+            gtCursorWatcher = CreateFrame("Frame")
+            gtCursorWatcher:SetScript("OnUpdate", function()
+                if not cursorFollowActive[GameTooltip] then return end
+                if not GameTooltip:IsShown() then
+                    cursorFollowActive[GameTooltip] = nil
+                    return
+                end
+                local settings = Provider:GetSettings()
+                if not settings or not settings.enabled or not settings.anchorToCursor then
+                    cursorFollowActive[GameTooltip] = nil
+                    return
+                end
+                Provider:PositionTooltipAtCursor(GameTooltip, settings)
+            end)
+        end
+        return
+    end
+
+    -- Non-GameTooltip frames can safely use HookScript
     tooltip:HookScript("OnUpdate", function(self)
         if not cursorFollowActive[self] then return end
-        if InCombatLockdown() then
-            cursorFollowActive[self] = nil
-            return
-        end
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled or not settings.anchorToCursor then
             cursorFollowActive[self] = nil
             return
         end
+        -- PositionTooltipAtCursor uses cached UIParent scale (updated on
+        -- UI_SCALE_CHANGED) so arithmetic is safe during combat.
+        -- GetCursorPosition returns screen coordinates, not combat-restricted data.
         Provider:PositionTooltipAtCursor(self, settings)
     end)
 
@@ -69,29 +96,46 @@ local function SetupTooltipHook()
     ns.QUI_AnchorTooltipToCursor = AnchorTooltipToCursor
 
     hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
-        if InCombatLockdown() then return end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return end
         if parent and parent.IsForbidden and parent:IsForbidden() then return end
 
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled then return end
 
-        local context = Provider:GetTooltipContext(parent)
-        if not Provider:ShouldShowTooltip(context) then
-            tooltip:Hide()
-            tooltip:SetOwner(UIParent, "ANCHOR_NONE")
-            tooltip:ClearLines()
-            return
+        -- Visibility/context checks call methods on Blizzard frames (GetName,
+        -- GetAttribute, GetActionInfo) which can taint the execution context
+        -- during combat. Skip them — combat hiding is handled by the SetUnit
+        -- hook and OnCombatStateChanged instead.
+        if not InCombatLockdown() then
+            local context = Provider:GetTooltipContext(parent)
+            if not Provider:ShouldShowTooltip(context) then
+                tooltip:Hide()
+                tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+                tooltip:ClearLines()
+                return
+            end
         end
 
+        -- Cursor positioning uses cached UIParent scale and
+        -- GetCursorPosition (screen coords, not restricted) — safe in combat.
         if settings.anchorToCursor then
-            AnchorTooltipToCursor(tooltip, parent, settings)
+            -- Don't call AnchorTooltipToCursor here — it calls SetOwner()
+            -- which re-taints the tooltip from addon context, breaking
+            -- widget-set layout (secret value arithmetic on child frames).
+            -- Blizzard already called SetOwner(parent, "ANCHOR_NONE") inside
+            -- GameTooltip_SetDefaultAnchor before this hook fires.
+            EnsureCursorFollowHooks(tooltip)
+            cursorFollowActive[tooltip] = true
+            Provider:PositionTooltipAtCursor(tooltip, settings)
         else
             cursorFollowActive[tooltip] = nil
         end
     end)
 
-    hooksecurefunc(GameTooltip, "SetUnit", function(tooltip)
+    -- TAINT SAFETY: Use TooltipDataProcessor instead of hooksecurefunc(GameTooltip, "SetUnit")
+    -- to avoid tainting GameTooltip's dispatch tables.
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tooltip)
+        if tooltip ~= GameTooltip then return end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return end
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled then return end
@@ -170,25 +214,18 @@ local function SetupTooltipHook()
     -- Spell ID tracking
     local tooltipSpellIDAdded = setmetatable({}, {__mode = "k"})
 
-    GameTooltip:HookScript("OnHide", function(tooltip)
-        tooltipSpellIDAdded[tooltip] = nil
+    -- TAINT SAFETY: Use a separate watcher frame to detect GameTooltip
+    -- hide/clear instead of HookScript("OnHide"/"OnTooltipCleared").
+    -- HookScript on GameTooltip permanently taints its dispatch tables.
+    local gtSpellIDWatcher = CreateFrame("Frame")
+    local gtSpellIDWasShown = false
+    gtSpellIDWatcher:SetScript("OnUpdate", function()
+        local shown = GameTooltip:IsShown()
+        if gtSpellIDWasShown and not shown then
+            tooltipSpellIDAdded[GameTooltip] = nil
+        end
+        gtSpellIDWasShown = shown
     end)
-    GameTooltip:HookScript("OnTooltipCleared", function(tooltip)
-        tooltipSpellIDAdded[tooltip] = nil
-    end)
-
-    local function IsBlockedValue(value)
-        if value == nil then return false end
-        if type(issecretvalue) == "function" and issecretvalue(value) then return true end
-        if type(canaccessvalue) == "function" and not canaccessvalue(value) then return true end
-        return false
-    end
-
-    local function CanAccessAuraArgs(unit, token)
-        if IsBlockedValue(unit) then return false end
-        if IsBlockedValue(token) then return false end
-        return true
-    end
 
     local function RefreshTooltipLayout(tooltip)
         if not tooltip then return end
@@ -247,44 +284,17 @@ local function SetupTooltipHook()
         end)
     end
 
-    local function HookAuraTooltip(methodName, getAuraFunc, isGeneric)
-        if not GameTooltip[methodName] then return end
-        hooksecurefunc(GameTooltip, methodName, function(tooltip, unit, indexOrID, filter)
-            if not CanAccessAuraArgs(unit, indexOrID) then return end
-            pcall(function()
-                local auraData
-                if filter ~= nil then
-                    auraData = getAuraFunc(unit, indexOrID, filter)
-                else
-                    auraData = getAuraFunc(unit, indexOrID)
-                end
-                if type(canaccesstable) == "function" and auraData and not canaccesstable(auraData) then
-                    return
-                end
-                if auraData and auraData.spellId then
-                    AddSpellIDToTooltip(tooltip, auraData.spellId, isGeneric or false)
-                end
-            end)
-        end)
-    end
+    -- TAINT SAFETY: Aura spell ID display now uses TooltipDataProcessor
+    -- instead of hooksecurefunc(GameTooltip, auraMethod). The Aura
+    -- TooltipDataProcessor callback above already handles spell IDs for
+    -- aura tooltips. The per-method hooks were redundant and tainted
+    -- GameTooltip's dispatch tables.
 
-    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-        HookAuraTooltip("SetUnitAura", C_UnitAuras.GetAuraDataByIndex, false)
-    end
-    if C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
-        HookAuraTooltip("SetUnitBuff", C_UnitAuras.GetBuffDataByIndex, false)
-    end
-    if C_UnitAuras and C_UnitAuras.GetDebuffDataByIndex then
-        HookAuraTooltip("SetUnitDebuff", C_UnitAuras.GetDebuffDataByIndex, false)
-    end
-    if C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID then
-        HookAuraTooltip("SetUnitBuffByAuraInstanceID", C_UnitAuras.GetAuraDataByAuraInstanceID, false)
-        HookAuraTooltip("SetUnitDebuffByAuraInstanceID", C_UnitAuras.GetAuraDataByAuraInstanceID, false)
-        HookAuraTooltip("SetUnitAuraByAuraInstanceID", C_UnitAuras.GetAuraDataByAuraInstanceID, true)
-    end
-
-    -- Suppress tooltips that bypass GameTooltip_SetDefaultAnchor
-    hooksecurefunc(GameTooltip, "SetSpellByID", function(tooltip)
+    -- TAINT SAFETY: Suppress tooltips that bypass GameTooltip_SetDefaultAnchor.
+    -- Uses TooltipDataProcessor instead of hooksecurefunc(GameTooltip, "SetSpellByID"/"SetItemByID")
+    -- to avoid tainting GameTooltip's dispatch tables.
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, function(tooltip)
+        if tooltip ~= GameTooltip then return end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return end
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled then return end
@@ -293,13 +303,16 @@ local function SetupTooltipHook()
             tooltip:Hide()
             return
         end
-        local context = Provider:GetTooltipContext(owner)
-        if not Provider:ShouldShowTooltip(context) then
-            tooltip:Hide()
+        if not InCombatLockdown() then
+            local context = Provider:GetTooltipContext(owner)
+            if not Provider:ShouldShowTooltip(context) then
+                tooltip:Hide()
+            end
         end
     end)
 
-    hooksecurefunc(GameTooltip, "SetItemByID", function(tooltip)
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
+        if tooltip ~= GameTooltip then return end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return end
         local settings = Provider:GetSettings()
         if not settings or not settings.enabled then return end
@@ -308,63 +321,14 @@ local function SetupTooltipHook()
             tooltip:Hide()
             return
         end
-        local context = Provider:GetTooltipContext(owner)
-        if not Provider:ShouldShowTooltip(context) then
-            tooltip:Hide()
-        end
-    end)
-
-    -- Safety net for combat tooltip issues
-    hooksecurefunc("GameTooltip_Hide", function()
-        C_Timer.After(0, function()
-            if GameTooltip.IsForbidden and GameTooltip:IsForbidden() then return end
-            if InCombatLockdown() and GameTooltip:IsVisible() then
-                GameTooltip:Hide()
+        if not InCombatLockdown() then
+            local context = Provider:GetTooltipContext(owner)
+            if not Provider:ShouldShowTooltip(context) then
+                tooltip:Hide()
             end
-        end)
-    end)
-
-    -- Tooltip sticking monitor (combat only)
-    local tooltipMonitor = CreateFrame("Frame")
-    local monitorElapsed = 0
-
-    local function TooltipMonitorOnUpdate(self, delta)
-        monitorElapsed = monitorElapsed + delta
-        if monitorElapsed < 0.25 then return end
-        monitorElapsed = 0
-        local settings = Provider:GetSettings()
-        if not settings or not settings.enabled then return end
-        if settings.hideInCombat then return end
-        if not GameTooltip:IsVisible() then return end
-        local owner = GameTooltip:GetOwner()
-        if not owner then return end
-        local mouseFrame = Provider:GetTopMouseFrame()
-        if not mouseFrame then return end
-        local isOverOwner = false
-        local checkFrame = mouseFrame
-        while checkFrame do
-            if checkFrame == owner then
-                isOverOwner = true
-                break
-            end
-            local ok, parent = pcall(checkFrame.GetParent, checkFrame)
-            checkFrame = ok and parent or nil
-        end
-        if not isOverOwner then
-            GameTooltip:Hide()
-        end
-    end
-
-    tooltipMonitor:RegisterEvent("PLAYER_REGEN_DISABLED")
-    tooltipMonitor:RegisterEvent("PLAYER_REGEN_ENABLED")
-    tooltipMonitor:SetScript("OnEvent", function(self, event)
-        if event == "PLAYER_REGEN_DISABLED" then
-            monitorElapsed = 0
-            self:SetScript("OnUpdate", TooltipMonitorOnUpdate)
-        else
-            self:SetScript("OnUpdate", nil)
         end
     end)
+
 end
 
 ---------------------------------------------------------------------------

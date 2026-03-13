@@ -1254,7 +1254,6 @@ local function UpdateButtonVisibility()
             craftingFrame:ClearAllPoints()
             craftingFrame:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", 28, 2)  -- Offset from mail
             craftingFrame:SetScale(0.8)
-            craftingFrame:Show()
         else
             craftingFrame:SetParent(hiddenButtonParent)
             craftingFrame:Hide()
