@@ -83,6 +83,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.50.1 - 2026-03-14
+
+### Fixed
+- fixed own frame being rendered twice with "solo mode" enabled and in a group
+- fixed 'show me first' to take precedence over other sorting options
+- fixed party frame anchoring when 'show me first' is enabled
 ## v2.50.0 - 2026-03-13
 
 ### Added
