@@ -82,6 +82,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.50.0 - 2026-03-13
+
+### Added
+- added row growth direction options for horizontal and vertical layouts
+- added spec and item level information of players in tooltips
+- added CENTER growth direction for all group frame icon layouts
+- added scroll wheel click-casting
+
+### Fixed
+- fixed tooltip cursor anchoring and border rendering
+- fixed gap between castbar border and castbar progress bar
+- fixed SetBorderColor issue on profiles page
+- fix: defer SafeReload on profile scale change to next frame
+- fix: profile switch refresh order and anchoring force bypass
+- refactor: remove unnecessary combat-deferred initialization from modules
+- fix: combat guards for minimap dragging and edit mode watcher
+- fix: minimap middle-click overlay to prevent ping taint, auto-hide toggle refresh
+- refactor: strip NineSlice approach for tooltips, comprehensive profile refresh, click-cast fixes
+- fix: correct minimap HUD parent check, ensure backdrop visibility
+- fix: zero-write tooltip skinning, fix minimap ticker cancel
+- fix: strengthen external HUD detection with GetRect fallback and hooks
+- refactor: overlay-based tooltip skinning
+- fix: improve external HUD detection with size and parent checks
+- fix: make click-cast settings live-toggleable without reload
+- refactor: migrate all modules from PLAYER_LOGIN to ADDON_LOADED
 ## v2.49.4 - 2026-03-12
 
 ### Added
