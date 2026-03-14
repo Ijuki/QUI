@@ -86,6 +86,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.51.1 - 2026-03-14
+
+### Added
+- added option to track Power Infusion on group frames
+
+### Fixed
+- fixed skyriding bar rendering
+- fixed stance bar skinning issue
+- fixed tooltip inspect functions running in unsafe environment
 ## v2.51.0 - 2026-03-14
 
 ### Added
