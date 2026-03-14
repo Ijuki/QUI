@@ -1715,6 +1715,29 @@ local function ShowMiddleClickMenu(keepPosition)
     end
 end
 
+local function UpdateMiddleClickMenuOverlayState()
+    if not middleClickBlockerOverlay then return end
+
+    local settings = GetSettings()
+    local enabled = settings and settings.enabled and settings.middleClickMenuEnabled
+
+    if enabled then
+        middleClickBlockerOverlay:Show()
+        middleClickBlockerOverlay:EnableMouse(true)
+
+        -- Keep hover/tooltips working for minimap children while still
+        -- intercepting MiddleButton clicks for the quick menu.
+        if middleClickBlockerOverlay.SetPropagateMouseMotion then
+            middleClickBlockerOverlay:SetPropagateMouseMotion(true)
+        elseif middleClickBlockerOverlay.SetMouseMotionEnabled then
+            middleClickBlockerOverlay:SetMouseMotionEnabled(false)
+        end
+    else
+        middleClickBlockerOverlay:EnableMouse(false)
+        middleClickBlockerOverlay:Hide()
+    end
+end
+
 local function SetupMiddleClickMenu()
     if middleClickMenuHooked then return end
     middleClickMenuHooked = true
@@ -1735,6 +1758,8 @@ local function SetupMiddleClickMenu()
             end
         end)
     end
+
+    UpdateMiddleClickMenuOverlayState()
 end
 
 ---=================================================================================
@@ -3280,6 +3305,7 @@ function Minimap_Module:Refresh()
     -- Handle disabled state - ensure minimap is still visible in Blizzard default state
     if not settings.enabled then
         StopUpdateTickers()
+        UpdateMiddleClickMenuOverlayState()
         -- Hide QUI customizations but keep minimap visible
         if backdropFrame then
             backdropFrame:Hide()
@@ -3314,6 +3340,7 @@ function Minimap_Module:Refresh()
     SetupAddonButtonHiding()
     RefreshButtonDrawer()
     UpdateDungeonEyePosition()
+    UpdateMiddleClickMenuOverlayState()
 
     -- Restore saved position from profile — skip if the frame anchoring system owns this frame
     if not (_G.QUI_IsFrameOverridden and _G.QUI_IsFrameOverridden(Minimap)) then
