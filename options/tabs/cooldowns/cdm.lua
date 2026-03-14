@@ -3993,10 +3993,10 @@ local function CreateCDMSetupPage(parent)
         if secondary.swapToPrimaryPosition == nil then secondary.swapToPrimaryPosition = false end
         if secondary.hidePrimaryOnSwap == nil then secondary.hidePrimaryOnSwap = false end
         if not secondary.swapSpecs then
-            secondary.swapSpecs = { [66]=true, [70]=true, [263]=true, [265]=true, [266]=true, [267]=true, [1467]=true, [1473]=true }
+            secondary.swapSpecs = { [66]=true, [70]=true, [102]=true, [251]=true, [263]=true, [265]=true, [266]=true, [267]=true, [1467]=true, [1473]=true }
         end
         if not secondary.hideSpecs then
-            secondary.hideSpecs = { [66]=true, [70]=true, [263]=true, [265]=true, [266]=true, [267]=true, [1467]=true, [1473]=true }
+            secondary.hideSpecs = { [66]=true, [70]=true, [102]=true, [251]=true, [263]=true, [265]=true, [266]=true, [267]=true, [1467]=true, [1473]=true }
         end
 
         -- Callback to refresh power bars

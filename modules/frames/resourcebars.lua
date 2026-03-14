@@ -581,6 +581,8 @@ local druidSpecResource = {
 -- Spec info for the "Swap Secondary to Primary Position" feature
 -- Used by both runtime checks and the options UI (via namespace export)
 local SwapCandidateSpecs = {
+    { specID = 102,  name = "Balance",      classColor = "FF7C0A" },  -- Druid
+    { specID = 251,  name = "Frost",        classColor = "C41E3A" },  -- Death Knight
     { specID = 1467, name = "Devastation",  classColor = "33937F" },  -- Evoker
     { specID = 1473, name = "Augmentation", classColor = "33937F" },  -- Evoker
     { specID = 66,   name = "Protection",   classColor = "F48CBA" },  -- Paladin

@@ -1103,6 +1103,8 @@ local defaults = {
             swapToPrimaryPosition = false,  -- Show secondary bar at primary bar's position (supported specs only)
             hidePrimaryOnSwap = false,      -- Auto-hide primary bar when secondary is swapped to its position
             swapSpecs = {                   -- Per-spec swap enable (all candidates default on)
+                [102]  = true,  -- Druid: Balance
+                [251]  = true,  -- Death Knight: Frost
                 [66]   = true,  -- Paladin: Protection
                 [70]   = true,  -- Paladin: Retribution
                 [263]  = true,  -- Shaman: Enhancement
@@ -1113,6 +1115,8 @@ local defaults = {
                 [1473] = true,  -- Evoker: Augmentation
             },
             hideSpecs = {                   -- Per-spec auto-hide enable (all candidates default on)
+                [102]  = true,  -- Druid: Balance
+                [251]  = true,  -- Death Knight: Frost
                 [66]   = true,  -- Paladin: Protection
                 [70]   = true,  -- Paladin: Retribution
                 [263]  = true,  -- Shaman: Enhancement
