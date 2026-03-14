@@ -989,7 +989,13 @@ local function OnEvent(self, event, ...)
     local settings = GetSettings()
 
     -- Handle range check ticker start/stop regardless of enabled state
-    if event == "PLAYER_LOGIN" or event == "GROUP_ROSTER_UPDATE" then
+    if event == "ADDON_LOADED" then
+        local addonName = ...
+        if addonName ~= ADDON_NAME then return end
+        self:UnregisterEvent("ADDON_LOADED")
+    end
+
+    if event == "ADDON_LOADED" or event == "GROUP_ROSTER_UPDATE" then
         if settings and settings.enabled and IsInGroup() then
             if StartRangeCheck then StartRangeCheck() end
         else
@@ -999,7 +1005,7 @@ local function OnEvent(self, event, ...)
 
     if not settings or not settings.enabled then return end
 
-    if event == "PLAYER_LOGIN" then
+    if event == "ADDON_LOADED" then
         CreateMainFrame()
         ApplySkin()
         C_Timer.After(2, UpdateDisplay)
@@ -1030,7 +1036,7 @@ local function OnEvent(self, event, ...)
     end
 end
 
-eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")

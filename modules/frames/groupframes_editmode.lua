@@ -472,8 +472,15 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             local stepX, stepY = 0, 0
             if growDir == "RIGHT" then stepX = iconSize + spacing
             elseif growDir == "LEFT" then stepX = -(iconSize + spacing)
+            elseif growDir == "CENTER" then stepX = iconSize + spacing
             elseif growDir == "UP" then stepY = iconSize + spacing
             elseif growDir == "DOWN" then stepY = -(iconSize + spacing)
+            end
+
+            -- CENTER: center icon centers around the anchor point
+            local defCenterOff = 0
+            if growDir == "CENTER" then
+                defCenterOff = -(math.max(maxIcons - 1, 0) * (iconSize + spacing)) / 2
             end
 
             -- Sample defensive textures for preview
@@ -482,7 +489,7 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             for i = 1, maxIcons do
                 local defIcon = CreateFrame("Frame", nil, frame, "BackdropTemplate")
                 defIcon:SetSize(iconSize, iconSize)
-                defIcon:SetPoint(position, frame, position, offsetX + stepX * (i - 1), offsetY + stepY * (i - 1))
+                defIcon:SetPoint(position, frame, position, offsetX + defCenterOff + stepX * (i - 1), offsetY + stepY * (i - 1))
                 defIcon:SetFrameLevel(baseLevel + 10)
                 defIcon:SetBackdrop({
                     edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -515,12 +522,20 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             if debuffAnchor:find("BOTTOM") then debuffOffY = debuffOffY + powerHeight end
 
             local prevDebuff
+            -- CENTER: centering offset for debuffs
+            local debuffCenterOff = 0
+            if debuffGrow == "CENTER" then
+                local totalSpan = count * size + math.max(count - 1, 0) * debuffSpacing
+                debuffCenterOff = -totalSpan / 2
+            end
             for i = 1, count do
                 local iconFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
                 iconFrame:SetSize(size, size)
                 iconFrame:SetFrameLevel(auraLevel)
 
-                if i == 1 then
+                if debuffGrow == "CENTER" then
+                    iconFrame:SetPoint("LEFT", frame, debuffAnchor, debuffOffX + debuffCenterOff + (i - 1) * (size + debuffSpacing), debuffOffY)
+                elseif i == 1 then
                     iconFrame:SetPoint(debuffAnchor, frame, debuffAnchor, debuffOffX, debuffOffY)
                 elseif prevDebuff then
                     if debuffGrow == "LEFT" then
@@ -567,12 +582,20 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             if buffAnchor:find("BOTTOM") then buffOffY = buffOffY + powerHeight end
 
             local prevBuff
+            -- CENTER: centering offset for buffs
+            local buffCenterOff = 0
+            if buffGrow == "CENTER" then
+                local totalSpan = count * size + math.max(count - 1, 0) * buffSpacing
+                buffCenterOff = -totalSpan / 2
+            end
             for i = 1, count do
                 local iconFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
                 iconFrame:SetSize(size, size)
                 iconFrame:SetFrameLevel(auraLevel)
 
-                if i == 1 then
+                if buffGrow == "CENTER" then
+                    iconFrame:SetPoint("LEFT", frame, buffAnchor, buffOffX + buffCenterOff + (i - 1) * (size + buffSpacing), buffOffY)
+                elseif i == 1 then
                     iconFrame:SetPoint(buffAnchor, frame, buffAnchor, buffOffX, buffOffY)
                 elseif prevBuff then
                     if buffGrow == "LEFT" then
@@ -619,11 +642,10 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
 
         local aiSampleIcons = { 136034, 135940, 136081, 135932, 136063 }
         local vertPart = aiAnchor:find("TOP") and "TOP" or (aiAnchor:find("BOTTOM") and "BOTTOM" or "")
-        local firstHoriz = aiGrow == "LEFT" and "RIGHT" or "LEFT"
-        local firstAnchor = vertPart .. firstHoriz
+        local aiCount = math.min(aiMax, #aiSampleIcons)
 
         local prevAiIcon
-        for i = 1, math.min(aiMax, #aiSampleIcons) do
+        for i = 1, aiCount do
             local aiFrame = CreateFrame("Frame", nil, aiContainer, "BackdropTemplate")
             aiFrame:SetSize(aiIconSize, aiIconSize)
             aiFrame:SetFrameLevel(baseLevel + 8)
@@ -633,7 +655,14 @@ local function CreateTestFrame(parent, index, totalCount, classToken, name, role
             })
             aiFrame:SetBackdropBorderColor(0, 0, 0, 1)
 
-            if i == 1 then
+            if aiGrow == "CENTER" then
+                local totalSpan = aiCount * aiIconSize + math.max(aiCount - 1, 0) * aiSpacing
+                local startX = -totalSpan / 2
+                local iconPoint = vertPart == "" and "LEFT" or (vertPart .. "LEFT")
+                aiFrame:SetPoint(iconPoint, aiContainer, aiAnchor, startX + (i - 1) * (aiIconSize + aiSpacing), 0)
+            elseif i == 1 then
+                local firstHoriz = aiGrow == "LEFT" and "RIGHT" or "LEFT"
+                local firstAnchor = vertPart .. firstHoriz
                 aiFrame:SetPoint(firstAnchor, aiContainer, firstAnchor, 0, 0)
             elseif prevAiIcon then
                 if aiGrow == "LEFT" then
@@ -1426,8 +1455,8 @@ local function RestoreHeaderAnchors()
 
     for _, hKey in ipairs({"party", "raid"}) do
         local hdr = GF.headers[hKey]
-        if hdr then
-            -- Determine position table for this header
+        local target = GF.anchorFrames and GF.anchorFrames[hKey] or hdr
+        if target then
             local pos
             if unified or hKey == "party" then
                 pos = db and db.position
@@ -1437,36 +1466,16 @@ local function RestoreHeaderAnchors()
             local oX = pos and pos.offsetX or -400
             local oY = pos and pos.offsetY or 0
 
-            hdr:SetParent(UIParent)
-            hdr:ClearAllPoints()
-
-            -- Recompute header size for current roster
-            if GF.CalculateHeaderSize and db then
-                local count
-                if hKey == "party" then
-                    count = IsInGroup() and not IsInRaid() and GetNumGroupMembers() or 5
-                else
-                    count = IsInRaid() and GetNumGroupMembers() or 25
-                    count = math.max(count, 5)
-                end
-                local w, h = GF.CalculateHeaderSize(db, count)
-                hdr:SetSize(w, h)
-                QUI:DebugPrint(("[GF] RestoreHeaderAnchors %s: pos=(%d,%d) size=(%d,%d)"):format(hKey, oX, oY, w, h))
-            end
-
-            hdr:SetPoint("CENTER", UIParent, "CENTER", oX, oY)
+            target:SetParent(UIParent)
+            target:ClearAllPoints()
+            target:SetPoint("CENTER", UIParent, "CENTER", oX, oY)
+            QUI:DebugPrint(("[GF] RestoreHeaderAnchors %s root: pos=(%d,%d)"):format(hKey, oX, oY))
         end
     end
 
-    -- Restore self header — re-parent to UIParent and anchor above active header
     local selfHdr = GF.headers.self
     if selfHdr then
-        selfHdr:SetParent(UIParent)
         selfHdr:ClearAllPoints()
-        local anchor = IsInRaid() and GF.headers.raid or GF.headers.party
-        if anchor then
-            selfHdr:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 4)
-        end
     end
 end
 
@@ -1731,6 +1740,9 @@ function QUI_GFEM:DisableEditMode()
 
     -- Re-anchor headers to UIParent at saved offset
     RestoreHeaderAnchors()
+    if GF and GF.UpdateAnchorFrames then
+        GF:UpdateAnchorFrames()
+    end
 
     -- Disable test mode if active
     if isTestMode then

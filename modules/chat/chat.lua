@@ -1552,34 +1552,39 @@ eventFrame:SetScript("OnEvent", function(self, event)
         C_Timer.After(0.5, function()
             local settings = GetSettings()
             ApplyTimestampSettings()
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
+        self:UnregisterEvent("ADDON_LOADED")
 
-            -- Setup new message sound (works independently of chat skinning)
-            SetupNewMessageSound()
+        local settings = GetSettings()
 
-            if not settings or not settings.enabled then return end
+        -- Setup new message sound (works independently of chat skinning)
+        SetupNewMessageSound()
 
-            -- Setup URL click handler (once)
-            SetupURLClickHandler()
+        if not settings or not settings.enabled then return end
 
-            -- Install chat message filters (timestamps + URLs) via safe API
-            InstallMessageFilters()
+        -- Setup URL click handler (once)
+        SetupURLClickHandler()
 
-            -- Hook chat frame opening to ensure edit box gets history initialization
-            hooksecurefunc("ChatFrame_OpenChat", function(text, chatFrame)
-                C_Timer.After(0.1, function()
-                    InitializeChatFrameHistory(chatFrame)
-                end)
+        -- Install chat message filters (timestamps + URLs) via safe API
+        InstallMessageFilters()
+
+        -- Hook chat frame opening to ensure edit box gets history initialization
+        hooksecurefunc("ChatFrame_OpenChat", function(text, chatFrame)
+            C_Timer.After(0.1, function()
+                InitializeChatFrameHistory(chatFrame)
             end)
-
-            -- Skin existing chat frames
-            SkinAllChatFrames()
-
-            -- Style chat tabs
-            StyleAllChatTabs()
-
-            -- Hook for new chat windows
-            HookNewChatWindows()
         end)
+
+        -- Skin existing chat frames
+        SkinAllChatFrames()
+
+        -- Style chat tabs
+        StyleAllChatTabs()
+
+        -- Hook for new chat windows
+        HookNewChatWindows()
     end
 end)
 
