@@ -84,6 +84,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+
+## v2.50.2 - 2026-03-14
+
+### Added
+- added anchoring support for AbilityTimeline / Better Timeline addon
+
+### Fixed
+- fixed tooltips disappearing when OPie is enabled
+- fixed tooltips not showing spellIDs and iconIDs anymore
+- fixed mouseover tooltips on the minimap
+- fixed defensives growth direction 'center' not working as intended
 ## v2.50.1 - 2026-03-14
 
 ### Fixed
