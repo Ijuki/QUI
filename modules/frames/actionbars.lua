@@ -789,7 +789,11 @@ local hookingSetPoint = false
 local extraActionSetPointHooked = false
 local zoneAbilitySetPointHooked = false
 local hookingSetParent = false
-local pageArrowShowHooked = false
+local pageArrowShowHooked = {}
+local pageArrowRetryTimer = nil
+local pageArrowRetryAttempts = 0
+local PAGE_ARROW_RETRY_MAX_ATTEMPTS = 15
+local PAGE_ARROW_RETRY_DELAY = 0.2
 
 -- Get settings for a specific extra button type
 local function GetExtraButtonDB(buttonType)
@@ -3282,26 +3286,81 @@ end
 -- PAGE ARROW VISIBILITY
 ---------------------------------------------------------------------------
 
-local function ApplyPageArrowVisibility(hide)
-    local pageNum = MainActionBar and MainActionBar.ActionBarPageNumber
-    if not pageNum then return end
+local function CollectPageArrowFrames()
+    local seen, frames = {}, {}
+
+    local function AddFrame(frame)
+        if not frame or seen[frame] then return end
+        if frame.Hide and frame.Show then
+            seen[frame] = true
+            table.insert(frames, frame)
+        end
+    end
+
+    local mainBar = _G.MainActionBar or _G.MainMenuBar
+    AddFrame(mainBar and mainBar.ActionBarPageNumber)
+    AddFrame(_G.ActionBarPageNumber)
+
+    AddFrame(_G.ActionBarUpButton)
+    AddFrame(_G.ActionBarDownButton)
+
+    local artFrame = _G.MainMenuBarArtFrame
+    AddFrame(artFrame and artFrame.PageNumber)
+    AddFrame(artFrame and artFrame.PageUpButton)
+    AddFrame(artFrame and artFrame.PageDownButton)
+
+    return frames
+end
+
+local ApplyPageArrowVisibility
+
+local function SchedulePageArrowVisibilityRetry()
+    if pageArrowRetryTimer or pageArrowRetryAttempts >= PAGE_ARROW_RETRY_MAX_ATTEMPTS then return end
+    pageArrowRetryAttempts = pageArrowRetryAttempts + 1
+    pageArrowRetryTimer = C_Timer.NewTimer(PAGE_ARROW_RETRY_DELAY, function()
+        pageArrowRetryTimer = nil
+        local db = GetDB()
+        if db and db.bars and db.bars.bar1 then
+            ApplyPageArrowVisibility(db.bars.bar1.hidePageArrow)
+        end
+    end)
+end
+
+ApplyPageArrowVisibility = function(hide)
+    local frames = CollectPageArrowFrames()
+    if #frames == 0 then
+        if hide then
+            SchedulePageArrowVisibilityRetry()
+        end
+        return
+    end
+
+    pageArrowRetryAttempts = 0
+    if pageArrowRetryTimer then
+        pageArrowRetryTimer:Cancel()
+        pageArrowRetryTimer = nil
+    end
 
     if hide then
-        pageNum:Hide()
-        if not pageArrowShowHooked then
-            pageArrowShowHooked = true
-            -- TAINT SAFETY: Defer to break taint chain from secure context.
-            hooksecurefunc(pageNum, "Show", function(self)
-                C_Timer.After(0, function()
-                    local db = GetDB()
-                    if db and db.bars and db.bars.bar1 and db.bars.bar1.hidePageArrow and self and self.Hide then
-                        self:Hide()
-                    end
+        for _, frame in ipairs(frames) do
+            frame:Hide()
+            if not pageArrowShowHooked[frame] then
+                pageArrowShowHooked[frame] = true
+                -- TAINT SAFETY: Defer to break taint chain from secure context.
+                hooksecurefunc(frame, "Show", function(self)
+                    C_Timer.After(0, function()
+                        local db = GetDB()
+                        if db and db.bars and db.bars.bar1 and db.bars.bar1.hidePageArrow and self and self.Hide then
+                            self:Hide()
+                        end
+                    end)
                 end)
-            end)
+            end
         end
     else
-        pageNum:Show()
+        for _, frame in ipairs(frames) do
+            frame:Show()
+        end
     end
 end
 
@@ -3496,6 +3555,12 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if addonName == "Blizzard_ActionBar" then
             HookSpellFlyoutSkinning()
             C_Timer.After(0, SkinSpellFlyoutButtons)
+            local db = GetDB()
+            if db and db.bars and db.bars.bar1 then
+                C_Timer.After(0, function()
+                    ApplyPageArrowVisibility(db.bars.bar1.hidePageArrow)
+                end)
+            end
         end
 
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
@@ -3577,6 +3642,15 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             if type(_G.QUI_RefreshActionBars) == "function" then
                 _G.QUI_RefreshActionBars()
             end
+        end
+        local db = GetDB()
+        if db and db.bars and db.bars.bar1 then
+            C_Timer.After(0.1, function()
+                ApplyPageArrowVisibility(db.bars.bar1.hidePageArrow)
+            end)
+            C_Timer.After(0.6, function()
+                ApplyPageArrowVisibility(db.bars.bar1.hidePageArrow)
+            end)
         end
 
     elseif event == "UPDATE_VEHICLE_ACTIONBAR" then

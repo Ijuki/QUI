@@ -624,6 +624,8 @@ local defaults = {
         loot = {
             enabled = true,           -- Enable custom loot window
             lootUnderMouse = false,   -- Position loot window at cursor
+            lootUnderMouseOffsetX = 0, -- Cursor anchor X offset (pixels)
+            lootUnderMouseOffsetY = 0, -- Cursor anchor Y offset (pixels)
             showTransmogMarker = true, -- Show marker on uncollected appearances
             position = { point = "TOP", relPoint = "TOP", x = 289.166, y = -165.667 },
         },
@@ -1044,6 +1046,12 @@ local defaults = {
             showTicks         = false,    -- Show tick marks for segmented resources (Holy Power, Chi, etc.)
             tickThickness     = 2,        -- Thickness of tick marks in pixels
             tickColor         = { 0, 0, 0, 1 },  -- Color of tick marks (default black)
+            indicators        = {
+                enabled   = false,        -- Show custom breakpoint indicator lines
+                thickness = 2,            -- Indicator line thickness in pixels
+                color     = { 1, 1, 1, 0.9 }, -- Indicator line color
+                perSpec   = {},           -- [specID] = { value1, value2, value3 }
+            },
             lockedToEssential = false,  -- Auto-resize width when Essential CDM changes
             lockedToUtility   = false,  -- Auto-resize width when Utility CDM changes
             snapGap           = 5,      -- Gap when snapped to CDM
@@ -1120,12 +1128,20 @@ local defaults = {
             showTicks     = true,     -- Show tick marks for segmented resources (Holy Power, Chi, etc.)
             tickThickness = 2,        -- Thickness of tick marks in pixels
             tickColor     = { 0, 0, 0, 1 },  -- Color of tick marks (default black)
+            indicators    = {
+                enabled   = false,        -- Show custom breakpoint indicator lines
+                thickness = 2,            -- Indicator line thickness in pixels
+                color     = { 1, 1, 1, 0.9 }, -- Indicator line color
+                perSpec   = {},           -- [specID] = { value1, value2, value3 }
+            },
             lockedToEssential = false,  -- Auto-resize width when Essential CDM changes
             lockedToUtility   = false,  -- Auto-resize width when Utility CDM changes
             lockedToPrimary   = true,   -- Position above + match Primary bar width
             swapToPrimaryPosition = false,  -- Show secondary bar at primary bar's position (supported specs only)
             hidePrimaryOnSwap = false,      -- Auto-hide primary bar when secondary is swapped to its position
             swapSpecs = {                   -- Per-spec swap enable (all candidates default on)
+                [102]  = true,  -- Druid: Balance
+                [251]  = true,  -- Death Knight: Frost
                 [66]   = true,  -- Paladin: Protection
                 [70]   = true,  -- Paladin: Retribution
                 [263]  = true,  -- Shaman: Enhancement
@@ -1136,6 +1152,8 @@ local defaults = {
                 [1473] = true,  -- Evoker: Augmentation
             },
             hideSpecs = {                   -- Per-spec auto-hide enable (all candidates default on)
+                [102]  = true,  -- Druid: Balance
+                [251]  = true,  -- Death Knight: Frost
                 [66]   = true,  -- Paladin: Protection
                 [70]   = true,  -- Paladin: Retribution
                 [263]  = true,  -- Shaman: Enhancement
@@ -1666,6 +1684,7 @@ local defaults = {
                 showHealthPercent = true,
                 showHealthAbsolute = true,
                 healthDisplayStyle = "both",    -- "percent", "absolute", "both", "both_reverse"
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",          -- " | ", " - ", " / "
                 healthFontSize = 16,
                 healthAnchor = "RIGHT",
@@ -1676,6 +1695,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",    -- "percent", "current", "both"
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = true,  -- Use power type color (mana blue, rage red, etc.)
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
@@ -1869,6 +1889,7 @@ local defaults = {
                 showHealthPercent = true,
                 showHealthAbsolute = true,
                 healthDisplayStyle = "both",    -- "percent", "absolute", "both", "both_reverse"
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",          -- " | ", " - ", " / "
                 healthFontSize = 16,
                 healthAnchor = "LEFT",
@@ -1879,6 +1900,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",    -- "percent", "current", "both"
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = false,  -- Use power type color (mana blue, rage red, etc.)
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
@@ -2023,6 +2045,7 @@ local defaults = {
                 showHealthPercent = true,
                 showHealthAbsolute = false,
                 healthDisplayStyle = "percent",
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",
                 healthFontSize = 14,
                 healthAnchor = "RIGHT",
@@ -2033,6 +2056,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = true,
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
@@ -2120,6 +2144,7 @@ local defaults = {
                 showHealthPercent = true,
                 showHealthAbsolute = false,
                 healthDisplayStyle = "percent",
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",
                 healthFontSize = 10,
                 healthAnchor = "RIGHT",
@@ -2130,6 +2155,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = true,
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
@@ -2224,6 +2250,7 @@ local defaults = {
                 showHealthPercent = true,
                 showHealthAbsolute = true,
                 healthDisplayStyle = "percent",
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",
                 healthFontSize = 14,
                 healthAnchor = "RIGHT",
@@ -2234,6 +2261,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = true,
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
@@ -2329,6 +2357,7 @@ local defaults = {
                 -- Health text
                 showHealth = true,
                 healthDisplayStyle = "both",
+                hideHealthPercentSymbol = false,
                 healthDivider = " | ",
                 healthFontSize = 11,
                 healthAnchor = "RIGHT",
@@ -2339,6 +2368,7 @@ local defaults = {
                 -- Power text
                 showPowerText = false,
                 powerTextFormat = "percent",
+                hidePowerPercentSymbol = false,
                 powerTextUsePowerColor = true,
                 powerTextUseClassColor = false,
                 powerTextColor = { 1, 1, 1, 1 },
