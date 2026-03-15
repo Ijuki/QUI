@@ -13,6 +13,8 @@ local TooltipInspect
 local GameTooltip = GameTooltip
 local UIParent = UIParent
 local InCombatLockdown = InCombatLockdown
+local GetTime = GetTime
+local floor = math.floor
 
 ---------------------------------------------------------------------------
 -- CLASSIC ENGINE TABLE
@@ -90,6 +92,9 @@ end
 ---------------------------------------------------------------------------
 local pendingSetUnitToken = 0
 local tooltipPlayerItemLevelGUID = setmetatable({}, {__mode = "k"})
+local tooltipUnitInfoState = setmetatable({}, {__mode = "k"})
+local mountNameCache = {}
+local MOUNT_NAME_CACHE_TTL = 0.75
 local DEFAULT_PLAYER_ILVL_BRACKETS = {
     white = 245,
     green = 255,
@@ -221,6 +226,399 @@ local function GetPlayerItemLevelLabel(playerData)
     return "Player"
 end
 
+local function IsSettingEnabled(settings, key, defaultValue)
+    if not settings then
+        return defaultValue == true
+    end
+
+    local value = settings[key]
+    if value == nil then
+        return defaultValue == true
+    end
+
+    return value == true
+end
+
+local function EnsureTooltipUnitInfoState(tooltip, guid)
+    if not tooltip or not guid then
+        return nil
+    end
+
+    local state = tooltipUnitInfoState[tooltip]
+    if not state or state.guid ~= guid then
+        state = {
+            guid = guid,
+            spacerAdded = false,
+            targetAdded = false,
+            mountAdded = false,
+            mountResolved = false,
+            mountName = "",
+            mountNameDisplayed = "",
+            ratingAdded = false,
+        }
+        tooltipUnitInfoState[tooltip] = state
+    end
+
+    return state
+end
+
+local function EnsureTooltipInfoSpacer(tooltip, state)
+    if not tooltip or not state or state.spacerAdded then return end
+    tooltip:AddLine(" ")
+    state.spacerAdded = true
+end
+
+local function ResolveTooltipTargetInfo(unit)
+    if not unit or Helpers.IsSecretValue(unit) then
+        return nil
+    end
+
+    local targetUnit = unit .. "target"
+    local okExists, targetExists = pcall(UnitExists, targetUnit)
+    if not okExists or not targetExists then
+        return nil
+    end
+
+    local okName, targetName = pcall(UnitName, targetUnit)
+    if not okName or not targetName or targetName == "" or Helpers.IsSecretValue(targetName) then
+        return nil
+    end
+
+    local displayName = targetName
+    if type(Ambiguate) == "function" then
+        local okAmbiguate, shortName = pcall(Ambiguate, targetName, "none")
+        if okAmbiguate and shortName and shortName ~= "" and not Helpers.IsSecretValue(shortName) then
+            displayName = shortName
+        end
+    end
+
+    local valueR, valueG, valueB = 1, 1, 1
+    local okPlayer, isPlayer = pcall(UnitIsPlayer, targetUnit)
+    if okPlayer and isPlayer then
+        local okClass, _, targetClassToken = pcall(UnitClass, targetUnit)
+        if okClass and targetClassToken then
+            valueR, valueG, valueB = GetPlayerClassColor(targetClassToken)
+        end
+    end
+
+    return {
+        name = displayName,
+        valueR = valueR,
+        valueG = valueG,
+        valueB = valueB,
+    }
+end
+
+local function AddTooltipTargetInfo(tooltip, unit, state)
+    if not tooltip or not unit or not state then return false end
+
+    local targetInfo = ResolveTooltipTargetInfo(unit)
+    local rightLine = nil
+    if state.targetLineIndex and tooltip.GetRightLine then
+        rightLine = tooltip:GetRightLine(state.targetLineIndex)
+    end
+
+    if not targetInfo then
+        if rightLine and state.targetName ~= "" then
+            pcall(rightLine.SetText, rightLine, "")
+            state.targetName = ""
+            return true
+        end
+        return false
+    end
+
+    if rightLine then
+        if state.targetName ~= targetInfo.name then
+            pcall(rightLine.SetText, rightLine, targetInfo.name)
+            pcall(rightLine.SetTextColor, rightLine, targetInfo.valueR, targetInfo.valueG, targetInfo.valueB)
+            state.targetName = targetInfo.name
+            return true
+        end
+        return false
+    end
+
+    EnsureTooltipInfoSpacer(tooltip, state)
+    tooltip:AddDoubleLine("Target:", targetInfo.name, 0.7, 0.82, 1, targetInfo.valueR, targetInfo.valueG, targetInfo.valueB)
+    if tooltip.NumLines then
+        local okNumLines, count = pcall(tooltip.NumLines, tooltip)
+        state.targetLineIndex = (okNumLines and type(count) == "number") and count or nil
+    else
+        state.targetLineIndex = nil
+    end
+    state.targetName = targetInfo.name
+    state.targetAdded = true
+    return true
+end
+
+local function GetMountNameFromSpellID(spellID)
+    if not spellID or Helpers.IsSecretValue(spellID) then return nil end
+    if not C_MountJournal or not C_MountJournal.GetMountFromSpell then return nil end
+
+    local okMount, mountID = pcall(C_MountJournal.GetMountFromSpell, spellID)
+    if not okMount or not mountID or mountID == 0 or Helpers.IsSecretValue(mountID) then
+        return nil
+    end
+
+    if not C_MountJournal.GetMountInfoByID then
+        return nil
+    end
+
+    local okInfo, mountName = pcall(C_MountJournal.GetMountInfoByID, mountID)
+    if not okInfo or not mountName or mountName == "" or Helpers.IsSecretValue(mountName) then
+        return nil
+    end
+
+    return mountName
+end
+
+local function GetCachedMountName(guid)
+    if not guid then
+        return nil
+    end
+
+    local entry = mountNameCache[guid]
+    if not entry then
+        return nil
+    end
+
+    if (entry.expiresAt or 0) < GetTime() then
+        mountNameCache[guid] = nil
+        return nil
+    end
+
+    if entry.value == false then
+        return false
+    end
+
+    return entry.value
+end
+
+local function SetCachedMountName(guid, mountName)
+    if not guid then
+        return
+    end
+
+    mountNameCache[guid] = {
+        value = mountName or false,
+        expiresAt = GetTime() + MOUNT_NAME_CACHE_TTL,
+    }
+end
+
+local function InvalidateCachedMountName(guid)
+    if not guid then return end
+    mountNameCache[guid] = nil
+end
+
+local function GetMountedPlayerMountName(unit)
+    if InCombatLockdown() then return nil end
+    if not unit or Helpers.IsSecretValue(unit) then return nil end
+    if not UnitExists(unit) then return nil end
+    local guid = UnitGUID(unit)
+    if Helpers.IsSecretValue(guid) then
+        guid = nil
+    end
+
+    local cachedValue = GetCachedMountName(guid)
+    if cachedValue ~= nil then
+        return cachedValue or nil
+    end
+
+    local function ResolveMountNameFromAuraData(auraData)
+        if not auraData then return nil end
+
+        local spellID = auraData.spellId or auraData.spellID
+        local mountName = GetMountNameFromSpellID(spellID)
+        if mountName then
+            return mountName
+        end
+
+        return nil
+    end
+
+    local mountName = nil
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        for index = 1, 80 do
+            local okAura, auraData = pcall(C_UnitAuras.GetAuraDataByIndex, unit, index, "HELPFUL")
+            if not okAura then break end
+            if not auraData then break end
+            mountName = ResolveMountNameFromAuraData(auraData)
+            if mountName then break end
+        end
+    elseif C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
+        for index = 1, 80 do
+            local okAura, auraData = pcall(C_UnitAuras.GetBuffDataByIndex, unit, index, "HELPFUL")
+            if not okAura then break end
+            if not auraData then break end
+            mountName = ResolveMountNameFromAuraData(auraData)
+            if mountName then break end
+        end
+    elseif UnitAura then
+        for index = 1, 80 do
+            local auraName, _, _, _, _, _, _, _, _, spellID = UnitAura(unit, index, "HELPFUL")
+            if not auraName then break end
+
+            mountName = GetMountNameFromSpellID(spellID)
+            if mountName then
+                break
+            end
+        end
+    end
+
+    if not mountName then
+        local okTaxi, onTaxi = pcall(UnitOnTaxi, unit)
+        if okTaxi and onTaxi then
+            mountName = "Taxi"
+        end
+    end
+
+    SetCachedMountName(guid, mountName)
+    return mountName
+end
+
+local function AddTooltipMountInfo(tooltip, unit, state)
+    if not tooltip or not unit or not state then return false end
+    if InCombatLockdown() then return false end
+
+    local mountName = nil
+    if state.mountResolved then
+        if state.mountName and state.mountName ~= "" then
+            mountName = state.mountName
+        end
+    else
+        mountName = GetMountedPlayerMountName(unit)
+        state.mountResolved = true
+        state.mountName = mountName or ""
+    end
+
+    local rightLine = nil
+    if state.mountLineIndex and tooltip.GetRightLine then
+        rightLine = tooltip:GetRightLine(state.mountLineIndex)
+    end
+
+    if rightLine then
+        local displayName = mountName or ""
+        if state.mountNameDisplayed ~= displayName then
+            pcall(rightLine.SetText, rightLine, displayName)
+            state.mountNameDisplayed = displayName
+            state.mountAdded = displayName ~= ""
+            return true
+        end
+        return false
+    end
+
+    if not mountName then
+        return false
+    end
+
+    EnsureTooltipInfoSpacer(tooltip, state)
+    tooltip:AddDoubleLine("Mount:", mountName, 0.65, 1, 0.65, 1, 1, 1)
+    if tooltip.NumLines then
+        local okNumLines, count = pcall(tooltip.NumLines, tooltip)
+        state.mountLineIndex = (okNumLines and type(count) == "number") and count or nil
+    else
+        state.mountLineIndex = nil
+    end
+    state.mountNameDisplayed = mountName
+    state.mountAdded = true
+    return true
+end
+
+local function GetPlayerMythicRating(unit)
+    if InCombatLockdown() then return nil end
+    if not unit then return nil end
+
+    if RaiderIO and RaiderIO.GetProfile then
+        local okProfile, profile = pcall(RaiderIO.GetProfile, unit)
+        if okProfile and profile and profile.mythicKeystoneProfile and profile.mythicKeystoneProfile.currentScore then
+            local score = Helpers.SafeToNumber(profile.mythicKeystoneProfile.currentScore, 0)
+            if score > 0 then
+                local rating = floor(score)
+                local color = {r = 1, g = 1, b = 1}
+
+                if RaiderIO.GetScoreColor then
+                    local okColor, r, g, b = pcall(RaiderIO.GetScoreColor, rating)
+                    if okColor and r and g and b then
+                        color.r, color.g, color.b = r, g, b
+                    end
+                end
+
+                return rating, color
+            end
+        end
+    end
+
+    if not C_PlayerInfo or not C_PlayerInfo.GetPlayerMythicPlusRatingSummary then
+        return nil
+    end
+
+    local okSummary, ratingInfo = pcall(C_PlayerInfo.GetPlayerMythicPlusRatingSummary, unit)
+    if not okSummary or not ratingInfo then
+        return nil
+    end
+
+    local score = Helpers.SafeToNumber(ratingInfo.currentSeasonScore, 0)
+    if score <= 0 then
+        return nil
+    end
+
+    local rating = floor(score)
+    local color = {r = 1, g = 1, b = 1}
+    if C_ChallengeMode and C_ChallengeMode.GetDungeonScoreRarityColor then
+        local okColor, rarityColor = pcall(C_ChallengeMode.GetDungeonScoreRarityColor, rating)
+        if okColor and rarityColor then
+            color.r = Helpers.SafeToNumber(rarityColor.r, 1)
+            color.g = Helpers.SafeToNumber(rarityColor.g, 1)
+            color.b = Helpers.SafeToNumber(rarityColor.b, 1)
+        end
+    end
+
+    return rating, color
+end
+
+local function AddUnitTooltipInfoToTooltip(tooltip, unit, settings)
+    if not tooltip or not unit then return false end
+
+    local guid = UnitGUID(unit)
+    if not guid or Helpers.IsSecretValue(guid) then
+        return false
+    end
+
+    local state = EnsureTooltipUnitInfoState(tooltip, guid)
+    if not state then
+        return false
+    end
+
+    local added = false
+    if IsSettingEnabled(settings, "showTooltipTarget", true) then
+        if AddTooltipTargetInfo(tooltip, unit, state) then
+            added = true
+        end
+    end
+
+    local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
+    if not okPlayer or not isPlayer or InCombatLockdown() then
+        return added
+    end
+
+    if IsSettingEnabled(settings, "showPlayerMount", true) then
+        if AddTooltipMountInfo(tooltip, unit, state) then
+            added = true
+        end
+    end
+
+    if IsSettingEnabled(settings, "showPlayerMythicRating", true) and not state.ratingAdded then
+        local rating, color = GetPlayerMythicRating(unit)
+        if rating and color then
+            EnsureTooltipInfoSpacer(tooltip, state)
+            tooltip:AddDoubleLine("M+ Rating:", tostring(rating), 0.8, 0.85, 1, color.r or 1, color.g or 1, color.b or 1)
+            state.ratingAdded = true
+            added = true
+        end
+    end
+
+    return added
+end
+
 local function AddPlayerItemLevelToTooltip(tooltip, unit, skipShow)
     if not TooltipInspect or not unit or not tooltip then return false end
     if InCombatLockdown() then return false end
@@ -260,6 +658,30 @@ local function AddPlayerItemLevelToTooltip(tooltip, unit, skipShow)
     end
 
     return true
+end
+
+local function AddUnitTooltipAugmentations(tooltip, unit, settings, skipShow)
+    if not tooltip or not unit or not settings then
+        return false
+    end
+
+    local added = false
+    if AddUnitTooltipInfoToTooltip(tooltip, unit, settings) then
+        added = true
+    end
+
+    local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
+    if okPlayer and isPlayer and settings.showPlayerItemLevel then
+        if AddPlayerItemLevelToTooltip(tooltip, unit, true) then
+            added = true
+        end
+    end
+
+    if added and not skipShow then
+        RefreshTooltipLayout(tooltip)
+    end
+
+    return added
 end
 
 ---------------------------------------------------------------------------
@@ -377,18 +799,15 @@ local function SetupTooltipHook()
 
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tooltip)
         if tooltip ~= GameTooltip then return end
-        if InCombatLockdown() then return end
         local settings = Provider:GetSettings()
-        if not settings or not settings.enabled or not settings.showPlayerItemLevel then return end
+        if not settings or not settings.enabled then return end
 
         local unit = ResolveTooltipUnit(tooltip)
         if not unit then return end
 
-        local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
-        if not okPlayer or not isPlayer then return end
-
         tooltipPlayerItemLevelGUID[tooltip] = nil
-        AddPlayerItemLevelToTooltip(tooltip, unit, true)
+        tooltipUnitInfoState[tooltip] = nil
+        AddUnitTooltipAugmentations(tooltip, unit, settings, true)
     end)
 
     -- Hide health bar
@@ -419,6 +838,8 @@ local function SetupTooltipHook()
         if gtSpellIDWasShown and not shown then
             InvalidatePendingSetUnit()
             tooltipSpellIDAdded[GameTooltip] = nil
+            tooltipPlayerItemLevelGUID[GameTooltip] = nil
+            tooltipUnitInfoState[GameTooltip] = nil
         end
         gtSpellIDWasShown = shown
     end)
@@ -554,7 +975,7 @@ local function SetupTooltipHook()
             local unit = ResolveTooltipUnit(GameTooltip)
             if not unit or UnitGUID(unit) ~= guid then return end
 
-            AddPlayerItemLevelToTooltip(GameTooltip, unit, false)
+            AddUnitTooltipAugmentations(GameTooltip, unit, settings, false)
         end)
     end
 
@@ -571,6 +992,74 @@ local function OnModifierStateChanged()
     local context = Provider:GetTooltipContext(owner)
     if context and not Provider:ShouldShowTooltip(context) then
         GameTooltip:Hide()
+    end
+end
+
+local function OnUnitTargetChanged(changedUnit)
+    if not changedUnit or not GameTooltip or not GameTooltip:IsShown() then return end
+
+    local settings = Provider:GetSettings()
+    if not settings or not settings.enabled then return end
+    if not IsSettingEnabled(settings, "showTooltipTarget", true) then return end
+
+    local unit = ResolveTooltipUnit(GameTooltip)
+    if not unit then return end
+
+    local isSameUnit = false
+    local okUnitIsUnit, matches = pcall(UnitIsUnit, unit, changedUnit)
+    if okUnitIsUnit and matches then
+        isSameUnit = true
+    elseif unit == changedUnit then
+        isSameUnit = true
+    end
+
+    if not isSameUnit then return end
+
+    local guid = UnitGUID(unit)
+    if not guid or Helpers.IsSecretValue(guid) then return end
+
+    local state = EnsureTooltipUnitInfoState(GameTooltip, guid)
+    if not state then return end
+
+    if AddTooltipTargetInfo(GameTooltip, unit, state) then
+        RefreshTooltipLayout(GameTooltip)
+    end
+end
+
+local function OnUnitAuraChanged(changedUnit)
+    if not changedUnit or not GameTooltip or not GameTooltip:IsShown() then return end
+    if InCombatLockdown() then return end
+
+    local settings = Provider:GetSettings()
+    if not settings or not settings.enabled then return end
+    if not IsSettingEnabled(settings, "showPlayerMount", true) then return end
+
+    local unit = ResolveTooltipUnit(GameTooltip)
+    if not unit then return end
+
+    local isSameUnit = false
+    local okUnitIsUnit, matches = pcall(UnitIsUnit, unit, changedUnit)
+    if okUnitIsUnit and matches then
+        isSameUnit = true
+    elseif unit == changedUnit then
+        isSameUnit = true
+    end
+
+    if not isSameUnit then return end
+
+    local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
+    if not okPlayer or not isPlayer then return end
+
+    local guid = UnitGUID(unit)
+    if not guid or Helpers.IsSecretValue(guid) then return end
+
+    local state = EnsureTooltipUnitInfoState(GameTooltip, guid)
+    if not state then return end
+
+    InvalidateCachedMountName(guid)
+    state.mountResolved = false
+    if AddTooltipMountInfo(GameTooltip, unit, state) then
+        RefreshTooltipLayout(GameTooltip)
     end
 end
 
@@ -597,11 +1086,17 @@ function ClassicEngine:Initialize()
     -- Event handlers
     local eventFrame = CreateFrame("Frame")
     eventFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+    eventFrame:RegisterEvent("UNIT_TARGET")
+    eventFrame:RegisterEvent("UNIT_AURA")
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    eventFrame:SetScript("OnEvent", function(self, event)
+    eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if event == "MODIFIER_STATE_CHANGED" then
             OnModifierStateChanged()
+        elseif event == "UNIT_TARGET" then
+            OnUnitTargetChanged(arg1)
+        elseif event == "UNIT_AURA" then
+            OnUnitAuraChanged(arg1)
         elseif event == "PLAYER_REGEN_DISABLED" then
             OnCombatStateChanged(true)
         elseif event == "PLAYER_REGEN_ENABLED" then

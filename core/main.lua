@@ -1370,6 +1370,9 @@ local defaults = {
             borderUseAccentColor = false,      -- Use addon accent color for border
             showSpellIDs = false,              -- Show spell ID and icon ID on buff/debuff tooltips
             showPlayerItemLevel = false,       -- Show inspected player item level on player tooltips
+            showTooltipTarget = true,          -- Show target name on unit tooltips when available
+            showPlayerMount = true,            -- Show mounted player's mount on player tooltips (out of combat)
+            showPlayerMythicRating = true,     -- Show player M+ rating on player tooltips (out of combat)
             colorPlayerItemLevel = true,       -- Color tooltip player item level by configured ilvl brackets
             itemLevelBrackets = {
                 white = 245,                   -- White bracket starts here (below = grey)
