@@ -26,6 +26,7 @@ local FLAT_TEXTURE = "Interface\\Buttons\\WHITE8x8"
 -- invisible). Each tooltip gets its own table, auto-cleaned via weak keys.
 local tooltipBackdrops = Helpers.CreateStateTable()
 local tooltipBorders = Helpers.CreateStateTable()
+local embeddedTooltips = Helpers.CreateStateTable()
 
 local function GetTooltipBackdrop(tooltip)
     local info = tooltipBackdrops[tooltip]
@@ -64,6 +65,32 @@ local function GetTooltipBorder(tooltip)
 
     tooltipBorders[tooltip] = border
     return border
+end
+
+-- Detect tooltip frames that are rendered inside another tooltip container
+-- (e.g. embedded World Quest reward item tooltips). Those should keep the
+-- parent background styling but not draw an additional inner border.
+local function IsContainedTooltip(tooltip)
+    if not tooltip then return false end
+    if embeddedTooltips[tooltip] then return true end
+    if tooltip.IsEmbedded then return true end
+    if EmbeddedItemTooltip and tooltip == EmbeddedItemTooltip then return true end
+    if GameTooltip and GameTooltip.ItemTooltip and tooltip == GameTooltip.ItemTooltip then return true end
+
+    local parent = tooltip.GetParent and tooltip:GetParent() or nil
+    local depth = 0
+    while parent and depth < 5 do
+        if parent == UIParent then
+            break
+        end
+        if parent.IsObjectType and parent:IsObjectType("GameTooltip") then
+            return true
+        end
+        parent = parent.GetParent and parent:GetParent() or nil
+        depth = depth + 1
+    end
+
+    return false
 end
 
 -- Snap an edge size to the nearest physical pixel boundary so thin borders
@@ -379,12 +406,20 @@ local function ApplyTooltipBackdrop(tooltip, edgeSize, sr, sg, sb, sa, bgr, bgg,
     backdrop.insets.top = edgeSize
     backdrop.insets.bottom = edgeSize
     pcall(tooltip.SetBackdrop, tooltip, backdrop)
-    pcall(tooltip.SetBackdropColor, tooltip, bgr, bgg, bgb, bga)
+    local backdropAlpha = bga
+    if IsContainedTooltip(tooltip) then
+        backdropAlpha = 0
+    end
+    pcall(tooltip.SetBackdropColor, tooltip, bgr, bgg, bgb, backdropAlpha)
     -- Keep the backdrop border itself transparent and render the visible border
     -- with addon-owned textures. This avoids inconsistent edge rasterization on
     -- Blizzard tooltip backdrops while preserving background insets/padding.
     pcall(tooltip.SetBackdropBorderColor, tooltip, 0, 0, 0, 0)
-    ApplyTooltipBorder(tooltip, edgeSize, sr, sg, sb, sa)
+    local borderAlpha = sa
+    if IsContainedTooltip(tooltip) then
+        borderAlpha = 0
+    end
+    ApplyTooltipBorder(tooltip, edgeSize, sr, sg, sb, borderAlpha)
 end
 
 ---------------------------------------------------------------------------
@@ -520,12 +555,20 @@ local function CombatSafeReapply(tooltip)
     -- Refresh backdrop colors on tooltip
     if tooltip.SetBackdropColor then
         local sr, sg, sb, sa, bgr, bgg, bgb, bga = GetEffectiveColors()
-        pcall(tooltip.SetBackdropColor, tooltip, bgr, bgg, bgb, bga)
+        local backdropAlpha = bga
+        if IsContainedTooltip(tooltip) then
+            backdropAlpha = 0
+        end
+        pcall(tooltip.SetBackdropColor, tooltip, bgr, bgg, bgb, backdropAlpha)
         pcall(tooltip.SetBackdropBorderColor, tooltip, 0, 0, 0, 0)
         local thickness = GetEffectiveBorderThickness()
         local px = SkinBase.GetPixelSize(tooltip, 1)
         local edge = SnapToPixel(tooltip, (thickness or 1) * px)
-        ApplyTooltipBorder(tooltip, edge, sr, sg, sb, sa)
+        local borderAlpha = sa
+        if IsContainedTooltip(tooltip) then
+            borderAlpha = 0
+        end
+        ApplyTooltipBorder(tooltip, edge, sr, sg, sb, borderAlpha)
     end
 end
 
@@ -540,6 +583,7 @@ end
 
 local function StripEmbeddedBorder(frame)
     if not frame then return end
+    embeddedTooltips[frame] = true
     local ns = frame.NineSlice
     if ns then
         DisableNineSliceLayout(ns)
@@ -547,6 +591,7 @@ local function StripEmbeddedBorder(frame)
         if ns.ClearBackdrop then pcall(ns.ClearBackdrop, ns) end
     end
     if frame.ItemTooltip then
+        embeddedTooltips[frame.ItemTooltip] = true
         local itemNS = frame.ItemTooltip.NineSlice
         if itemNS then
             DisableNineSliceLayout(itemNS)
@@ -554,12 +599,28 @@ local function StripEmbeddedBorder(frame)
             if itemNS.ClearBackdrop then pcall(itemNS.ClearBackdrop, itemNS) end
         end
     end
+    if frame.SetBackdropColor then
+        pcall(frame.SetBackdropColor, frame, 0, 0, 0, 0)
+    end
+    if frame.SetBackdropBorderColor then
+        pcall(frame.SetBackdropBorderColor, frame, 0, 0, 0, 0)
+    end
+    if frame.ItemTooltip then
+        if frame.ItemTooltip.SetBackdropColor then
+            pcall(frame.ItemTooltip.SetBackdropColor, frame.ItemTooltip, 0, 0, 0, 0)
+        end
+        if frame.ItemTooltip.SetBackdropBorderColor then
+            pcall(frame.ItemTooltip.SetBackdropBorderColor, frame.ItemTooltip, 0, 0, 0, 0)
+        end
+    end
 end
 
 local function RestoreEmbeddedBorder(frame)
-    -- NineSlice pieces are restored naturally by Blizzard's
-    -- SharedTooltip_SetBackdropStyle on the next tooltip show.
-    -- No explicit restore needed.
+    if not frame then return end
+    embeddedTooltips[frame] = nil
+    if frame.ItemTooltip then
+        embeddedTooltips[frame.ItemTooltip] = nil
+    end
 end
 
 local function SetupEmbeddedTooltipHooks()
@@ -570,16 +631,21 @@ local function SetupEmbeddedTooltipHooks()
         hooksecurefunc("SharedTooltip_SetBackdropStyle", function(tooltip, style, isEmbedded)
             if not IsEnabled() then return end
             if not tooltip then return end
-            if isEmbedded or tooltip.IsEmbedded then
+            local embedded = isEmbedded or tooltip.IsEmbedded
+            if embedded then
+                embeddedTooltips[tooltip] = true
                 -- Embedded tooltip: cover its NineSlice with matching background.
                 StripEmbeddedBorder(tooltip)
             elseif InCombatLockdown() then
+                embeddedTooltips[tooltip] = nil
                 -- Combat: refresh overlay colors only.
                 pcall(CombatSafeReapply, tooltip)
             elseif skinnedTooltips[tooltip] then
+                embeddedTooltips[tooltip] = nil
                 -- Out of combat: full reapply (overlay backdrop + colors).
                 pcall(ReapplySkin, tooltip)
             else
+                embeddedTooltips[tooltip] = nil
                 -- First encounter with this tooltip — skin it now.
                 pcall(SkinTooltip, tooltip)
             end
