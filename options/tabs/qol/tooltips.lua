@@ -54,6 +54,15 @@ local function BuildTooltipTab(tabContent)
 
     local tooltip = db and db.tooltip
     if not tooltip then return end
+    if tooltip.showTooltipTarget == nil then
+        tooltip.showTooltipTarget = true
+    end
+    if tooltip.showPlayerMount == nil then
+        tooltip.showPlayerMount = true
+    end
+    if tooltip.showPlayerMythicRating == nil then
+        tooltip.showPlayerMythicRating = true
+    end
     if tooltip.colorPlayerItemLevel == nil then
         tooltip.colorPlayerItemLevel = true
     end
@@ -268,6 +277,39 @@ local function BuildTooltipTab(tabContent)
     classColorInfo:SetPoint("TOPLEFT", PADDING, y)
     classColorInfo:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
     classColorInfo:SetJustifyH("LEFT")
+    y = y - FORM_ROW
+
+    local targetInfoCheck = GUI:CreateFormCheckbox(tabContent, "Show Target Info", "showTooltipTarget", tooltip, RefreshTooltips)
+    targetInfoCheck:SetPoint("TOPLEFT", PADDING, y)
+    targetInfoCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local targetInfoLabel = GUI:CreateLabel(tabContent, "Show the hovered unit's current target when available.", 10, C.textMuted)
+    targetInfoLabel:SetPoint("TOPLEFT", PADDING, y)
+    targetInfoLabel:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    targetInfoLabel:SetJustifyH("LEFT")
+    y = y - FORM_ROW
+
+    local mountInfoCheck = GUI:CreateFormCheckbox(tabContent, "Show Player Mount", "showPlayerMount", tooltip, RefreshTooltips)
+    mountInfoCheck:SetPoint("TOPLEFT", PADDING, y)
+    mountInfoCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local mountInfoLabel = GUI:CreateLabel(tabContent, "Show mounted player mount names on player tooltips (out of combat).", 10, C.textMuted)
+    mountInfoLabel:SetPoint("TOPLEFT", PADDING, y)
+    mountInfoLabel:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    mountInfoLabel:SetJustifyH("LEFT")
+    y = y - FORM_ROW
+
+    local mythicRatingCheck = GUI:CreateFormCheckbox(tabContent, "Show Player M+ Rating", "showPlayerMythicRating", tooltip, RefreshTooltips)
+    mythicRatingCheck:SetPoint("TOPLEFT", PADDING, y)
+    mythicRatingCheck:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    y = y - FORM_ROW
+
+    local mythicRatingLabel = GUI:CreateLabel(tabContent, "Show player Mythic+ rating on player tooltips (out of combat).", 10, C.textMuted)
+    mythicRatingLabel:SetPoint("TOPLEFT", PADDING, y)
+    mythicRatingLabel:SetPoint("RIGHT", tabContent, "RIGHT", -PADDING, 0)
+    mythicRatingLabel:SetJustifyH("LEFT")
     y = y - FORM_ROW
 
     local RefreshPlayerItemLevelBracketInputs
