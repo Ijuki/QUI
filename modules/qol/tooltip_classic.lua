@@ -250,6 +250,8 @@ local function EnsureTooltipUnitInfoState(tooltip, guid)
             guid = guid,
             spacerAdded = false,
             targetAdded = false,
+            guildRankAdded = false,
+            guildLineText = "",
             mountAdded = false,
             mountResolved = false,
             mountName = "",
@@ -280,14 +282,14 @@ local function ResolveTooltipTargetInfo(unit)
     end
 
     local okName, targetName = pcall(UnitName, targetUnit)
-    if not okName or not targetName or targetName == "" or Helpers.IsSecretValue(targetName) then
+    if not okName or not targetName or Helpers.IsSecretValue(targetName) or targetName == "" then
         return nil
     end
 
     local displayName = targetName
     if type(Ambiguate) == "function" then
         local okAmbiguate, shortName = pcall(Ambiguate, targetName, "none")
-        if okAmbiguate and shortName and shortName ~= "" and not Helpers.IsSecretValue(shortName) then
+        if okAmbiguate and shortName and not Helpers.IsSecretValue(shortName) and shortName ~= "" then
             displayName = shortName
         end
     end
@@ -364,7 +366,7 @@ local function GetMountNameFromSpellID(spellID)
     end
 
     local okInfo, mountName = pcall(C_MountJournal.GetMountInfoByID, mountID)
-    if not okInfo or not mountName or mountName == "" or Helpers.IsSecretValue(mountName) then
+    if not okInfo or not mountName or Helpers.IsSecretValue(mountName) or mountName == "" then
         return nil
     end
 
@@ -575,6 +577,163 @@ local function GetPlayerMythicRating(unit)
     return rating, color
 end
 
+local function StripColorCodes(text)
+    if not text or Helpers.IsSecretValue(text) then
+        return nil
+    end
+
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", "")
+    text = text:gsub("|r", "")
+    return text
+end
+
+local function TrimText(text)
+    if not text then return nil end
+    text = text:gsub("^%s+", "")
+    text = text:gsub("%s+$", "")
+    return text
+end
+
+local function EscapePattern(text)
+    if not text then return nil end
+    return text:gsub("([^%w])", "%%%1")
+end
+
+local function StripRealmSuffix(name, realm)
+    if not name or not realm or realm == "" then
+        return name
+    end
+
+    local realmPattern = EscapePattern("-" .. realm)
+    if not realmPattern then
+        return name
+    end
+
+    local stripped = name:gsub(realmPattern .. "$", "")
+    if stripped and stripped ~= "" then
+        return stripped
+    end
+
+    return name
+end
+
+local function AddGuildRankToExistingGuildLine(tooltip, unit, state)
+    if not tooltip or not unit or not state then return false end
+
+    local okGuildInfo, guildNameRaw, ret2, ret3, ret4 = pcall(GetGuildInfo, unit)
+    if not okGuildInfo then return false end
+
+    local guildName = guildNameRaw
+    if not guildName or Helpers.IsSecretValue(guildName) or guildName == "" then
+        return false
+    end
+
+    local unitRealm = nil
+    local okUnitName, _, realm = pcall(UnitName, unit)
+    if okUnitName and realm and not Helpers.IsSecretValue(realm) and realm ~= "" then
+        unitRealm = realm
+    end
+
+    local guildRealm = nil
+    if type(ret4) == "string" and not Helpers.IsSecretValue(ret4) and ret4 ~= "" then
+        guildRealm = ret4
+    end
+
+    local function IsRealmString(value)
+        if not value then return false end
+        if guildRealm and value == guildRealm then return true end
+        if unitRealm and value == unitRealm then return true end
+        return false
+    end
+
+    local guildRank = nil
+    local function TryRankCandidate(value)
+        if guildRank then return end
+        if type(value) ~= "string" then return end
+        if Helpers.IsSecretValue(value) or value == "" then return end
+        if value == guildName then return end
+        if IsRealmString(value) then return end
+        guildRank = value
+    end
+
+    TryRankCandidate(ret2)
+    TryRankCandidate(ret3)
+    TryRankCandidate(ret4)
+    if not guildRank then return false end
+
+    local displayGuildName = StripRealmSuffix(guildName, guildRealm)
+    displayGuildName = StripRealmSuffix(displayGuildName, unitRealm)
+    local expectedText = string.format("%s - %s", displayGuildName, guildRank)
+    if state.guildLineText == expectedText then
+        return false
+    end
+
+    local lineCount = 0
+    if tooltip.NumLines then
+        local okNumLines, count = pcall(tooltip.NumLines, tooltip)
+        if okNumLines and type(count) == "number" then
+            lineCount = count
+        end
+    end
+
+    local guildLine = nil
+    local possibleGuildLines = {
+        guildName,
+        displayGuildName,
+        guildRealm and (displayGuildName .. "-" .. guildRealm) or nil,
+        unitRealm and (displayGuildName .. "-" .. unitRealm) or nil,
+    }
+    local possibleExtendedGuildLines = {
+        expectedText,
+        string.format("%s - %s", guildName, guildRank),
+        guildRealm and string.format("%s-%s - %s", displayGuildName, guildRealm, guildRank) or nil,
+        unitRealm and string.format("%s-%s - %s", displayGuildName, unitRealm, guildRank) or nil,
+    }
+
+    local function IsGuildLineMatch(plainText)
+        if not plainText then return false end
+        for _, candidate in ipairs(possibleGuildLines) do
+            if candidate and (plainText == candidate or plainText == string.format("<%s>", candidate)) then
+                return true
+            end
+        end
+        for _, candidate in ipairs(possibleExtendedGuildLines) do
+            if candidate and (plainText == candidate or plainText == string.format("<%s>", candidate)) then
+                return true
+            end
+        end
+        return false
+    end
+
+    for i = 2, math.min(lineCount, 8) do
+        local line = tooltip.GetLeftLine and tooltip:GetLeftLine(i) or _G["GameTooltipTextLeft" .. i]
+        if line then
+            local okText, text = pcall(line.GetText, line)
+            if okText and text and not Helpers.IsSecretValue(text) then
+                local plain = TrimText(StripColorCodes(text))
+                if IsGuildLineMatch(plain) then
+                    guildLine = line
+                    break
+                end
+            end
+        end
+    end
+
+    if not guildLine then
+        return false
+    end
+
+    local okR, r, g, b, a = pcall(guildLine.GetTextColor, guildLine)
+    pcall(guildLine.SetText, guildLine, expectedText)
+    if okR then
+        pcall(guildLine.SetTextColor, guildLine, r, g, b, a)
+    end
+
+    state.guildLineText = expectedText
+    state.guildRankAdded = true
+    return true
+end
+
 local function AddUnitTooltipInfoToTooltip(tooltip, unit, settings)
     if not tooltip or not unit then return false end
 
@@ -596,7 +755,15 @@ local function AddUnitTooltipInfoToTooltip(tooltip, unit, settings)
     end
 
     local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
-    if not okPlayer or not isPlayer or InCombatLockdown() then
+    if not okPlayer or not isPlayer then
+        return added
+    end
+
+    if AddGuildRankToExistingGuildLine(tooltip, unit, state) then
+        added = true
+    end
+
+    if InCombatLockdown() then
         return added
     end
 
