@@ -109,6 +109,15 @@ local function RefreshTooltipLayout(tooltip)
     if type(tooltip.UpdateTooltipSize) == "function" then
         pcall(tooltip.UpdateTooltipSize, tooltip)
     end
+    -- Re-showing GameTooltip can re-enter widget setup (GameTooltip_AddWidgetSet).
+    -- If another addon tainted the widget container, that path can hard-error on
+    -- secret metric values. Keep our extra lines, but skip only when taint is
+    -- detected and let normal widget tooltips continue to refresh as usual.
+    if tooltip == GameTooltip then
+        if Helpers.HasTaintedWidgetContainer and Helpers.HasTaintedWidgetContainer(tooltip) then
+            return
+        end
+    end
     pcall(tooltip.Show, tooltip)
 end
 
